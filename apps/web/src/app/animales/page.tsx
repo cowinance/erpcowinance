@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { apiSafe } from '@/lib/api';
-import { EmptyState, StatusBadge, TagMono } from '@/components/ui';
+import { EmptyState, StatusBadge } from '@/components/ui';
 import { ageFrom, formatAdg, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { Plus, Search } from 'lucide-react';
 

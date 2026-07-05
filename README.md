@@ -88,6 +88,17 @@ Sigue las convenciones del documento de APIs: prefijo `/v1`, paginación por cur
 - `POST /v1/animals/:id/events` — evento polimórfico (`weighing`, `note`, …)
 - `GET /v1/lots` · `GET /v1/farms` · `GET /v1/organizations/current`
 
+## Limitaciones conocidas (entorno dev)
+
+- **Sin autenticación ni RLS activa**: la API resuelve un tenant único de desarrollo; OIDC + Row-Level
+  Security llegan con el módulo de identidad real.
+- **`Idempotency-Key` en REST**: se acepta la cabecera pero el dedupe solo está implementado en el canal
+  de sincronización (device + seq); en REST es un no-op por ahora.
+- **Fechas en UTC**: los cálculos de retiro/parto usan fechas ISO UTC; la presentación por zona horaria
+  del establecimiento queda pendiente.
+- **Suscripciones parciales**: el bootstrap baja el tenant completo; el filtrado por fincas asignadas al
+  dispositivo llega con el módulo de identidad.
+
 ## Próximos pasos (según roadmap)
 
 1. Sanidad y Reproducción completos (Fase 1)

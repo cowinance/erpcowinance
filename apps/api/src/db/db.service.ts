@@ -4,6 +4,12 @@ import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { seed } from './seed';
 
+/** Superficie mínima de consulta — la implementan DbService y sus transacciones. */
+export interface Q {
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  one<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined>;
+}
+
 /**
  * Capa de persistencia (dev): PGlite = PostgreSQL embebido en proceso.
  * Carga el DDL canónico completo (140 tablas, packages/db/cowinance_schema.sql).
@@ -111,5 +117,21 @@ export class DbService implements OnModuleInit {
 
   async one<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined> {
     return (await this.query<T>(sql, params))[0];
+  }
+
+  /**
+   * Transacción real de PGlite: serializa el acceso a la conexión única
+   * (otras requests esperan) y hace rollback automático si el callback lanza.
+   * Nunca usar BEGIN/COMMIT manuales: con la conexión compartida, las queries
+   * de otras requests se intercalarían dentro de la transacción ajena.
+   */
+  async tx<T>(fn: (q: Q) => Promise<T>): Promise<T> {
+    return this.db.transaction(async (t) => {
+      const q: Q = {
+        query: async <R>(sql: string, params?: unknown[]) => (await t.query<R>(sql, params)).rows,
+        one: async <R>(sql: string, params?: unknown[]) => (await t.query<R>(sql, params)).rows[0],
+      };
+      return fn(q);
+    });
   }
 }

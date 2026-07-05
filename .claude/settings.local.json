@@ -45,7 +45,8 @@
       "Bash(python3 -c ' *)",
       "Bash(rm -rf /var/folders/s1/t4mgk62s6tz4pvrqjlgvmfm00000gn/T/metro-cache /var/folders/s1/t4mgk62s6tz4pvrqjlgvmfm00000gn/T/metro-file-map-* 2>/dev/null; echo cleared)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8081/)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(grep -o \"transaction[^;]\\\\{0,120\\\\}\" node_modules/@electric-sql/pglite/dist/interface.d.ts)"
     ]
   }
 }

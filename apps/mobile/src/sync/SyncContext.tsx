@@ -503,7 +503,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       },
 
       captureCalving: (damId: string, calf: { sex: 'F' | 'M'; tag?: string }) => {
-        const d = deviceRef.current!;
+        const d = deviceRef.current;
+        if (!d) return { calfId: '' };
         const now = new Date();
         const today = now.toISOString().slice(0, 10);
         const dam = store()?.getRow('animals', damId)?.fields as any;

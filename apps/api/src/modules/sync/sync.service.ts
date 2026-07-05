@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { applyPut, hlcNode, TERMINAL_STATUS, Changeset, PutOp, RowState } from '@cowinance/sync-core';
-import { DbService } from '../../db/db.service';
+import { DbService, Q } from '../../db/db.service';
 
 /**
  * Servidor de sincronización v0 sobre Postgres — misma semántica que
@@ -52,30 +52,25 @@ export class SyncService {
     const conflicts: { type: string; entity_id: string; detail: string }[] = [];
 
     for (const cs of [...body.changesets].sort((a, b) => a.seq - b.seq)) {
-      // Atómico: el changeset se registra y aplica completo, o nada (reintenta el cliente)
-      await this.db.query('BEGIN');
-      try {
-        const inserted = await this.db.one<{ id: string }>(
+      // Atómico: el changeset se registra y aplica completo, o nada (reintenta el cliente).
+      // db.tx() serializa la conexión y hace rollback si algo lanza.
+      const result = await this.db.tx(async (q) => {
+        const inserted = await q.one<{ id: string }>(
           `INSERT INTO sync_changesets (tenant_id, sync_device_id, seq, hlc, operations, status, received_at, applied_at)
            VALUES ($1,$2,$3,$4,$5,'applied',now(),now())
            ON CONFLICT (sync_device_id, seq) DO NOTHING RETURNING id`,
           [this.db.tenant, device.id, cs.seq, cs.hlc, JSON.stringify({ client_id: cs.id, schema_version: cs.schemaVersion, ops: cs.ops })],
         );
-        if (!inserted) {
-          await this.db.query('ROLLBACK');
-          deduped++; // reintento del cliente → exactly-once
-          continue;
-        }
+        if (!inserted) return { deduped: true as const, conflicts: [] };
 
+        const csConflicts: { type: string; entity_id: string; detail: string }[] = [];
         for (const op of cs.ops ?? []) {
           if (op.kind === 'put' && op.table === 'animals') {
-            const opConflicts = await this.applyAnimalPut(op, inserted.id);
-            conflicts.push(...opConflicts);
+            csConflicts.push(...(await this.applyAnimalPut(q, op, inserted.id)));
           } else if (op.kind === 'put' && op.table === 'pregnancies') {
-            const opConflicts = await this.applyPregnancyPut(op, inserted.id);
-            conflicts.push(...opConflicts);
+            csConflicts.push(...(await this.applyPregnancyPut(q, op, inserted.id)));
           } else if (op.kind === 'event' && EVENT_TABLES.has(op.table)) {
-            await this.applyEvent(op.table, op.rowId, op.row);
+            await this.applyEvent(q, op.table, op.rowId, op.row);
           } else {
             throw new BadRequestException({
               code: 'sync.unsupported_op',
@@ -83,11 +78,14 @@ export class SyncService {
             });
           }
         }
-        await this.db.query('COMMIT');
+        return { deduped: false as const, conflicts: csConflicts };
+      });
+
+      if (result.deduped) {
+        deduped++; // reintento del cliente → exactly-once
+      } else {
         accepted++;
-      } catch (err) {
-        await this.db.query('ROLLBACK');
-        throw err;
+        conflicts.push(...result.conflicts);
       }
     }
 
@@ -267,15 +265,15 @@ export class SyncService {
 
   // ── Aplicación de operaciones ─────────────────────────────────────────
 
-  private async applyAnimalPut(op: PutOp, changesetDbId: string) {
+  private async applyAnimalPut(q: Q, op: PutOp, changesetDbId: string) {
     const conflicts: { type: string; entity_id: string; detail: string }[] = [];
     const t = this.db.tenant;
 
-    const stateRow = await this.db.one<any>(
+    const stateRow = await q.one<any>(
       `SELECT versions FROM sync_row_state WHERE tenant_id = $1 AND table_name = 'animals' AND row_id = $2`,
       [t, op.rowId],
     );
-    const existing = await this.db.one<any>(`SELECT id, status FROM animals WHERE id = $1 AND tenant_id = $2`, [op.rowId, t]);
+    const existing = await q.one<any>(`SELECT id, status FROM animals WHERE id = $1 AND tenant_id = $2`, [op.rowId, t]);
     const prev: RowState | undefined = stateRow
       ? { fields: { status: existing?.status }, versions: stateRow.versions }
       : undefined;
@@ -301,7 +299,7 @@ export class SyncService {
     // Duplicado de campo: misma caravana visual creada para otro animal
     const tag = op.fields['visual_tag'];
     if (typeof tag === 'string') {
-      const owner = await this.db.one<any>(
+      const owner = await q.one<any>(
         `SELECT ai.animal_id FROM animal_identifiers ai
          WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = $2 AND ai.deleted_at IS NULL
            AND ai.animal_id != $3 LIMIT 1`,
@@ -320,8 +318,8 @@ export class SyncService {
     const { state, changed } = applyPut(prev ?? { fields: {}, versions: {} }, op);
 
     if (!existing) {
-      const species = await this.db.one<any>(`SELECT id FROM species WHERE code = 'bovine'`);
-      await this.db.query(
+      const species = await q.one<any>(`SELECT id FROM species WHERE code = 'bovine'`);
+      await q.query(
         `INSERT INTO animals (id, tenant_id, farm_id, species_id, sex, origin, status, created_by)
          VALUES ($1,$2,$3,$4,$5,'born','active',$6) ON CONFLICT (id) DO NOTHING`,
         [op.rowId, t, this.db.farm, species.id, (op.fields['sex'] as string) ?? 'F', this.db.user],
@@ -330,9 +328,9 @@ export class SyncService {
 
     // category_code (campo lógico del cliente) → category_id
     if (typeof op.fields['category_code'] === 'string' && changed.includes('category_code')) {
-      const cat = await this.db.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [op.fields['category_code']]);
+      const cat = await q.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [op.fields['category_code']]);
       if (cat)
-        await this.db.query(`UPDATE animals SET category_id = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
+        await q.query(`UPDATE animals SET category_id = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
           op.rowId,
           t,
           cat.id,
@@ -342,7 +340,7 @@ export class SyncService {
     const columns = changed.filter((f) => ANIMAL_FIELDS.has(f));
     if (columns.length) {
       const sets = columns.map((c, i) => `"${c}" = $${i + 3}`).join(', ');
-      await this.db.query(`UPDATE animals SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
+      await q.query(`UPDATE animals SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
         op.rowId,
         t,
         ...columns.map((c) => op.fields[c]),
@@ -350,7 +348,7 @@ export class SyncService {
     }
 
     if (typeof tag === 'string' && changed.includes('visual_tag')) {
-      await this.db.query(
+      await q.query(
         `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value)
          SELECT $1::uuid, $2::uuid, 'visual', $3::varchar
          WHERE NOT EXISTS (
@@ -359,7 +357,7 @@ export class SyncService {
       );
     }
 
-    await this.db.query(
+    await q.query(
       `INSERT INTO sync_row_state (tenant_id, table_name, row_id, versions)
        VALUES ($1,'animals',$2,$3)
        ON CONFLICT (tenant_id, table_name, row_id) DO UPDATE SET versions = $3, updated_at = now()`,
@@ -367,7 +365,7 @@ export class SyncService {
     );
 
     for (const c of conflicts) {
-      await this.db.query(
+      await q.query(
         `INSERT INTO sync_conflicts (tenant_id, changeset_id, entity_type, entity_id, conflict_type, detail)
          VALUES ($1,$2,'animals',$3,$4,$5)`,
         [t, changesetDbId, c.entity_id, c.type, c.detail],
@@ -377,15 +375,15 @@ export class SyncService {
   }
 
   /** Preñeces: el diagnóstico offline crea la fila; el parto/aborto la cierra (LWW por campo). */
-  private async applyPregnancyPut(op: PutOp, changesetDbId: string) {
+  private async applyPregnancyPut(q: Q, op: PutOp, changesetDbId: string) {
     const conflicts: { type: string; entity_id: string; detail: string }[] = [];
     const t = this.db.tenant;
 
-    const stateRow = await this.db.one<any>(
+    const stateRow = await q.one<any>(
       `SELECT versions FROM sync_row_state WHERE tenant_id = $1 AND table_name = 'pregnancies' AND row_id = $2`,
       [t, op.rowId],
     );
-    const existing = await this.db.one<any>(`SELECT id, status, animal_id FROM pregnancies WHERE id = $1 AND tenant_id = $2`, [
+    const existing = await q.one<any>(`SELECT id, status, animal_id FROM pregnancies WHERE id = $1 AND tenant_id = $2`, [
       op.rowId,
       t,
     ]);
@@ -400,7 +398,7 @@ export class SyncService {
         throw new BadRequestException({ code: 'sync.pregnancy_missing_animal', title: 'La preñez nueva requiere animal_id' });
 
       // Conflicto semántico: dos diagnósticos concurrentes → dos preñeces abiertas
-      const open = await this.db.one<any>(
+      const open = await q.one<any>(
         `SELECT id FROM pregnancies WHERE tenant_id = $1 AND animal_id = $2 AND status = 'open' AND deleted_at IS NULL AND id != $3`,
         [t, animalId, op.rowId],
       );
@@ -411,7 +409,7 @@ export class SyncService {
           detail: 'Diagnóstico de preñez concurrente: el animal ya tiene otra preñez abierta — revisar',
         });
       }
-      await this.db.query(
+      await q.query(
         `INSERT INTO pregnancies (id, tenant_id, animal_id, diagnosis_date, method, expected_due_date, status, closed_at, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
         [
@@ -430,7 +428,7 @@ export class SyncService {
       const columns = changed.filter((f) => PREGNANCY_FIELDS.has(f) && f !== 'animal_id');
       if (columns.length) {
         const sets = columns.map((c, i) => `"${c}" = $${i + 3}`).join(', ');
-        await this.db.query(`UPDATE pregnancies SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
+        await q.query(`UPDATE pregnancies SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
           op.rowId,
           t,
           ...columns.map((c) => op.fields[c]),
@@ -438,14 +436,14 @@ export class SyncService {
       }
     }
 
-    await this.db.query(
+    await q.query(
       `INSERT INTO sync_row_state (tenant_id, table_name, row_id, versions)
        VALUES ($1,'pregnancies',$2,$3)
        ON CONFLICT (tenant_id, table_name, row_id) DO UPDATE SET versions = $3, updated_at = now()`,
       [t, op.rowId, JSON.stringify(state.versions)],
     );
     for (const c of conflicts) {
-      await this.db.query(
+      await q.query(
         `INSERT INTO sync_conflicts (tenant_id, changeset_id, entity_type, entity_id, conflict_type, detail)
          VALUES ($1,$2,'pregnancies',$3,$4,$5)`,
         [t, changesetDbId, c.entity_id, c.type, c.detail],
@@ -454,10 +452,10 @@ export class SyncService {
     return conflicts;
   }
 
-  private async applyEvent(table: string, rowId: string, row: Record<string, unknown>) {
+  private async applyEvent(q: Q, table: string, rowId: string, row: Record<string, unknown>) {
     const t = this.db.tenant;
     if (table === 'weighings') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO weighings (id, tenant_id, animal_id, weighed_at, weight_kg, method, body_condition, device_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
         [
@@ -472,7 +470,7 @@ export class SyncService {
         ],
       );
     } else if (table === 'animal_events') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO animal_events (id, tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'manual') ON CONFLICT (id) DO NOTHING`,
         [
@@ -486,7 +484,7 @@ export class SyncService {
         ],
       );
     } else if (table === 'vaccinations') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO vaccinations (id, tenant_id, animal_id, product_id, applied_at, dose, dose_unit, batch_number, next_due_date, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
         [
@@ -503,7 +501,7 @@ export class SyncService {
         ],
       );
     } else if (table === 'treatments') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO treatments (id, tenant_id, animal_id, product_id, applied_at, dose, dose_unit, route, meat_withdrawal_until, milk_withdrawal_until, notes, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
         [
@@ -522,7 +520,7 @@ export class SyncService {
         ],
       );
     } else if (table === 'breeding_events') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, notes, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
         [
@@ -537,7 +535,7 @@ export class SyncService {
         ],
       );
     } else if (table === 'calvings') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO calvings (id, tenant_id, pregnancy_id, dam_id, calving_date, ease, offspring_count, notes, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
         [
@@ -553,7 +551,7 @@ export class SyncService {
         ],
       );
     } else if (table === 'calving_offspring') {
-      await this.db.query(
+      await q.query(
         `INSERT INTO calving_offspring (id, tenant_id, calving_id, animal_id, birth_weight_kg, vitality, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
         [rowId, t, row['calving_id'], row['animal_id'] ?? null, row['birth_weight_kg'] ?? null, row['vitality'] ?? 'live', this.db.user],
