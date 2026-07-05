@@ -24,7 +24,9 @@ import {
   ChevronsUpDown,
   Search,
   Zap,
+  LogOut,
 } from 'lucide-react';
+import { ACCESS_COOKIE, API_URL, REFRESH_COOKIE } from '@/lib/api';
 
 const SECTIONS: { title: string | null; items: { href: string; label: string; icon: any }[] }[] = [
   {
@@ -82,17 +84,25 @@ function NavItem({ href, label, icon: Icon }: { href: string; label: string; ico
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ orgName, farmName, userName }: { orgName?: string; farmName?: string; userName?: string }) {
+  const farm = farmName ?? 'Cowinance';
+  const initials = farm
+    .split(' ')
+    .filter((w) => w.length > 2)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sunken px-3 pt-4 pb-3 max-lg:hidden">
       {/* Cabecera de contexto: Organización → Finca */}
       <button className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-brand-soft">
         <div className="flex size-7 items-center justify-center rounded-md bg-brand text-[12px] font-semibold text-white">
-          LE
+          {initials || 'CW'}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold">Estancia La Esperanza</div>
-          <div className="truncate text-[11px] text-ink-3">Grupo La Esperanza</div>
+          <div className="truncate text-[13px] font-semibold">{farm}</div>
+          <div className="truncate text-[11px] text-ink-3">{orgName ?? '—'}</div>
         </div>
         <ChevronsUpDown size={14} className="text-ink-3" />
       </button>
@@ -125,6 +135,23 @@ export function Sidebar() {
         {FOOTER_ITEMS.map((it) => (
           <NavItem key={it.href} {...it} />
         ))}
+        <button
+          onClick={() => {
+            const refresh = document.cookie.match(new RegExp(`(?:^|; )${REFRESH_COOKIE}=([^;]*)`))?.[1];
+            fetch(`${API_URL}/auth/logout`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh_token: refresh ? decodeURIComponent(refresh) : undefined }),
+            }).catch(() => {});
+            document.cookie = `${ACCESS_COOKIE}=; path=/; max-age=0`;
+            document.cookie = `${REFRESH_COOKIE}=; path=/; max-age=0`;
+            window.location.href = '/login';
+          }}
+          className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink"
+        >
+          <LogOut size={18} strokeWidth={1.75} />
+          <span className="truncate">Cerrar sesión{userName ? ` (${userName.split(' ')[0]})` : ''}</span>
+        </button>
         {/* Indicador de sincronización: información de primera clase (doc §3.1) */}
         <Link
           href="/sincronizacion"

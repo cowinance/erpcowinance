@@ -1,4 +1,5 @@
 import type { PGlite } from '@electric-sql/pglite';
+import { hashPassword } from '../common/passwords';
 
 /**
  * Seed de desarrollo: una organización demo con finca, hato, pesajes,
@@ -91,14 +92,27 @@ export async function seed(db: PGlite) {
   const cat = Object.fromEntries(catRows.map((r) => [r.code, r.id]));
 
   // ── Identidad y organización ──────────────────────────────────────────
+  const [{ id: ownerRole }] = await q(
+    `INSERT INTO roles (tenant_id, code, name, is_system) VALUES (NULL,'owner','Propietario',true) RETURNING id`,
+  );
+  await q(
+    `INSERT INTO roles (tenant_id, code, name, is_system) VALUES
+     (NULL,'admin','Administrador',true), (NULL,'veterinarian','Veterinario',true),
+     (NULL,'foreman','Capataz',true), (NULL,'worker','Operario',true), (NULL,'accountant','Contador',true)`,
+  );
+
   const [{ id: userId }] = await q(
-    `INSERT INTO users (email, full_name, locale) VALUES ('cowinance@gmail.com','Jose Montilla','es-AR') RETURNING id`,
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-AR',$1) RETURNING id`,
+    [hashPassword('cowinance')],
   );
   const [{ id: org }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
      VALUES ('Grupo La Esperanza','Grupo La Esperanza S.A.','AR','ARS','es-AR','America/Argentina/Buenos_Aires',$1) RETURNING id`,
     [userId],
   );
+  // RLS: a partir de acá, las inserciones con tenant_id necesitan el GUC
+  await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
+  await q(`INSERT INTO user_role_assignments (tenant_id, user_id, role_id) VALUES ($1,$2,$3)`, [org, userId, ownerRole]);
   const [{ id: company }] = await q(
     `INSERT INTO companies (tenant_id, name, tax_id, country_code, functional_currency, created_by)
      VALUES ($1,'La Esperanza S.A.','30-71234567-8','AR','ARS',$2) RETURNING id`,
@@ -334,5 +348,44 @@ export async function seed(db: PGlite) {
     );
   }
 
-  console.log(`Seed: ${animalIds.length} animales, ${events.length} eventos, ${pregnant} preñeces.`);
+  // ── Segundo tenant: prueba viviente del aislamiento RLS ───────────────
+  const [{ id: mariaId }] = await q(
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('maria@elombu.com','María Fernández','es-AR',$1) RETURNING id`,
+    [hashPassword('ombu1234')],
+  );
+  const [{ id: orgB }] = await q(
+    `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
+     VALUES ('Agropecuaria El Ombú','El Ombú S.R.L.','AR','ARS','es-AR','America/Argentina/Buenos_Aires',$1) RETURNING id`,
+    [mariaId],
+  );
+  await q(`SELECT set_config('app.tenant_id', $1, false)`, [orgB]);
+  await q(`INSERT INTO user_role_assignments (tenant_id, user_id, role_id) VALUES ($1,$2,$3)`, [orgB, mariaId, ownerRole]);
+  const [{ id: companyB }] = await q(
+    `INSERT INTO companies (tenant_id, name, country_code, functional_currency, created_by)
+     VALUES ($1,'El Ombú S.R.L.','AR','ARS',$2) RETURNING id`,
+    [orgB, mariaId],
+  );
+  const [{ id: farmB }] = await q(
+    `INSERT INTO farms (tenant_id, company_id, name, total_area_ha, created_by) VALUES ($1,$2,'Campo El Ombú',320,$3) RETURNING id`,
+    [orgB, companyB, mariaId],
+  );
+  for (let i = 0; i < 5; i++) {
+    const birth = daysAgo(between(24, 60) * 30.4);
+    const [{ id }] = await q(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, status, created_by)
+       VALUES ($1,$2,$3,$4,'F',$5,'born','active',$6) RETURNING id`,
+      [orgB, farmB, bovine, cat['vaca'], birth.toISOString().slice(0, 10), mariaId],
+    );
+    await q(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`, [
+      orgB,
+      id,
+      String(501 + i),
+    ]);
+  }
+  // Restaurar el contexto del tenant principal para el resto del boot
+  await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
+
+  console.log(
+    `Seed: ${animalIds.length} animales (+5 de El Ombú), ${events.length} eventos, ${pregnant} preñeces. Usuarios: cowinance@gmail.com/cowinance · maria@elombu.com/ombu1234`,
+  );
 }

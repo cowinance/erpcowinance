@@ -229,7 +229,7 @@ export class HerdService {
     const animal = await this.db.one<any>(
       `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, name, birth_date, origin, current_lot_id, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'born',$8,'active') RETURNING id`,
-      [this.db.tenant, this.db.farm, cat.species_id, cat.id, body.sex, body.name ?? null, body.birth_date ?? null, body.lot_id ?? null],
+      [this.db.tenant, await this.db.defaultFarm(), cat.species_id, cat.id, body.sex, body.name ?? null, body.birth_date ?? null, body.lot_id ?? null],
     );
     await this.db.query(
       `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`,

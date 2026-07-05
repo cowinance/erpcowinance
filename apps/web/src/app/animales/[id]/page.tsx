@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, StatusBadge, TagMono } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
 import { ageFrom, EVENT_LABELS, formatDate, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';

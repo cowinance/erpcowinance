@@ -1,9 +1,13 @@
 import type { SerializedDevice, SyncDevice } from '@cowinance/sync-core';
 
 export interface PersistedMeta {
-  serverDeviceId: string;
+  serverDeviceId?: string;
   farmName?: string;
   lastSyncAt?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  userName?: string;
+  userEmail?: string;
 }
 
 /**

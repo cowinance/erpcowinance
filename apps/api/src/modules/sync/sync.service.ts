@@ -150,7 +150,7 @@ export class SyncService {
        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.status = 'active'`,
       [this.db.tenant],
     );
-    const farm = await this.db.one<any>(`SELECT id, name FROM farms WHERE id = $1`, [this.db.farm]);
+    const farm = await this.db.one<any>(`SELECT id, name FROM farms WHERE id = $1`, [await this.db.defaultFarm()]);
 
     const products = await this.db.query<any>(
       `SELECT id, name, type, withdrawal_meat_days, withdrawal_milk_hours, default_dose
@@ -322,7 +322,7 @@ export class SyncService {
       await q.query(
         `INSERT INTO animals (id, tenant_id, farm_id, species_id, sex, origin, status, created_by)
          VALUES ($1,$2,$3,$4,$5,'born','active',$6) ON CONFLICT (id) DO NOTHING`,
-        [op.rowId, t, this.db.farm, species.id, (op.fields['sex'] as string) ?? 'F', this.db.user],
+        [op.rowId, t, await this.db.defaultFarm(), species.id, (op.fields['sex'] as string) ?? 'F', this.db.user],
       );
     }
 

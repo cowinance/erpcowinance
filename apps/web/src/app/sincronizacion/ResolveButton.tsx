@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL } from '@/lib/api';
+import { API_URL, authHeaders } from '@/lib/api';
 
 export function ResolveButton({ conflictId }: { conflictId: string }) {
   const router = useRouter();
@@ -18,7 +18,7 @@ export function ResolveButton({ conflictId }: { conflictId: string }) {
     setSaving(true);
     await fetch(`${API_URL}/sync/resolve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ conflict_id: conflictId, resolution: 'manual' }),
     });
     router.refresh();

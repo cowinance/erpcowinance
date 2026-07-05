@@ -1,4 +1,4 @@
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, EmptyState, TagMono } from '@/components/ui';
 import { relativeTime } from '@/lib/format';
 import { ResolveButton } from './ResolveButton';

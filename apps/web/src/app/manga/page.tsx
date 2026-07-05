@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { API_URL } from '@/lib/api';
+import { API_URL, authHeaders } from '@/lib/api';
 
 interface Animal {
   id: string;
@@ -74,7 +74,7 @@ export default function MangaPage() {
     try {
       const res = await fetch(`${API_URL}/animals/lookup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ identifier: tag.trim() }),
       });
       if (!res.ok) return fail(`SIN ANIMAL ${tag.trim().toUpperCase()}`);
@@ -92,7 +92,7 @@ export default function MangaPage() {
     try {
       const res = await fetch(`${API_URL}/animals/${animal.id}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ type: 'weighing', weight_kg: Number(kg), body_condition: cc ?? undefined }),
       });
       if (!res.ok) {

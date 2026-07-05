@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { EmptyState, StatusBadge } from '@/components/ui';
 import { ageFrom, formatAdg, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { Plus, Search } from 'lucide-react';

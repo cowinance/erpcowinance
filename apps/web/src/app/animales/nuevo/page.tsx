@@ -1,4 +1,4 @@
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { NewAnimalForm } from './NewAnimalForm';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';

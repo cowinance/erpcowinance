@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL } from '@/lib/api';
+import { API_URL, authHeaders } from '@/lib/api';
 
 const inputCls =
   'h-9 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand';
@@ -21,7 +21,7 @@ export function NewAnimalForm({ categories, lots }: { categories: any[]; lots: a
     try {
       const res = await fetch(`${API_URL}/animals`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({
           tag: fd.get('tag'),
           name: fd.get('name') || undefined,

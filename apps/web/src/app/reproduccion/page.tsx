@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, EmptyState, KpiCard, TagMono } from '@/components/ui';
 import { formatDate } from '@/lib/format';
 import { ReproCapture } from './ReproCapture';

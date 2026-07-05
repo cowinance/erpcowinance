@@ -65,8 +65,11 @@ export interface ServerConflict {
 }
 
 interface SyncCtx {
-  status: 'boot' | 'ready' | 'error';
+  status: 'boot' | 'login' | 'ready' | 'error';
   errorMsg?: string;
+  userName?: string;
+  login: (email: string, password: string) => Promise<string | null>;
+  logout: () => Promise<void>;
   farmName?: string;
   lastSyncAt?: string;
   lastSyncResult?: string;
@@ -125,7 +128,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const offlineRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [status, setStatus] = useState<'boot' | 'ready' | 'error'>('boot');
+  const [status, setStatus] = useState<'boot' | 'login' | 'ready' | 'error'>('boot');
   const [errorMsg, setErrorMsg] = useState<string>();
   const [version, setVersion] = useState(0);
   const [offlineSim, setOfflineSimState] = useState(false);
@@ -135,12 +138,47 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   const pushConflictsRef = useRef(0);
 
+  /**
+   * Fetch autenticado: Bearer del meta persistido; ante 401 intenta UNA
+   * rotación de refresh y reintenta; si sigue 401 → pantalla de login.
+   */
+  const authFetch = useCallback(async (path: string, init?: RequestInit): Promise<Response> => {
+    const doFetch = () =>
+      fetch(`${API_URL}${path}`, {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(init?.headers ?? {}),
+          ...(metaRef.current?.accessToken ? { Authorization: `Bearer ${metaRef.current.accessToken}` } : {}),
+        },
+      });
+    let res = await doFetch();
+    if (res.status === 401 && metaRef.current?.refreshToken) {
+      const r = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: metaRef.current.refreshToken }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        metaRef.current = { ...metaRef.current, accessToken: j.access_token, refreshToken: j.refresh_token };
+        await storageRef.current.saveMeta(metaRef.current);
+        res = await doFetch();
+      }
+    }
+    if (res.status === 401) {
+      metaRef.current = { ...metaRef.current, accessToken: undefined, refreshToken: undefined };
+      await storageRef.current.saveMeta(metaRef.current!);
+      setStatus('login');
+    }
+    return res;
+  }, []);
+
   const transport = useMemo(
     () => ({
       push: async (changesets: Changeset[]): Promise<PushResult> => {
-        const res = await fetch(`${API_URL}/sync/push`, {
+        const res = await authFetch(`/sync/push`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ device_id: metaRef.current!.serverDeviceId, changesets }),
         });
         if (!res.ok) throw new Error(`push → ${res.status}`);
@@ -149,7 +187,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         return { accepted: j.accepted, deduped: j.deduped, conflicts: j.conflicts ?? [], serverCursor: j.server_cursor };
       },
       pull: async (after: number): Promise<PullResult> => {
-        const res = await fetch(`${API_URL}/sync/pull?device_id=${metaRef.current!.serverDeviceId}&cursor=${after}`);
+        const res = await authFetch(`/sync/pull?device_id=${metaRef.current!.serverDeviceId}&cursor=${after}`);
         if (!res.ok) throw new Error(`pull → ${res.status}`);
         const j = await res.json();
         return {
@@ -161,7 +199,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         };
       },
     }),
-    [],
+    [authFetch],
   );
 
   const syncNow = useCallback(async (): Promise<{ pushed: number; pulled: number } | { error: string }> => {
@@ -204,28 +242,33 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       const storage = storageRef.current;
       await storage.init();
       const [meta, saved] = await Promise.all([storage.loadMeta(), storage.loadDevice()]);
+      metaRef.current = meta;
 
-      if (meta && saved) {
+      if (!meta?.accessToken) {
+        setStatus('login');
+        return;
+      }
+
+      if (meta.serverDeviceId && saved) {
         const d = SyncDevice.restore(saved);
         storage.attach(d);
         deviceRef.current = d;
-        metaRef.current = meta;
         setStatus('ready');
         bump();
         return;
       }
 
-      // Primer arranque: registrar dispositivo + snapshot inicial (requiere red UNA vez)
+      // Primer arranque de este usuario: registrar dispositivo + snapshot inicial
       const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
-      const reg = await fetch(`${API_URL}/sync/devices`, {
+      const reg = await authFetch(`/sync/devices`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ platform, device_name: `Móvil ${platform}`, app_version: '0.1.0' }),
       });
+      if (reg.status === 401) return; // authFetch ya nos mandó a login
       if (!reg.ok) throw new Error(`registro de dispositivo → ${reg.status}`);
       const device = await reg.json();
 
-      const boot = await fetch(`${API_URL}/sync/bootstrap?device_id=${device.id}`);
+      const boot = await authFetch(`/sync/bootstrap?device_id=${device.id}`);
       if (!boot.ok) throw new Error(`bootstrap → ${boot.status}`);
       const snapshot = await boot.json();
 
@@ -233,7 +276,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       storage.attach(d); // antes de hidratar: las filas del snapshot se persisten como mutaciones
       d.hydrate(snapshot.rows ?? snapshot.animals, snapshot.cursor);
       deviceRef.current = d;
-      metaRef.current = { serverDeviceId: device.id, farmName: snapshot.farm?.name, lastSyncAt: new Date().toISOString() };
+      metaRef.current = { ...metaRef.current, serverDeviceId: device.id, farmName: snapshot.farm?.name, lastSyncAt: new Date().toISOString() };
       await storage.saveMeta(metaRef.current);
       setStatus('ready');
       bump();
@@ -241,11 +284,52 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setErrorMsg(e.message);
       setStatus('error');
     }
-  }, []);
+  }, [authFetch]);
 
   useEffect(() => {
     init();
   }, [init]);
+
+  const login = useCallback(
+    async (email: string, password: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const j = await res.json().catch(() => null);
+        if (!res.ok) return j?.message?.title ?? 'Credenciales inválidas';
+        metaRef.current = {
+          ...metaRef.current,
+          accessToken: j.access_token,
+          refreshToken: j.refresh_token,
+          userName: j.user?.name,
+          userEmail: j.user?.email,
+        };
+        await storageRef.current.saveMeta(metaRef.current!);
+        setStatus('boot');
+        await init();
+        return null;
+      } catch (e: any) {
+        return `Sin conexión con la API (${e.message})`;
+      }
+    },
+    [init],
+  );
+
+  const logout = useCallback(async () => {
+    if (metaRef.current?.refreshToken) {
+      fetch(`${API_URL}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: metaRef.current.refreshToken }),
+      }).catch(() => {});
+    }
+    metaRef.current = { ...metaRef.current, accessToken: undefined, refreshToken: undefined };
+    await storageRef.current.saveMeta(metaRef.current!);
+    setStatus('login');
+  }, []);
 
   // Sync automático: al quedar listo y luego cada 60 s
   useEffect(() => {
@@ -272,6 +356,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     return {
       status,
       errorMsg,
+      userName: metaRef.current?.userName,
+      login,
+      logout,
       farmName: metaRef.current?.farmName,
       lastSyncAt: metaRef.current?.lastSyncAt,
       lastSyncResult,
@@ -626,7 +713,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       fetchConflicts: async () => {
         if (offlineRef.current) return { error: 'Sin señal — los conflictos se revisan con conexión' };
         try {
-          const res = await fetch(`${API_URL}/sync/conflicts`);
+          const res = await authFetch(`/sync/conflicts`);
           if (!res.ok) throw new Error(`conflicts → ${res.status}`);
           return (await res.json()) as ServerConflict[];
         } catch (e: any) {
@@ -636,9 +723,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       resolveConflict: async (conflictId: string) => {
         try {
-          const res = await fetch(`${API_URL}/sync/resolve`, {
+          const res = await authFetch(`/sync/resolve`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ conflict_id: conflictId, resolution: 'manual' }),
           });
           return res.ok;
@@ -657,7 +743,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         init();
       },
     };
-  }, [status, errorMsg, version, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init]);
+  }, [status, errorMsg, version, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, authFetch]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

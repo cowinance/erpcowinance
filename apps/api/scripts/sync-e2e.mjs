@@ -13,15 +13,25 @@ const API = process.env.API_URL ?? 'http://localhost:3001/v1';
 const hlc = (ms, node, count = 0) =>
   `${String(ms).padStart(14, '0')}:${count.toString(16).padStart(6, '0')}:${node}`;
 
+let ACCESS_TOKEN = null;
+
 async function api(method, path, body) {
   const res = await fetch(`${API}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(ACCESS_TOKEN ? { Authorization: `Bearer ${ACCESS_TOKEN}` } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => null);
   if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${JSON.stringify(json)}`);
   return json;
+}
+
+async function login() {
+  const session = await api('POST', '/auth/login', { email: 'cowinance@gmail.com', password: 'cowinance' });
+  ACCESS_TOKEN = session.access_token;
 }
 
 let failures = 0;
@@ -32,6 +42,7 @@ function check(name, cond, extra = '') {
 
 async function main() {
   console.log('── E2E sincronización offline (HTTP) ──');
+  await login();
 
   // 1. Registro de dispositivos
   const devA = await api('POST', '/sync/devices', { platform: 'android', device_name: 'Tablet Manga Norte', app_version: '0.1.0' });

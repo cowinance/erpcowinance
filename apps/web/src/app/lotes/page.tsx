@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { EmptyState } from '@/components/ui';
 
 const PURPOSE: Record<string, string> = {

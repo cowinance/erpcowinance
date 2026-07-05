@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { API_URL } from '@/lib/api';
+import { API_URL, authHeaders } from '@/lib/api';
 import { Check, X } from 'lucide-react';
 
 export const inputCls =
@@ -52,7 +52,7 @@ export function AnimalPicker({ animal, onSelect }: { animal: PickedAnimal | null
     try {
       const res = await fetch(`${API_URL}/animals/lookup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ identifier: value.trim() }),
       });
       if (!res.ok) throw new Error(`Sin animal con caravana ${value.trim()}`);
@@ -117,7 +117,7 @@ export function useSubmit() {
     try {
       const res = await fetch(`${API_URL}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => null);

@@ -1,12 +1,16 @@
 import Link from 'next/link';
-import { apiSafe } from '@/lib/api';
+import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, KpiCard, EmptyState, TagMono } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
 import { EVENT_LABELS, formatDate, relativeTime } from '@/lib/format';
 import { AlertTriangle, Syringe, Plus } from 'lucide-react';
 
 export default async function Dashboard() {
-  const kpis = await apiSafe<any>('/dashboard/kpis');
+  const [kpis, me, farms] = await Promise.all([
+    apiSafe<any>('/dashboard/kpis'),
+    apiSafe<any>('/auth/me'),
+    apiSafe<any[]>('/farms'),
+  ]);
 
   if (!kpis) {
     return (
@@ -28,8 +32,13 @@ export default async function Dashboard() {
       {/* Cabecera (doc diseño §11.2) */}
       <div className="mb-6 flex items-end justify-between">
         <div>
-          <h1 className="text-xl font-semibold">{greeting}, Jose</h1>
-          <p className="mt-0.5 text-[13px] text-ink-3">{today} · Estancia La Esperanza</p>
+          <h1 className="text-xl font-semibold">
+            {greeting}, {me?.name?.split(' ')[0] ?? ''}
+          </h1>
+          <p className="mt-0.5 text-[13px] text-ink-3">
+            {today}
+            {farms?.[0]?.name ? ` · ${farms[0].name}` : ''}
+          </p>
         </div>
         <Link
           href="/animales/nuevo"

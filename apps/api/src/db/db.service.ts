@@ -3,6 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { seed } from './seed';
+import { requestContext } from '../common/request-context';
 
 /** Superficie mínima de consulta — la implementan DbService y sus transacciones. */
 export interface Q {
@@ -25,8 +26,9 @@ export class DbService implements OnModuleInit {
   private userId!: string;
 
   /**
-   * Infra del motor de sync v0 (pendiente de incorporar al DDL canónico):
-   * cursor global de changesets y versiones HLC por campo para el LWW.
+   * Infra dev v0 (pendiente de incorporar al DDL canónico): cursor global de
+   * changesets, versiones HLC por campo (LWW), credenciales de login y
+   * refresh tokens con rotación.
    */
   private static readonly SYNC_MIGRATION = `
     CREATE SEQUENCE IF NOT EXISTS sync_changesets_server_seq;
@@ -41,7 +43,65 @@ export class DbService implements OnModuleInit {
       updated_at timestamptz DEFAULT now() NOT NULL,
       PRIMARY KEY (tenant_id, table_name, row_id)
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash varchar(255);
+    CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
+      jti uuid PRIMARY KEY,
+      user_id uuid NOT NULL,
+      tenant_id uuid NOT NULL,
+      expires_at timestamptz NOT NULL,
+      rotated_at timestamptz,
+      revoked_at timestamptz,
+      created_at timestamptz DEFAULT now() NOT NULL
+    );
   `;
+
+  /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
+  private static readonly RLS_TABLES = [
+    'companies',
+    'farms',
+    'animals',
+    'animal_identifiers',
+    'animal_breeds',
+    'animal_events',
+    'weighings',
+    'treatments',
+    'vaccinations',
+    'health_events',
+    'health_plans',
+    'mortalities',
+    'breeding_events',
+    'pregnancies',
+    'calvings',
+    'calving_offspring',
+    'weanings',
+    'lots',
+    'paddocks',
+    'products_veterinary',
+    // user_role_assignments queda SIN RLS: el login resuelve el tenant del
+    // usuario ANTES de tener contexto de tenant (plano de identidad)
+    'sync_devices',
+    'sync_changesets',
+    'sync_conflicts',
+    'sync_row_state',
+  ];
+
+  /**
+   * RLS activa y FORZADA (PGlite conecta como owner de las tablas; sin FORCE
+   * el owner la saltea). La política compara tenant_id con la variable de
+   * sesión app.tenant_id, que el interceptor de auth fija por request con
+   * SET LOCAL dentro de la transacción. Sin variable → cero filas.
+   */
+  private static rlsMigration(): string {
+    return DbService.RLS_TABLES.map(
+      (t) => `
+        ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "${t}" FORCE ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS tenant_isolation ON "${t}";
+        CREATE POLICY tenant_isolation ON "${t}"
+          USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+          WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);`,
+    ).join('\n');
+  }
 
   async onModuleInit() {
     const dataDir = join(process.cwd(), '.data', 'pglite');
@@ -57,6 +117,7 @@ export class DbService implements OnModuleInit {
       this.logger.log('Esquema cargado.');
     }
     await this.db.exec(DbService.SYNC_MIGRATION);
+    await this.db.exec(DbService.rlsMigration());
     const orgs = await this.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM organizations`);
     if (orgs.rows[0].n === 0) {
       this.logger.log('Sembrando datos demo…');
@@ -74,6 +135,9 @@ export class DbService implements OnModuleInit {
       `SELECT id FROM organizations ORDER BY created_at LIMIT 1`,
     );
     this.tenantId = org.rows[0].id;
+    // GUC de sesión: contexto por defecto para código fuera de request
+    // (boot, seed). Las requests lo pisan con SET LOCAL en su transacción.
+    await this.db.query(`SELECT set_config('app.tenant_id', $1, false)`, [this.tenantId]);
     const farm = await this.db.query<{ id: string }>(
       `SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
       [this.tenantId],
@@ -81,7 +145,7 @@ export class DbService implements OnModuleInit {
     this.farmId = farm.rows[0].id;
     const user = await this.db.query<{ id: string }>(`SELECT id FROM users ORDER BY created_at LIMIT 1`);
     this.userId = user.rows[0].id;
-    this.logger.log(`Contexto dev: tenant=${this.tenantId} farm=${this.farmId}`);
+    this.logger.log(`Contexto dev: tenant=${this.tenantId} farm=${this.farmId} · RLS forzada en ${DbService.RLS_TABLES.length} tablas`);
   }
 
   private loadSchemaSql(): string {
@@ -99,18 +163,34 @@ export class DbService implements OnModuleInit {
       .replace(/geography\([^)]*\)/g, 'jsonb');
   }
 
-  /** Tenant/finca del contexto de desarrollo (en prod: middleware de auth + RLS). */
+  /** Tenant del actor: contexto de la request autenticada, o el default de boot (seed/jobs). */
   get tenant(): string {
-    return this.tenantId;
+    return requestContext.getStore()?.tenantId ?? this.tenantId;
   }
+  get user(): string {
+    return requestContext.getStore()?.userId ?? this.userId;
+  }
+  /** Finca por defecto del tenant de boot (solo seed); las requests usan defaultFarm(). */
   get farm(): string {
     return this.farmId;
   }
-  get user(): string {
-    return this.userId;
+
+  private farmCache = new Map<string, string>();
+  /** Primera finca del tenant actual (v0: finca única por tenant). */
+  async defaultFarm(): Promise<string> {
+    const t = this.tenant;
+    const cached = this.farmCache.get(t);
+    if (cached) return cached;
+    const farm = await this.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]);
+    if (!farm) throw new Error(`El tenant ${t} no tiene fincas`);
+    this.farmCache.set(t, farm.id);
+    return farm.id;
   }
 
   async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
+    // Dentro de una request autenticada, todo va por su transacción (RLS activa)
+    const q = requestContext.getStore()?.q;
+    if (q) return q.query<T>(sql, params);
     const res = await this.db.query<T>(sql, params);
     return res.rows;
   }
@@ -126,6 +206,10 @@ export class DbService implements OnModuleInit {
    * de otras requests se intercalarían dentro de la transacción ajena.
    */
   async tx<T>(fn: (q: Q) => Promise<T>): Promise<T> {
+    // Si la request ya corre dentro de su transacción (interceptor de auth),
+    // se reutiliza: PGlite no soporta transacciones anidadas.
+    const existing = requestContext.getStore()?.q;
+    if (existing) return fn(existing);
     return this.db.transaction(async (t) => {
       const q: Q = {
         query: async <R>(sql: string, params?: unknown[]) => (await t.query<R>(sql, params)).rows,

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL } from '@/lib/api';
+import { API_URL, authHeaders } from '@/lib/api';
 import { Check } from 'lucide-react';
 
 export function WeighingForm({ animalId }: { animalId: string }) {
@@ -19,7 +19,7 @@ export function WeighingForm({ animalId }: { animalId: string }) {
     try {
       const res = await fetch(`${API_URL}/animals/${animalId}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({
           type: 'weighing',
           weight_kg: Number(kg),

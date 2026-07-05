@@ -15,7 +15,9 @@ export default function Menu() {
         <Text style={{ fontSize: 20, fontWeight: '700', color: T.ink }}>Menú</Text>
 
         <Card>
-          <Text style={styles.title}>Finca</Text>
+          <Text style={styles.title}>Usuario</Text>
+          <Text style={styles.value}>{sync.userName ?? '—'}</Text>
+          <Text style={[styles.title, { marginTop: 12 }]}>Finca</Text>
           <Text style={styles.value}>{sync.farmName ?? '—'}</Text>
           <Text style={[styles.title, { marginTop: 12 }]}>API</Text>
           <Text style={styles.mono}>{API_URL}</Text>
@@ -58,6 +60,14 @@ export default function Menu() {
               }
             }}
           />
+        </Card>
+
+        <Card>
+          <Text style={styles.title}>Sesión</Text>
+          <Text style={{ fontSize: 12, color: T.ink3, marginVertical: 8 }}>
+            Los datos locales se conservan; al volver a ingresar seguís donde estabas.
+          </Text>
+          <Button label="Cerrar sesión" variant="secondary" onPress={() => sync.logout()} />
         </Card>
 
         <Text style={{ fontSize: 11, color: T.ink3, textAlign: 'center' }}>Cowinance móvil · esqueleto v0.1</Text>
