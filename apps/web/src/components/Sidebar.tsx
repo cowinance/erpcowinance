@@ -1,0 +1,142 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import {
+  LayoutDashboard,
+  Beef,
+  Boxes,
+  Map,
+  CalendarCheck,
+  Heart,
+  Stethoscope,
+  Weight,
+  Wheat,
+  Package,
+  Tractor,
+  Landmark,
+  ShoppingCart,
+  Store,
+  BarChart3,
+  Bell,
+  GraduationCap,
+  Settings,
+  ChevronsUpDown,
+  Search,
+  Zap,
+} from 'lucide-react';
+
+const SECTIONS: { title: string | null; items: { href: string; label: string; icon: any }[] }[] = [
+  {
+    title: 'Operación diaria',
+    items: [
+      { href: '/', label: 'Inicio', icon: LayoutDashboard },
+      { href: '/animales', label: 'Animales', icon: Beef },
+      { href: '/lotes', label: 'Lotes', icon: Boxes },
+      { href: '/manga', label: 'Modo manga', icon: Zap },
+      { href: '/modulo/mapa', label: 'Potreros y Mapa', icon: Map },
+      { href: '/modulo/tareas', label: 'Tareas', icon: CalendarCheck },
+    ],
+  },
+  {
+    title: 'Gestión',
+    items: [
+      { href: '/reproduccion', label: 'Reproducción', icon: Heart },
+      { href: '/sanidad', label: 'Sanidad', icon: Stethoscope },
+      { href: '/modulo/produccion', label: 'Producción', icon: Weight },
+      { href: '/modulo/nutricion', label: 'Nutrición', icon: Wheat },
+      { href: '/modulo/inventario', label: 'Inventario', icon: Package },
+      { href: '/modulo/maquinaria', label: 'Maquinaria', icon: Tractor },
+    ],
+  },
+  {
+    title: 'Negocio',
+    items: [
+      { href: '/modulo/finanzas', label: 'Finanzas', icon: Landmark },
+      { href: '/modulo/comercial', label: 'Compras y Ventas', icon: ShoppingCart },
+      { href: '/modulo/marketplace', label: 'Marketplace', icon: Store },
+      { href: '/modulo/reportes', label: 'Reportes', icon: BarChart3 },
+    ],
+  },
+];
+
+const FOOTER_ITEMS = [
+  { href: '/modulo/alertas', label: 'Alertas', icon: Bell },
+  { href: '/modulo/academia', label: 'Academia', icon: GraduationCap },
+  { href: '/modulo/configuracion', label: 'Configuración', icon: Settings },
+];
+
+function NavItem({ href, label, icon: Icon }: { href: string; label: string; icon: any }) {
+  const pathname = usePathname();
+  const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
+  return (
+    <Link
+      href={href}
+      className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors duration-75 ${
+        active ? 'bg-brand-soft font-medium text-ink' : 'text-ink-2 hover:bg-sunken hover:text-ink'
+      }`}
+    >
+      <Icon size={18} strokeWidth={1.75} className={active ? 'text-brand' : ''} />
+      {label}
+    </Link>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sunken px-3 pt-4 pb-3 max-lg:hidden">
+      {/* Cabecera de contexto: Organización → Finca */}
+      <button className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-brand-soft">
+        <div className="flex size-7 items-center justify-center rounded-md bg-brand text-[12px] font-semibold text-white">
+          LE
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold">Estancia La Esperanza</div>
+          <div className="truncate text-[11px] text-ink-3">Grupo La Esperanza</div>
+        </div>
+        <ChevronsUpDown size={14} className="text-ink-3" />
+      </button>
+
+      {/* Buscador global (command palette ⌘K, próximamente) */}
+      <button className="mt-3 flex h-8 items-center gap-2 rounded-md border border-subtle bg-surface px-2.5 text-[13px] text-ink-3">
+        <Search size={15} strokeWidth={1.75} />
+        <span className="flex-1 text-left">Buscar…</span>
+        <kbd className="rounded border border-subtle bg-sunken px-1 font-mono text-[10px]">⌘K</kbd>
+      </button>
+
+      <nav className="mt-4 flex-1 space-y-5 overflow-y-auto">
+        {SECTIONS.map((s) => (
+          <div key={s.title}>
+            {s.title && (
+              <div className="mb-1 px-2.5 text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+                {s.title}
+              </div>
+            )}
+            <div className="space-y-0.5">
+              {s.items.map((it) => (
+                <NavItem key={it.href} {...it} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      <div className="space-y-0.5 border-t border-subtle pt-3">
+        {FOOTER_ITEMS.map((it) => (
+          <NavItem key={it.href} {...it} />
+        ))}
+        {/* Indicador de sincronización: información de primera clase (doc §3.1) */}
+        <Link
+          href="/sincronizacion"
+          className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-ink-3 hover:bg-sunken hover:text-ink"
+        >
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40" />
+            <span className="relative inline-flex size-2 rounded-full bg-success" />
+          </span>
+          Sincronizado
+        </Link>
+      </div>
+    </aside>
+  );
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@cowinance/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cowinance api-core — monolito modular de dominio (NestJS)",
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch"
+  },
+  "dependencies": {
+    "@cowinance/sync-core": "*",
+    "@electric-sql/pglite": "^0.3.14",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

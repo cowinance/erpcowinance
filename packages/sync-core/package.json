@@ -1,0 +1,16 @@
+{
+  "name": "@cowinance/sync-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Motor de sincronización offline v0: HLC, changesets, merge determinista y simulación de convergencia",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "sim": "npm run build && node dist/sim/run.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,107 @@
+@import 'tailwindcss';
+
+/* ─────────────────────────────────────────────────────────────
+   Cowinance UI — tokens del Design System (doc §4, §5, §8)
+   Base neutra cálida · un acento de marca (verde bosque)
+   ───────────────────────────────────────────────────────────── */
+:root {
+  /* Marca */
+  --brand-900: #0e2a20;
+  --brand-700: #1f4e3d;
+  --brand-500: #2e7d5b;
+  --brand-300: #7fbfa3;
+  --brand-100: #e7f2ec;
+  --amber-500: #d97b2b;
+
+  /* Neutros — modo claro */
+  --bg-canvas: #fafaf7;
+  --bg-surface: #ffffff;
+  --bg-sunken: #f2f2ed;
+  --bg-raised: #ffffff;
+  --border-subtle: #e8e8e2;
+  --border-strong: #d1d1c9;
+  --text-primary: #191c1a;
+  --text-secondary: #5a605c;
+  --text-tertiary: #8b918d;
+
+  /* Semánticos */
+  --success: #1e7f4f;
+  --warning: #b45309;
+  --danger: #b3261e;
+  --info: #20618a;
+
+  --accent: var(--brand-700);
+  --accent-soft: var(--brand-100);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-canvas: #0c0f0e;
+    --bg-surface: #151917;
+    --bg-sunken: #10130f;
+    --bg-raised: #1d2220;
+    --border-subtle: #262b29;
+    --border-strong: #343a37;
+    --text-primary: #ecefed;
+    --text-secondary: #9ba39e;
+    --text-tertiary: #6a716d;
+
+    --success: #34b375;
+    --warning: #e8a33d;
+    --danger: #e5534b;
+    --info: #5ba3d0;
+
+    --accent: var(--brand-500);
+    --accent-soft: rgba(46, 125, 91, 0.16);
+
+    --shadow-1: none;
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-sunken: var(--bg-sunken);
+  --color-raised: var(--bg-raised);
+  --color-subtle: var(--border-subtle);
+  --color-strong: var(--border-strong);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-ink-3: var(--text-tertiary);
+  --color-brand: var(--accent);
+  --color-brand-soft: var(--accent-soft);
+  --color-brand-300: var(--brand-300);
+  --color-amber: var(--amber-500);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+}
+
+body {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-feature-settings: 'ss01';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Cifras tabulares para datos (doc §5.1) */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--brand-300);
+  color: var(--brand-900);
+}
