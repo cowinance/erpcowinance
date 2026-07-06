@@ -3,14 +3,17 @@ import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, EmptyState, KpiCard, TagMono } from '@/components/ui';
 import { formatDate } from '@/lib/format';
 import { SanidadCapture } from './SanidadCapture';
+import { HealthPlansPanel } from './HealthPlansPanel';
 import { Clock, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
-  const [kpis, withdrawals, upcoming, products] = await Promise.all([
+  const [kpis, withdrawals, upcoming, products, lots, categories] = await Promise.all([
     apiSafe<any>('/health/kpis'),
     apiSafe<any[]>('/health/withdrawals'),
     apiSafe<any[]>('/health/upcoming-vaccinations?days=60'),
     apiSafe<any[]>('/products-veterinary'),
+    apiSafe<any[]>('/lots'),
+    apiSafe<any[]>('/catalogs/categories'),
   ]);
   if (!kpis) return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
 
@@ -115,6 +118,8 @@ export default async function SanidadPage() {
           <SanidadCapture products={products ?? []} />
         </Card>
       </div>
+
+      <HealthPlansPanel lots={lots ?? []} categories={categories ?? []} />
     </div>
   );
 }

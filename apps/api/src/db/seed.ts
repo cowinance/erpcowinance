@@ -347,6 +347,48 @@ export async function seed(db: PGlite) {
   const pregOver = await q(`SELECT id FROM pregnancies WHERE tenant_id = $1 AND status = 'open' ORDER BY diagnosis_date DESC LIMIT 1`, [org]);
   if (pregOver[0]) await q(`UPDATE pregnancies SET expected_due_date = $2 WHERE id = $1`, [pregOver[0].id, soon(-6)]);
 
+  // ── Planes sanitarios reutilizables (calendarios) ─────────────────────
+  const planGeneral = [
+    { product_id: prodAftosa, product_name: 'Vacuna Aftosa', applies_to: [], offset_days: 0, label: 'Vacunación Aftosa' },
+    { product_id: prodAftosa, product_name: 'Vacuna Aftosa', applies_to: [], offset_days: 180, label: 'Refuerzo Aftosa' },
+    { product_id: prodIvermectina, product_name: 'Ivermectina 1%', applies_to: [], offset_days: 0, label: 'Desparasitación' },
+    { product_id: prodIvermectina, product_name: 'Ivermectina 1%', applies_to: [], offset_days: 90, label: 'Desparasitación (2ª dosis)' },
+  ];
+  const planRecria = [
+    { product_id: prodIvermectina, product_name: 'Ivermectina 1%', applies_to: ['ternero', 'ternera'], offset_days: 7, label: 'Desparasitación de destete' },
+    { product_id: prodAftosa, product_name: 'Vacuna Aftosa', applies_to: ['ternero', 'ternera'], offset_days: 14, label: 'Primovacunación Aftosa' },
+  ];
+  await q(
+    `INSERT INTO health_plans (tenant_id, name, species_id, schedule, created_by) VALUES ($1,'Plan sanitario general',$2,$3,$4)`,
+    [org, bovine, JSON.stringify(planGeneral), userId],
+  );
+  await q(
+    `INSERT INTO health_plans (tenant_id, name, species_id, schedule, created_by) VALUES ($1,'Plan de recría',$2,$3,$4)`,
+    [org, bovine, JSON.stringify(planRecria), userId],
+  );
+
+  // Aplicar el plan de recría al lote de recría (tareas próximas → recordatorios)
+  const recriaLot = lots[2];
+  const anchorTasks = new Date(); // ancla hoy → tareas próximas (días 7 y 14), no vencidas
+  const targetAnimals = await q(
+    `SELECT a.id, c.code AS category_code, ai.value AS tag FROM animals a
+     LEFT JOIN animal_categories c ON c.id = a.category_id
+     LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' ORDER BY x.created_at DESC LIMIT 1) ai ON true
+     WHERE a.tenant_id = $1 AND a.current_lot_id = $2 AND a.status = 'active' AND a.deleted_at IS NULL`,
+    [org, recriaLot],
+  );
+  for (const animal of targetAnimals) {
+    for (const step of planRecria) {
+      if (step.applies_to.length && !step.applies_to.includes(animal.category_code)) continue;
+      const due = new Date(anchorTasks.getTime() + step.offset_days * 86400000);
+      await q(
+        `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, related_type, related_id, created_by)
+         VALUES ($1,$2,$3,'health',$4,'normal','pending','animal',$5,$6)`,
+        [org, farm, `${step.label} — caravana ${animal.tag ?? '—'}`, due.toISOString(), animal.id, userId],
+      );
+    }
+  }
+
   // ── Mortalidad: una ternera muerta (para KPI y flujo de baja) ─────────
   const deadCalf = animalIds.find((a) => a.catCode === 'ternera')!;
   const diedAt = daysAgo(60);

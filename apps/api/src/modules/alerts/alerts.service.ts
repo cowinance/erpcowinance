@@ -21,6 +21,7 @@ interface RuleDef {
 const RULES: RuleDef[] = [
   { code: 'withdrawal_active', name: 'Retiro activo', category: 'health', severity: 'warning' },
   { code: 'vaccination_due', name: 'Vacunación programada', category: 'health', severity: 'info' },
+  { code: 'health_task_due', name: 'Tarea sanitaria programada', category: 'health', severity: 'info' },
   { code: 'calving_soon', name: 'Parto próximo', category: 'reproduction', severity: 'info' },
   { code: 'pregnancy_overdue', name: 'Preñez vencida', category: 'reproduction', severity: 'warning' },
   { code: 'sync_device_stale', name: 'Dispositivo sin sincronizar', category: 'task', severity: 'info' },
@@ -238,6 +239,25 @@ export class AlertsService {
         related_id: v.rid,
       });
     }
+
+    // Tareas sanitarias programadas (de planes) por vencer o vencidas (≤ 15 días)
+    const tasks = await this.db.query<any>(
+      `SELECT tk.id AS rid, tk.title, tk.due_date, (tk.due_date::date < CURRENT_DATE) AS overdue
+       FROM tasks tk
+       WHERE tk.tenant_id = $1 AND tk.type = 'health' AND tk.status = 'pending' AND tk.deleted_at IS NULL
+         AND tk.due_date <= now() + interval '15 days'`,
+      [t],
+    );
+    for (const tk of tasks)
+      out.push({
+        code: 'health_task_due',
+        category: 'health',
+        severity: tk.overdue ? 'warning' : 'info',
+        title: tk.title,
+        message: `${tk.overdue ? 'Tarea vencida' : 'Tarea programada'} para el ${fmt(tk.due_date)}`,
+        related_type: 'task',
+        related_id: tk.rid,
+      });
 
     // Partos próximos (≤ 15 días)
     const calvings = await this.db.query<any>(
