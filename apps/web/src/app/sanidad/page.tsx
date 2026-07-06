@@ -4,6 +4,7 @@ import { Card, CardTitle, EmptyState, KpiCard, TagMono } from '@/components/ui';
 import { formatDate } from '@/lib/format';
 import { SanidadCapture } from './SanidadCapture';
 import { HealthPlansPanel } from './HealthPlansPanel';
+import { MedicationsPanel } from './MedicationsPanel';
 import { Clock, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
@@ -118,6 +119,8 @@ export default async function SanidadPage() {
           <SanidadCapture products={products ?? []} />
         </Card>
       </div>
+
+      <MedicationsPanel products={products ?? []} />
 
       <HealthPlansPanel lots={lots ?? []} categories={categories ?? []} />
     </div>

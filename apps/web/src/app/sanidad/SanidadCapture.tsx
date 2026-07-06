@@ -3,15 +3,61 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, inputCls, labelCls, useSubmit } from '@/components/capture';
+import { AddProductForm } from './AddProductForm';
+import { Plus } from 'lucide-react';
 
 export function SanidadCapture({ products }: { products: any[] }) {
   const router = useRouter();
   const [tab, setTab] = useState('Vacunación');
   const [animal, setAnimal] = useState<PickedAnimal | null>(null);
+  const [productId, setProductId] = useState('');
+  const [addingProduct, setAddingProduct] = useState(false);
   const { state, message, submit } = useSubmit();
 
   const vaccines = products.filter((p) => p.type === 'vaccine');
   const drugs = products.filter((p) => p.type !== 'vaccine');
+
+  function changeTab(t: string) {
+    setTab(t);
+    setProductId('');
+    setAddingProduct(false);
+  }
+
+  // Alta inline: al crear un medicamento, se selecciona y se refresca el catálogo
+  function onProductCreated(product: any) {
+    setProductId(product.id);
+    setAddingProduct(false);
+    router.refresh();
+  }
+
+  const ProductPicker = ({ options, label, defaultType }: { options: any[]; label: string; defaultType: string }) => (
+    <div>
+      <div className="flex items-center justify-between">
+        <span className={labelCls}>{label} *</span>
+        <button
+          type="button"
+          onClick={() => setAddingProduct((v) => !v)}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-brand hover:underline"
+        >
+          <Plus size={12} /> Nuevo medicamento
+        </button>
+      </div>
+      <select name="product_id" required value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
+        <option value="">Elegir…</option>
+        {options.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+            {p.withdrawal_meat_days ? ` (retiro ${p.withdrawal_meat_days} d)` : ''}
+          </option>
+        ))}
+      </select>
+      {addingProduct && (
+        <div className="mt-2">
+          <AddProductForm defaultType={defaultType} onCreated={onProductCreated} onCancel={() => setAddingProduct(false)} />
+        </div>
+      )}
+    </div>
+  );
 
   async function handle(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -68,13 +114,14 @@ export function SanidadCapture({ products }: { products: any[] }) {
     if (res) {
       form.reset();
       setAnimal(null);
+      setProductId('');
       router.refresh();
     }
   }
 
   return (
     <form onSubmit={handle}>
-      <Tabs tabs={['Vacunación', 'Tratamiento', 'Diagnóstico', 'Mortalidad']} active={tab} onChange={setTab} />
+      <Tabs tabs={['Vacunación', 'Tratamiento', 'Diagnóstico', 'Mortalidad']} active={tab} onChange={changeTab} />
       <div className="space-y-3">
         <div>
           <span className={labelCls}>Animal *</span>
@@ -83,14 +130,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
 
         {tab === 'Vacunación' && (
           <>
-            <label className="block">
-              <span className={labelCls}>Vacuna *</span>
-              <select name="product_id" required className={inputCls}>
-                {vaccines.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </label>
+            <ProductPicker options={vaccines} label="Vacuna" defaultType="vaccine" />
             <div className="grid grid-cols-3 gap-3">
               <label className="block">
                 <span className={labelCls}>Dosis (ml)</span>
@@ -110,17 +150,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
 
         {tab === 'Tratamiento' && (
           <>
-            <label className="block">
-              <span className={labelCls}>Producto *</span>
-              <select name="product_id" required className={inputCls}>
-                {drugs.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {p.withdrawal_meat_days ? ` (retiro ${p.withdrawal_meat_days} d)` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ProductPicker options={drugs} label="Producto" defaultType="antibiotic" />
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className={labelCls}>Dosis (ml)</span>
