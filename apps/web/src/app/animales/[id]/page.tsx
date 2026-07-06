@@ -5,6 +5,8 @@ import { Card, CardTitle, StatusBadge, TagMono } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
 import { ageFrom, EVENT_LABELS, formatDate, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { WeighingForm } from './WeighingForm';
+import { PhotoGallery } from './PhotoGallery';
+import { fileUrl } from '@/lib/api';
 import { ArrowLeft, Baby, Clock, Heart, Scale, Stethoscope, Syringe, StickyNote } from 'lucide-react';
 
 const EVENT_ICON: Record<string, any> = {
@@ -34,9 +36,22 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
         <ArrowLeft size={14} /> Animales
       </Link>
 
-      {/* Cabecera de identidad (doc diseño §12.2) */}
+      {/* Cabecera de identidad (doc diseño §12.2) — foto principal + identidad */}
       <div className="mb-5 flex items-start justify-between gap-6">
-        <div>
+        <div className="flex items-start gap-4">
+          {fileUrl(animal.photo) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={fileUrl(animal.photo)!}
+              alt={`Foto de ${visual?.value ?? 'animal'}`}
+              className="size-20 shrink-0 rounded-lg border border-subtle object-cover"
+            />
+          ) : (
+            <div className="flex size-20 shrink-0 items-center justify-center rounded-lg border border-dashed border-strong bg-sunken text-[10px] text-ink-3">
+              Sin foto
+            </div>
+          )}
+          <div>
           <div className="flex items-center gap-3">
             <h1 className="font-mono text-[28px] leading-9 font-semibold tracking-wide">{visual?.value ?? '—'}</h1>
             <StatusBadge status={animal.status} label={STATUS_LABELS[animal.status] ?? animal.status} />
@@ -87,6 +102,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
               </>
             )}
           </p>
+          </div>
         </div>
       </div>
 
@@ -174,6 +190,12 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
           <Card>
             <CardTitle>Registrar pesaje</CardTitle>
             <WeighingForm animalId={animal.id} />
+          </Card>
+
+          {/* Multimedia (Módulo Animales §11) */}
+          <Card>
+            <CardTitle>Multimedia</CardTitle>
+            <PhotoGallery animalId={animal.id} />
           </Card>
         </div>
       </div>

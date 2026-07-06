@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { apiSafe } from '@/lib/server-api';
+import { fileUrl } from '@/lib/api';
 import { EmptyState, StatusBadge } from '@/components/ui';
 import { ageFrom, formatAdg, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { Plus, Search } from 'lucide-react';
@@ -95,7 +96,13 @@ export default async function AnimalsPage({
             {animals.map((a: any) => (
               <tr key={a.id} className="h-9 border-b border-subtle last:border-0 hover:bg-sunken">
                 <td className="pl-4">
-                  <Link href={`/animales/${a.id}`} className="font-mono font-medium text-brand hover:underline">
+                  <Link href={`/animales/${a.id}`} className="inline-flex items-center gap-2 font-mono font-medium text-brand hover:underline">
+                    {fileUrl(a.photo) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={fileUrl(a.photo)!} alt="" className="size-6 rounded-full border border-subtle object-cover" />
+                    ) : (
+                      <span className="size-6 rounded-full border border-dashed border-strong bg-sunken" />
+                    )}
                     {a.tag ?? '—'}
                   </Link>
                 </td>

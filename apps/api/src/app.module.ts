@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { LandModule } from './modules/land/land.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
+import { MediaModule } from './modules/media/media.module';
 
 /**
  * Monolito modular (Fase 0-1 del roadmap): cada módulo se alinea 1:1 con un
@@ -17,6 +18,6 @@ import { AlertsModule } from './modules/alerts/alerts.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule],
+  imports: [DbModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule],
 })
 export class AppModule {}

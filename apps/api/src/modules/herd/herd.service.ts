@@ -1,5 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
+import { signFileToken } from '../../common/file-token';
+
+/** Referencia de foto (id + token firmado) para renderizar desde el navegador. */
+function photoRef(db: DbService, fileId?: string | null, mime?: string | null) {
+  if (!fileId) return null;
+  return { file_id: fileId, mime: mime ?? 'image/jpeg', token: signFileToken(fileId, db.tenant, mime ?? 'image/jpeg') };
+}
 
 export interface ListAnimalsParams {
   status?: string;
@@ -53,11 +60,13 @@ export class HerdService {
               p.name AS paddock_name,
               t.value AS tag,
               w.weight_kg::float AS last_weight_kg, w.adg_since_last::float AS adg, w.weighed_at AS last_weighed_at,
-              br.breeds
+              br.breeds,
+              a.photo_file_id, pf.mime_type AS photo_mime
        FROM animals a
        LEFT JOIN animal_categories c ON c.id = a.category_id
        LEFT JOIN lots l ON l.id = a.current_lot_id
        LEFT JOIN paddocks p ON p.id = a.current_paddock_id
+       LEFT JOIN files pf ON pf.id = a.photo_file_id AND pf.deleted_at IS NULL
        LEFT JOIN LATERAL (
          SELECT value FROM animal_identifiers ai
          WHERE ai.animal_id = a.id AND ai.type = 'visual' AND ai.deleted_at IS NULL
@@ -77,7 +86,10 @@ export class HerdService {
     );
 
     const hasMore = rows.length > limit;
-    const data = hasMore ? rows.slice(0, limit) : rows;
+    const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => ({
+      ...r,
+      photo: photoRef(this.db, r.photo_file_id, r.photo_mime),
+    }));
     const last = data[data.length - 1];
     return {
       data,
@@ -90,13 +102,15 @@ export class HerdService {
   async getAnimal(id: string) {
     const animal = await this.db.one<any>(
       `SELECT a.*, c.name AS category, c.code AS category_code, s.name AS species,
-              l.name AS lot_name, p.name AS paddock_name, f.name AS farm_name
+              l.name AS lot_name, p.name AS paddock_name, f.name AS farm_name,
+              pf.mime_type AS photo_mime
        FROM animals a
        LEFT JOIN animal_categories c ON c.id = a.category_id
        LEFT JOIN species s ON s.id = a.species_id
        LEFT JOIN lots l ON l.id = a.current_lot_id
        LEFT JOIN paddocks p ON p.id = a.current_paddock_id
        LEFT JOIN farms f ON f.id = a.farm_id
+       LEFT JOIN files pf ON pf.id = a.photo_file_id AND pf.deleted_at IS NULL
        WHERE a.id = $1 AND a.tenant_id = $2 AND a.deleted_at IS NULL`,
       [id, this.db.tenant],
     );
@@ -154,6 +168,7 @@ export class HerdService {
 
     return {
       ...animal,
+      photo: photoRef(this.db, animal.photo_file_id, animal.photo_mime),
       identifiers,
       breeds,
       last_weighing: lastWeighing ?? null,

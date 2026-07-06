@@ -80,6 +80,9 @@ export class DbService implements OnModuleInit {
     'alerts',
     'alert_rules',
     'notifications',
+    'files',
+    'attachments',
+    'documents',
     // user_role_assignments queda SIN RLS: el login resuelve el tenant del
     // usuario ANTES de tener contexto de tenant (plano de identidad)
     'sync_devices',
