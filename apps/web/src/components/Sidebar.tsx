@@ -36,7 +36,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
       { href: '/animales', label: 'Animales', icon: Beef },
       { href: '/lotes', label: 'Lotes', icon: Boxes },
       { href: '/manga', label: 'Modo manga', icon: Zap },
-      { href: '/modulo/mapa', label: 'Potreros y Mapa', icon: Map },
+      { href: '/mapa', label: 'Potreros y Mapa', icon: Map },
       { href: '/modulo/tareas', label: 'Tareas', icon: CalendarCheck },
     ],
   },

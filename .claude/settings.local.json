@@ -48,7 +48,10 @@
       "Bash(git commit -m ' *)",
       "Bash(grep -o \"transaction[^;]\\\\{0,120\\\\}\" node_modules/@electric-sql/pglite/dist/interface.d.ts)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/v1/auth/login -X POST -H 'Content-Type: application/json' -d '{}')",
-      "Bash(node scripts/auth-e2e.mjs)"
+      "Bash(node scripts/auth-e2e.mjs)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(f\\\\\"{p['name']}: {p['animal_count']} cab, {p['area_ha']}ha, carga {p['stocking_rate']}, geom={'sí' if p['boundary'] else 'no'}, lotes={[l['name'] for l in p['lots']]}\\\\\"\\) for p in d]\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/login)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('último evento:', d[0]['event_type'], d[0]['payload']\\)\")"
     ]
   }
 }

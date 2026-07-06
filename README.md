@@ -9,6 +9,7 @@ Plataforma ERP para ganadería, agricultura y administración de fincas. La espe
 - **Sanidad**: vacunaciones, tratamientos con cálculo automático de retiros (carne/leche) según el producto, diagnósticos, mortalidad con baja del animal; KPIs (cobertura, retiros activos, mortalidad).
 - **Reproducción**: ciclo completo celo → servicio (IA/monta) → diagnóstico (crea la preñez con fecha probable de parto desde el servicio + 283 d) → parto (alta de crías con genealogía) → destete; KPIs y próximos partos.
 - **Modo manga** (`/manga`): captura masiva de campo en alto contraste AAA — caravana → peso → condición corporal, con feedback auditivo y contador de progreso.
+- **Potreros y Mapa** (`/mapa`): mapa 2D esquemático con polígonos coloreados por ocupación/carga, panel contextual por potrero y movimiento de lotes entre potreros (registrado en la línea de tiempo de cada animal).
 - **Motor de sincronización offline v0**: changesets con relojes híbridos (HLC), LWW por campo, conflictos semánticos y duplicados con cola de revisión, dedupe exactly-once por (device, seq), panel de flota.
 
 ## Estructura del monorepo

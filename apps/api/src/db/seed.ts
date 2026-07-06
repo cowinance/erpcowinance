@@ -125,19 +125,22 @@ export async function seed(db: PGlite) {
   );
 
   // ── Potreros y lotes ──────────────────────────────────────────────────
-  const paddockDefs: [string, number, string][] = [
-    ['Potrero Norte', 120, 'natural'],
-    ['Potrero Laguna', 95, 'natural'],
-    ['Pradera Alfalfa', 60, 'alfalfa'],
-    ['Loma Sur', 140, 'natural'],
-    ['Bajo Grande', 110, 'raigrás'],
-    ['Corral Central', 8, 'feedlot'],
+  // boundary: polígono esquemático (GeoJSON) en unidades de mapa local;
+  // en producción es PostGIS geography con coordenadas reales (Fase 2: dibujo sobre tiles)
+  const poly = (pts: number[][]) => JSON.stringify({ type: 'Polygon', coordinates: [pts] });
+  const paddockDefs: [string, number, string, string][] = [
+    ['Potrero Norte', 120, 'natural', poly([[25, 25], [390, 20], [405, 255], [35, 275]])],
+    ['Potrero Laguna', 95, 'natural', poly([[410, 18], [975, 35], [952, 262], [422, 252]])],
+    ['Pradera Alfalfa', 60, 'alfalfa', poly([[38, 292], [406, 272], [416, 452], [48, 468]])],
+    ['Loma Sur', 140, 'natural', poly([[50, 485], [418, 468], [428, 578], [578, 572], [588, 672], [68, 680]])],
+    ['Bajo Grande', 110, 'raigrás', poly([[425, 268], [952, 280], [936, 655], [598, 668], [588, 560], [432, 566]])],
+    ['Corral Central', 8, 'feedlot', poly([[434, 470], [572, 462], [580, 552], [440, 558]])],
   ];
   const paddocks: string[] = [];
-  for (const [name, area, pasture] of paddockDefs) {
+  for (const [name, area, pasture, boundary] of paddockDefs) {
     const [{ id }] = await q(
-      `INSERT INTO paddocks (tenant_id, farm_id, name, area_ha, pasture_type, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-      [org, farm, name, area, pasture, userId],
+      `INSERT INTO paddocks (tenant_id, farm_id, name, boundary, area_ha, pasture_type, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [org, farm, name, boundary, area, pasture, userId],
     );
     paddocks.push(id);
   }
