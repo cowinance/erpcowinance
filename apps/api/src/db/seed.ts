@@ -331,6 +331,22 @@ export async function seed(db: PGlite) {
     }
   }
 
+  // ── Escenario de alertas: eventos próximos y una preñez vencida ───────
+  const soon = (d: number) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+  // 4 refuerzos de vacuna próximos (dispara "vacunación programada")
+  const vaxSoon = await q(`SELECT id FROM vaccinations WHERE tenant_id = $1 ORDER BY applied_at LIMIT 4`, [org]);
+  const vaxOffsets = [4, 9, 15, 22];
+  for (let i = 0; i < vaxSoon.length; i++)
+    await q(`UPDATE vaccinations SET next_due_date = $2 WHERE id = $1`, [vaxSoon[i].id, soon(vaxOffsets[i])]);
+  // 3 partos próximos (dispara "parto próximo")
+  const pregSoon = await q(`SELECT id FROM pregnancies WHERE tenant_id = $1 AND status = 'open' ORDER BY diagnosis_date LIMIT 3`, [org]);
+  const pregOffsets = [6, 11, 14];
+  for (let i = 0; i < pregSoon.length; i++)
+    await q(`UPDATE pregnancies SET expected_due_date = $2 WHERE id = $1`, [pregSoon[i].id, soon(pregOffsets[i])]);
+  // 1 preñez vencida sin parto registrado (dispara "preñez vencida")
+  const pregOver = await q(`SELECT id FROM pregnancies WHERE tenant_id = $1 AND status = 'open' ORDER BY diagnosis_date DESC LIMIT 1`, [org]);
+  if (pregOver[0]) await q(`UPDATE pregnancies SET expected_due_date = $2 WHERE id = $1`, [pregOver[0].id, soon(-6)]);
+
   // ── Mortalidad: una ternera muerta (para KPI y flujo de baja) ─────────
   const deadCalf = animalIds.find((a) => a.catCode === 'ternera')!;
   const diedAt = daysAgo(60);

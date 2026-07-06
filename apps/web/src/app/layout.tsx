@@ -17,12 +17,20 @@ async function sessionContext() {
   if (!token) return null;
   try {
     const headers = { Authorization: `Bearer ${token}` };
-    const [me, farms] = await Promise.all([
+    // /alerts/kpis evalúa las reglas (read-through) → el badge siempre está fresco
+    const [me, farms, alertKpis] = await Promise.all([
       fetch(`${API_URL}/auth/me`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/farms`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API_URL}/alerts/kpis`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
     ]);
     if (!me) return null;
-    return { userName: me.name as string, orgName: me.organization?.name as string, farmName: farms?.[0]?.name as string };
+    return {
+      userName: me.name as string,
+      orgName: me.organization?.name as string,
+      farmName: farms?.[0]?.name as string,
+      openAlerts: (alertKpis?.open ?? 0) as number,
+      criticalAlerts: (alertKpis?.critical ?? 0) as number,
+    };
   } catch {
     return null;
   }
@@ -34,7 +42,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="es" className={inter.variable}>
       <body className="font-sans text-[14px] leading-5">
         <div className="flex min-h-screen">
-          <Sidebar orgName={session?.orgName} farmName={session?.farmName} userName={session?.userName} />
+          <Sidebar
+            orgName={session?.orgName}
+            farmName={session?.farmName}
+            userName={session?.userName}
+            openAlerts={session?.openAlerts ?? 0}
+            criticalAlerts={session?.criticalAlerts ?? 0}
+          />
           <main className="min-w-0 flex-1">
             <div className="mx-auto max-w-[1440px] px-8 py-6">{children}</div>
           </main>

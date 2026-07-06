@@ -63,12 +63,24 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
 ];
 
 const FOOTER_ITEMS = [
-  { href: '/modulo/alertas', label: 'Alertas', icon: Bell },
+  { href: '/alertas', label: 'Alertas', icon: Bell },
   { href: '/modulo/academia', label: 'Academia', icon: GraduationCap },
   { href: '/modulo/configuracion', label: 'Configuración', icon: Settings },
 ];
 
-function NavItem({ href, label, icon: Icon }: { href: string; label: string; icon: any }) {
+function NavItem({
+  href,
+  label,
+  icon: Icon,
+  badge,
+  badgeTone,
+}: {
+  href: string;
+  label: string;
+  icon: any;
+  badge?: number;
+  badgeTone?: 'danger' | 'warning';
+}) {
   const pathname = usePathname();
   const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
   return (
@@ -79,12 +91,33 @@ function NavItem({ href, label, icon: Icon }: { href: string; label: string; ico
       }`}
     >
       <Icon size={18} strokeWidth={1.75} className={active ? 'text-brand' : ''} />
-      {label}
+      <span className="flex-1">{label}</span>
+      {badge != null && badge > 0 && (
+        <span
+          className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white ${
+            badgeTone === 'danger' ? 'bg-danger' : 'bg-warning'
+          }`}
+        >
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }
 
-export function Sidebar({ orgName, farmName, userName }: { orgName?: string; farmName?: string; userName?: string }) {
+export function Sidebar({
+  orgName,
+  farmName,
+  userName,
+  openAlerts = 0,
+  criticalAlerts = 0,
+}: {
+  orgName?: string;
+  farmName?: string;
+  userName?: string;
+  openAlerts?: number;
+  criticalAlerts?: number;
+}) {
   const farm = farmName ?? 'Cowinance';
   const initials = farm
     .split(' ')
@@ -133,7 +166,12 @@ export function Sidebar({ orgName, farmName, userName }: { orgName?: string; far
 
       <div className="space-y-0.5 border-t border-subtle pt-3">
         {FOOTER_ITEMS.map((it) => (
-          <NavItem key={it.href} {...it} />
+          <NavItem
+            key={it.href}
+            {...it}
+            badge={it.href === '/alertas' ? openAlerts : undefined}
+            badgeTone={it.href === '/alertas' && criticalAlerts > 0 ? 'danger' : 'warning'}
+          />
         ))}
         <button
           onClick={() => {

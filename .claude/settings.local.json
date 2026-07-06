@@ -55,7 +55,9 @@
       "Bash(sed 's/^/  \\\\/login render: /')",
       "Bash(curl -s -o /dev/null -w \"  / \\(sin sesión\\) → HTTP %{http_code}\\\\n\" http://localhost:3000/)",
       "Bash(curl -s -o /dev/null -w \"  /mapa \\(sin sesión\\) → HTTP %{http_code}\\\\n\" http://localhost:3000/mapa)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code} \" http://localhost:3000/login)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code} \" http://localhost:3000/login)",
+      "Bash(git rm *)",
+      "Bash(git commit *)"
     ]
   }
 }
