@@ -8,6 +8,7 @@ import { HealthModule } from './modules/health/health.module';
 import { ReproModule } from './modules/repro/repro.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { LandModule } from './modules/land/land.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 /**
  * Monolito modular (Fase 0-1 del roadmap): cada módulo se alinea 1:1 con un
@@ -15,6 +16,6 @@ import { LandModule } from './modules/land/land.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule],
+  imports: [DbModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule],
 })
 export class AppModule {}

@@ -57,7 +57,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
       { href: '/modulo/finanzas', label: 'Finanzas', icon: Landmark },
       { href: '/modulo/comercial', label: 'Compras y Ventas', icon: ShoppingCart },
       { href: '/modulo/marketplace', label: 'Marketplace', icon: Store },
-      { href: '/modulo/reportes', label: 'Reportes', icon: BarChart3 },
+      { href: '/reportes', label: 'Reportes', icon: BarChart3 },
     ],
   },
 ];
