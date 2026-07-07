@@ -1,0 +1,14 @@
+{
+  "name": "@cowinance/domain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dominio puro de Cowinance — reglas de negocio y tipos, sin dependencias de infraestructura",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
