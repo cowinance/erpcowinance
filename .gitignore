@@ -9,3 +9,4 @@ dist/
 
 # tsc incremental build info
 *.tsbuildinfo
+coverage/

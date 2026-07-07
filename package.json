@@ -12,7 +12,14 @@
     "api": "npm run start:dev --workspace @cowinance/api",
     "web": "npm run dev --workspace @cowinance/web",
     "mobile": "npm run web --prefix apps/mobile",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=22"
