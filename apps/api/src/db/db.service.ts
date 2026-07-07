@@ -4,12 +4,10 @@ import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { seed } from './seed';
 import { requestContext } from '../common/request-context';
+import type { Q } from './query';
 
-/** Superficie mínima de consulta — la implementan DbService y sus transacciones. */
-export interface Q {
-  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
-  one<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined>;
-}
+// Re-exportado para no romper a los consumidores que ya importan Q desde aquí.
+export type { Q } from './query';
 
 /**
  * Capa de persistencia (dev): PGlite = PostgreSQL embebido en proceso.

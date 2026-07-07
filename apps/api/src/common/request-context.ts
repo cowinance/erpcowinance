@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'async_hooks';
-import type { Q } from '../db/db.service';
+import type { Q } from '../db/query';
 
 /**
  * Contexto de la request autenticada, propagado por AsyncLocalStorage:
