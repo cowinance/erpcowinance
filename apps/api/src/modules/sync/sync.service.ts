@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { applyPut, hlcNode, HlcClock, TERMINAL_STATUS, Changeset, PutOp, RowState } from '@cowinance/sync-core';
-import { computeWithdrawal, computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
+import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
+import { SyncHandlerRegistry } from './sync-handler.registry';
 
 /**
  * Servidor de sincronización v0 sobre Postgres — misma semántica que
@@ -36,7 +37,8 @@ const ANIMAL_FIELDS = new Set([
 /** Columnas de pregnancies que un changeset puede escribir (diagnóstico/cierre offline). */
 const PREGNANCY_FIELDS = new Set(['animal_id', 'status', 'diagnosis_date', 'expected_due_date', 'method', 'closed_at']);
 
-const EVENT_TABLES = new Set(['weighings', 'animal_events', 'vaccinations', 'treatments', 'breeding_events', 'calvings', 'calving_offspring']);
+// 'treatments' migró al registry (F6.1, TreatmentSyncHandler) — ya no pasa por applyEvent.
+const EVENT_TABLES = new Set(['weighings', 'animal_events', 'vaccinations', 'breeding_events', 'calvings', 'calving_offspring']);
 
 @Injectable()
 export class SyncService {
@@ -45,7 +47,10 @@ export class SyncService {
    *  dispositivos (`new HlcClock(deviceId, ...)`), con node='server'. */
   private readonly serverClock = new HlcClock('server');
 
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly handlers: SyncHandlerRegistry,
+  ) {}
 
   async registerDevice(body: { platform: string; device_name?: string; app_version?: string }) {
     if (!['ios', 'android', 'web'].includes(body?.platform))
@@ -80,12 +85,17 @@ export class SyncService {
 
         const csConflicts: { type: string; entity_id: string; detail: string }[] = [];
         for (const op of cs.ops ?? []) {
-          if (op.kind === 'put' && op.table === 'animals') {
+          // Strangler (F6.1): el registry se consulta primero; las tablas
+          // sin handler todavía siguen por el camino legacy de abajo.
+          const handler = this.handlers.get(op.table);
+          if (handler) {
+            csConflicts.push(...(await handler.apply(q, op, inserted.id)));
+          } else if (op.kind === 'put' && op.table === 'animals') {
             csConflicts.push(...(await this.applyAnimalPut(q, op, inserted.id)));
           } else if (op.kind === 'put' && op.table === 'pregnancies') {
             csConflicts.push(...(await this.applyPregnancyPut(q, op, inserted.id)));
           } else if (op.kind === 'event' && EVENT_TABLES.has(op.table)) {
-            csConflicts.push(...(await this.applyEvent(q, op.table, op.rowId, op.row, inserted.id)));
+            await this.applyEvent(q, op.table, op.rowId, op.row);
           } else {
             throw new BadRequestException({
               code: 'sync.unsupported_op',
@@ -511,15 +521,9 @@ export class SyncService {
     return conflicts;
   }
 
-  private async applyEvent(
-    q: Q,
-    table: string,
-    rowId: string,
-    row: Record<string, unknown>,
-    changesetDbId: string,
-  ): Promise<{ type: string; entity_id: string; detail: string }[]> {
+  /** Tablas evento restantes (sin lógica de negocio) — 'treatments' migró al registry (F6.1). */
+  private async applyEvent(q: Q, table: string, rowId: string, row: Record<string, unknown>): Promise<void> {
     const t = this.db.tenant;
-    const conflicts: { type: string; entity_id: string; detail: string }[] = [];
     if (table === 'weighings') {
       await q.query(
         `INSERT INTO weighings (id, tenant_id, animal_id, weighed_at, weight_kg, method, body_condition, device_id)
@@ -566,56 +570,6 @@ export class SyncService {
           this.db.user,
         ],
       );
-    } else if (table === 'treatments') {
-      // Server Authority (F4.4, ADR-0007): meat/milk_withdrawal_until son
-      // derivados por regla de dominio, no una preferencia del cliente. El
-      // servidor busca el producto y recalcula; si difiere de lo propuesto,
-      // usa SU valor y deja traza — sin tolerancia (inocuidad alimentaria).
-      let meatWithdrawalUntil = (row['meat_withdrawal_until'] as string | null) ?? null;
-      let milkWithdrawalUntil = (row['milk_withdrawal_until'] as string | null) ?? null;
-      const product = await q.one<any>(
-        `SELECT withdrawal_meat_days, withdrawal_milk_hours FROM products_veterinary
-         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
-        [row['product_id'], t],
-      );
-      if (product) {
-        const appliedAt = new Date((row['applied_at'] as string) ?? new Date().toISOString());
-        const computed = computeWithdrawal(appliedAt, product.withdrawal_meat_days, product.withdrawal_milk_hours);
-        if (computed.meatWithdrawalUntil !== meatWithdrawalUntil) {
-          conflicts.push({
-            type: 'semantic',
-            entity_id: rowId,
-            detail: `Server recomputation mismatch: meat_withdrawal_until client=${meatWithdrawalUntil ?? 'null'} server=${computed.meatWithdrawalUntil ?? 'null'}`,
-          });
-        }
-        if (computed.milkWithdrawalUntil !== milkWithdrawalUntil) {
-          conflicts.push({
-            type: 'semantic',
-            entity_id: rowId,
-            detail: `Server recomputation mismatch: milk_withdrawal_until client=${milkWithdrawalUntil ?? 'null'} server=${computed.milkWithdrawalUntil ?? 'null'}`,
-          });
-        }
-        meatWithdrawalUntil = computed.meatWithdrawalUntil;
-        milkWithdrawalUntil = computed.milkWithdrawalUntil;
-      }
-      await q.query(
-        `INSERT INTO treatments (id, tenant_id, animal_id, product_id, applied_at, dose, dose_unit, route, meat_withdrawal_until, milk_withdrawal_until, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
-        [
-          rowId,
-          t,
-          row['animal_id'],
-          row['product_id'],
-          row['applied_at'] ?? new Date().toISOString(),
-          row['dose'] ?? null,
-          row['dose_unit'] ?? null,
-          row['route'] ?? null,
-          meatWithdrawalUntil,
-          milkWithdrawalUntil,
-          row['notes'] ?? null,
-          this.db.user,
-        ],
-      );
     } else if (table === 'breeding_events') {
       await q.query(
         `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, notes, created_by)
@@ -654,15 +608,6 @@ export class SyncService {
         [rowId, t, row['calving_id'], row['animal_id'] ?? null, row['birth_weight_kg'] ?? null, row['vitality'] ?? 'live', this.db.user],
       );
     }
-
-    for (const c of conflicts) {
-      await q.query(
-        `INSERT INTO sync_conflicts (tenant_id, changeset_id, entity_type, entity_id, conflict_type, detail, resolution, resolved_at)
-         VALUES ($1,$2,$3,$4,$5,$6,'server_wins',now())`,
-        [t, changesetDbId, table, c.entity_id, c.type, c.detail],
-      );
-    }
-    return conflicts;
   }
 
   private async globalCursor(): Promise<number> {
