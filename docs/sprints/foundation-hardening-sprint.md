@@ -76,10 +76,12 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 
 **Fase 4 completa.** Siguiente: F6 (Sync → SyncHandler registry, usa los servicios de dominio recién creados).
 
-### Fase 5 — Event Bus + Outbox (fundación, cableado mínimo)
-- **T5.1** Contratos de eventos versionados en `packages/domain/events`: `AnimalRegistered`, `WeighingRecorded`, `TreatmentApplied`, `PregnancyDiagnosed`, etc.
-- **T5.2** Puerto `EventPublisher` en el dominio; adaptador con **EventEmitter2** en `api` (transporte reemplazable sin tocar el dominio).
-- **T5.3** Tabla `outbox` + publicación *después del commit*. Los writes actuales **emiten** el evento (dual-write: se mantiene `insertAnimalEvent` para el timeline y se **agrega** la emisión). Un suscriptor trivial de logging + su test prueban el cableado. **Sin cambiar comportamiento de consumidores.**
+### Fase 5 — Event Bus + Outbox (fundación, cableado mínimo) — **COMPLETA** (ADR-0005)
+- **T5.1 — hecho.** Contratos versionados en `packages/domain/src/events/` (`DomainEvent` base + `TreatmentApplied` = `treatment.applied.v1`). Solo `TreatmentApplied` en F5; los demás se agregan cuando tengan consumidor real.
+- **T5.2 — hecho, con ajuste de ubicación (ADR-0005, Opción B).** El puerto `EventPublisher` **no** va en el dominio puro sino en la **capa de aplicación** (`apps/api/src/application/ports/`) — las funciones puras del dominio no publican; quien decide cuándo publicar es la aplicación. Adaptador EventEmitter2 en `apps/api/src/infra/event-bus/` (`@Global`), transporte reemplazable detrás del puerto.
+- **T5.3 — hecho, con dos aclaraciones.** Tabla `event_outbox` (migración idempotente en `db.service`, sin RLS) + relay poller que publica **post-commit**. La emisión va por el **puerto** (`OutboxEventPublisher` escribe la fila en la misma tx que el write) — no un dual-write manual. **Emisor único en F5: el camino REST `health.service.treat()`**; el dual-write con `TreatmentSyncHandler` queda para después (decisión de alcance). `insertAnimalEvent` (timeline) se mantiene intacto. Suscriptor de logging + test del relay (4 casos, incl. at-least-once) prueban el cableado. Verificado end-to-end contra la api real.
+
+**Fase 5 completa.** Siguiente (orden aprobado): **F7** (Dashboard → service + costura de proyección).
 
 ### Fase 6 — Refactor de sync a `SyncHandler` registry
 - **T6.1 — hecho.** Interface `SyncHandler` (`sync/contracts/sync-handler.interface.ts`: `table`, `apply(q, op, changesetDbId)`), recibiendo el handle transaccional `Q` (mismas fronteras de tx que hoy — ver análisis F6 §3: la transacción real vive alrededor de la request HTTP completa, abierta por `AuthInterceptor`, no por changeset).
