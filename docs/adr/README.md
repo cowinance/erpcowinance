@@ -11,6 +11,7 @@ numerado `NNNN-titulo.md`. Estados: `propuesto` · `aceptado` · `reemplazado po
 | ADR | Título | Estado |
 |---|---|---|
 | [0004](0004-domain-package.md) | Paquete de dominio puro (`packages/domain`) | aceptado |
+| [0006](0006-value-object-strategy.md) | Estrategia de Value Objects: invariante real antes que patrón DDD | aceptado |
 
 Pendientes (se documentan en F8 del Foundation Hardening Sprint):
 `0001` Monolito Modular · `0002` PGlite y PostgreSQL · `0003` Arquitectura Offline-First · `0005` Event Bus interno.

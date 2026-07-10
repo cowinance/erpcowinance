@@ -175,5 +175,10 @@ Escala subjetiva (1–5) del estado de gordura/reservas del animal, tomada junto
 
 Están en el lenguaje, pero se formalizan cuando su regla lo justifique (YAGNI): Company, Paddock,
 Movement, Species, Category, ADG, BodyCondition, y todo lo de las secciones 4–7. Value Objects
-planificados en este sprint (F2): `TenantId`, `FarmId`, `AnimalId`, `LotId` (F2.1) · `TagNumber`
-(F2.2) · `Weight` (F2.3) · `Breed`, `Sex` (F2.4).
+del sprint (F2): `TenantId`, `FarmId`, `AnimalId`, `LotId` (F2.1) · `TagNumber` (F2.2) ·
+`Weight` (F2.3) · `Sex` (F2.4).
+
+`Breed` fue **evaluado y descartado** como Value Object en F2.4: ya es una entidad de catálogo
+(`breeds` + `animal_breeds`) con identidad, ciclo de vida y alcance global/tenant propios; no hay
+primitivo inseguro que envolver ni comportamiento propio de "una raza". Ver
+[ADR-0006](adr/0006-value-object-strategy.md).

@@ -57,7 +57,8 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 
 ### Fase 2 — Value Objects (set estratégico)
 - **T2.1** VOs de identidad: `TenantId`, `FarmId`, `AnimalId`, `LotId` (UUID *branded* con validación en el factory).
-- **T2.2** VOs de dominio: `Sex` ('F'|'M'), `TagNumber` (normalización + validez), `Weight` (valor + unidad SI), `Breed`.
+- **T2.2** VOs de dominio: `TagNumber` (normalización + validez), `Weight` (valor + unidad SI), `Sex` ('F'|'M').
+- **Criterio de admisión (F2.4, ADR-0006):** cada VO candidato responde antes de implementarse a 5 preguntas (invariante que protege, errores que evita vs. primitivo, comportamiento propio, módulos que lo reusarán, por qué VO y no primitivo). `Breed` fue evaluado y **descartado**: ya es una entidad de catálogo (`breeds` + `animal_breeds`) con identidad y ciclo de vida propios; no hay primitivo inseguro que envolver. Ver [ADR-0006](../adr/0006-value-object-strategy.md).
 - **Estrategia:** adoptarlos en las fronteras de mayor valor (alta de animal, captura de pesaje); no reescribir todas las firmas este sprint. Adopción gradual vía factories `parse()`/`of()`.
 
 ### Fase 3 — Domain Errors
@@ -85,7 +86,7 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 - **T7.2** Interface `DashboardProjection` con una impl `LiveQueryProjection` (hoy el mismo SQL; mañana proyecciones). Dirección fijada, comportamiento idéntico. **Sin CQRS materializado aún.**
 
 ### Fase 8 — Architecture Decision Records
-- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. Agregar ADR-006 (estrategia de Value Objects) y ADR-007 (Sync Handler registry) que este sprint decide.
+- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. Agregar ADR-007 (Sync Handler registry) que este sprint decide. ADR-006 (estrategia de Value Objects) ya se escribió en F2.4, al surgir la decisión.
 
 ### Fase 9 — Estrategia de métricas de calidad
 - **T9.1** Tooling: `vitest` (cobertura), regla de complejidad ciclomática (`eslint`/`ts-complex`), `dpdm`/`madge` (dependencias circulares + grafo de acoplamiento), `jscpd` (duplicación), log de tiempo de compilación.
