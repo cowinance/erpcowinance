@@ -1,8 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
-
-const GESTATION_DAYS = 283; // bovino; en el catálogo, por especie
 
 @Injectable()
 export class ReproService {
@@ -37,7 +36,7 @@ export class ReproService {
       this.db,
       animalId,
       'service',
-      { method: body.method, sire_id: body?.sire_id ?? null, expected_due: new Date(new Date(occurredAt).getTime() + GESTATION_DAYS * 86400000).toISOString().slice(0, 10) },
+      { method: body.method, sire_id: body?.sire_id ?? null, expected_due: computeExpectedDueDateFromService(new Date(occurredAt)) },
       occurredAt,
     );
     return { ...row, tag: animal.tag };
@@ -66,8 +65,8 @@ export class ReproService {
         [body.animal_id, diagnosisDate],
       );
       const expectedDue = lastService
-        ? new Date(new Date(lastService.occurred_at).getTime() + GESTATION_DAYS * 86400000).toISOString().slice(0, 10)
-        : new Date(new Date(diagnosisDate).getTime() + (GESTATION_DAYS - 45) * 86400000).toISOString().slice(0, 10);
+        ? computeExpectedDueDateFromService(new Date(lastService.occurred_at))
+        : computeExpectedDueDateFromDiagnosis(new Date(diagnosisDate));
 
       const row = await this.db.one<any>(
         `INSERT INTO pregnancies (tenant_id, animal_id, breeding_event_id, diagnosis_date, method, expected_due_date, status, created_by)

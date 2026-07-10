@@ -1,51 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import { computeWithdrawal } from '@cowinance/domain';
+import {
+  computeWithdrawal,
+  computeExpectedDueDateFromService,
+  computeExpectedDueDateFromDiagnosis,
+} from '@cowinance/domain';
 
 /**
  * GOLDEN / CHARACTERIZATION TESTS — Fase 0 (red de seguridad).
  *
- * Pinean el comportamiento de las reglas de negocio que la Fase 4 extrae a
+ * Pinean el comportamiento de las reglas de negocio que la Fase 4 extrajo a
  * `packages/domain` (antes duplicadas en health.service.ts, repro.service.ts
- * y apps/mobile/SyncContext.tsx).
- *
- * Retiro (carne/leche) — MIGRADO (F4.1): `referenceMeatWithdrawal`/
- * `referenceMilkWithdrawal` ahora delegan en `computeWithdrawal` real de
- * `@cowinance/domain`. Que esta MISMA tabla de valores siga pasando es la
- * prueba de que la extracción no cambió el comportamiento.
- *
- * Gestación — todavía copia verbatim (pendiente F4.2). Tiene DOS modos que
- * hoy están duplicados de forma consistente en repro.service.ts:68-70 y
- * SyncContext.tsx:557: Modo A (a partir de un servicio conocido) YA estaba
- * pineado acá; Modo B (diagnóstico sin servicio conocido, heurística de
- * -45 días) NO tenía golden test — gap encontrado durante el análisis de
- * F4.2, cerrado acá ANTES de extraer nada (regla: no se puede probar que
- * una extracción no cambia comportamiento que nunca se capturó).
+ * y apps/mobile/SyncContext.tsx). Todas las `reference*` de abajo MIGRADAS:
+ * delegan en la función real del dominio. Que esta MISMA tabla de valores
+ * siga pasando es la prueba de que la extracción no cambió comportamiento.
  */
 
-/** health.service.ts (antes) / packages/domain/health/withdrawal.ts (ahora, F4.1). */
+/** health.service.ts (antes) / packages/domain/health/withdrawal.ts (F4.1). */
 function referenceMeatWithdrawal(appliedAtISO: string, days: number | null): string | null {
   return computeWithdrawal(new Date(appliedAtISO), days, null).meatWithdrawalUntil;
 }
 
-/** health.service.ts (antes) / packages/domain/health/withdrawal.ts (ahora, F4.1). */
+/** health.service.ts (antes) / packages/domain/health/withdrawal.ts (F4.1). */
 function referenceMilkWithdrawal(appliedAtISO: string, hours: number | null): string | null {
   return computeWithdrawal(new Date(appliedAtISO), null, hours).milkWithdrawalUntil;
 }
 
-/** repro.service.ts (Modo A): fecha probable de parto = fecha de servicio + 283 días (solo fecha). */
-const GESTATION_DAYS = 283;
+/** repro.service.ts, Modo A (antes) / packages/domain/reproduction/gestation.ts (F4.2). */
 function referenceExpectedDue(serviceISO: string): string {
-  return new Date(new Date(serviceISO).getTime() + GESTATION_DAYS * 86400000).toISOString().slice(0, 10);
+  return computeExpectedDueDateFromService(new Date(serviceISO));
 }
 
-/**
- * repro.service.ts (Modo B, sin servicio conocido): fecha probable de parto
- * = fecha de diagnóstico + (283 − 45) días. Heurística: se asume que ya
- * transcurrieron ~45 días de gestación al momento del diagnóstico (p. ej.
- * vientre comprado ya preñado, sin registro de servicio en el sistema).
- */
+/** repro.service.ts, Modo B (antes) / packages/domain/reproduction/gestation.ts (F4.2). */
 function referenceExpectedDueFromDiagnosis(diagnosisISO: string): string {
-  return new Date(new Date(diagnosisISO).getTime() + (GESTATION_DAYS - 45) * 86400000).toISOString().slice(0, 10);
+  return computeExpectedDueDateFromDiagnosis(new Date(diagnosisISO));
 }
 
 describe('GOLDEN · retiro de carne (días)', () => {

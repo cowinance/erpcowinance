@@ -6,3 +6,5 @@ export { DomainError } from './shared';
 export * from './value-objects';
 // Servicios de dominio — sanidad (F4.1).
 export * from './health';
+// Servicios de dominio — reproducción (F4.2).
+export * from './reproduction';

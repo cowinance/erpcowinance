@@ -9,15 +9,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, PushResult, PullResult } from '@cowinance/sync-core';
-import { computeWithdrawal } from '@cowinance/domain';
+import { computeWithdrawal, computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
 import { createStorage } from './storage';
 import type { DeviceStorage, PersistedMeta } from './storage.types';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
 const AUTO_SYNC_INTERVAL_MS = 60_000;
 const POST_CAPTURE_DEBOUNCE_MS = 2_500;
-
-const GESTATION_DAYS = 283;
 
 export interface AnimalRow {
   id: string;
@@ -554,9 +552,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
                 if (!serviceAt || at > serviceAt) serviceAt = at;
               }
             }
-          const expectedDue = new Date((serviceAt ?? new Date(now.getTime() - 45 * 86400000)).getTime() + GESTATION_DAYS * 86400000)
-            .toISOString()
-            .slice(0, 10);
+          const expectedDue = serviceAt
+            ? computeExpectedDueDateFromService(serviceAt)
+            : computeExpectedDueDateFromDiagnosis(now);
           d.setFields('pregnancies', Crypto.randomUUID(), {
             animal_id: animalId,
             status: 'open',
