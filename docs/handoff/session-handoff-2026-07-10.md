@@ -9,7 +9,7 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP para ganadería, agricultura y administración de fincas**, offline-first y multi-tenant, especificada en 14 documentos (`docs/*.docx`). El **alcance funcional ganadero de la Fase 1 del producto está completo y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa de potreros, Reportes, Alertas, Fotos, Planes sanitarios, Vademécum), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 2 packages (`sync-core`, `domain`). En este momento el proyecto está **pausado en features** y en curso de un **Foundation Hardening Sprint** (mejora de arquitectura sin cambiar comportamiento). Vamos por **F2.4 completada** (VO `Sex`; `Breed` evaluado y descartado, ADR-0006); el siguiente paso es **F3 (Domain Errors + `DomainExceptionFilter`)**.
+Cowinance es una **plataforma ERP para ganadería, agricultura y administración de fincas**, offline-first y multi-tenant, especificada en 14 documentos (`docs/*.docx`). El **alcance funcional ganadero de la Fase 1 del producto está completo y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa de potreros, Reportes, Alertas, Fotos, Planes sanitarios, Vademécum), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 2 packages (`sync-core`, `domain`). En este momento el proyecto está **pausado en features** y en curso de un **Foundation Hardening Sprint** (mejora de arquitectura sin cambiar comportamiento). Vamos por **F3 completada** (`DomainExceptionFilter`; catálogo de errores nuevos diferido a F4, ver ADR-0006); el siguiente paso es **F4 (servicios de dominio — elimina la triplicación de reglas)**.
 
 ### Estado general del repositorio
 - **Working tree:** limpio (solo `.claude/settings.local.json` sin trackear/ignorar; irrelevante).
@@ -20,7 +20,7 @@ Cowinance es una **plataforma ERP para ganadería, agricultura y administración
 `main` (siempre se trabaja acá; los commits son pequeños y directos).
 
 ### Último commit
-`feat(domain): Value Object Sex — sexo del animal (F2.4)` (ver git log; commits F2.3 `Weight` y F2.4 `Sex` posteriores a `12897d0`)
+`feat(api): DomainExceptionFilter (F3)` (ver git log; commits F2.3 `Weight`, F2.4 `Sex` y F3 `DomainExceptionFilter` posteriores a `12897d0`)
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
@@ -29,12 +29,12 @@ Cowinance es una **plataforma ERP para ganadería, agricultura y administración
 - `tsc` (packages/domain, puro) — **limpio**.
 
 ### Estado de las pruebas
-- **76 tests verdes**, 9 archivos (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio, y VOs de dominio (Brand, ids, TagNumber, Weight, Sex).
+- **78 tests verdes**, 10 archivos (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio, VOs de dominio (Brand, ids, TagNumber, Weight, Sex) y `DomainExceptionFilter` (prueba de cableado).
 - **Suite de convergencia de sync:** 2000/2000 (100%).
-- **E2E HTTP:** auth 15/15, sync 19/19 (requieren la api corriendo).
+- **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras F3** con la api corriendo y el filtro registrado; respuestas de error byte a byte idénticas al baseline pre-F3 (verificación empírica con `curl`, ver §3).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint** en curso. Completadas: **F0, F1, F2.1, F2.2, F2.3, F2.4**. Siguiente: **F3**. Ver §5.
+**Foundation Hardening Sprint** en curso. Completadas: **F0, F1, F2.1, F2.2, F2.3, F2.4, F3**. Siguiente: **F4**. Ver §5.
 
 ---
 
@@ -67,11 +67,13 @@ UI → Application → **Domain** → Infrastructure, con:
 - **Estructura de dominio perezosa (YAGNI):** no se crean carpetas vacías; se crean cuando reciben código real (documentado en ADR-0004).
 - **Precisión numérica es decisión del dominio, no de la persistencia** (F2.3): `WEIGHT_SCALE` es una constante explícita en `packages/domain`, no se infiere del `numeric(14,3)` del schema — el comportamiento del dominio debe ser idéntico si cambia el motor de base de datos.
 - **Checklist obligatorio de 5 preguntas antes de implementar un VO nuevo** (F2.4, ADR-0006): invariante que protege, errores que evita vs. primitivo, comportamiento propio, módulos consumidores, por qué VO y no primitivo. Si una entidad/catálogo existente ya cubre el concepto (caso `Breed`), no se crea el VO.
+- **El mismo criterio se generalizó a `DomainError`** (F3, extensión ADR-0006): no se crea un error de dominio sin una función pura de dominio (o caso de uso concreto) que lo necesite lanzar. Regla permanente ampliada: ninguna abstracción de dominio se crea sin demostrar antes qué problema real resuelve y por qué las abstracciones existentes no alcanzan.
+- **`DomainExceptionFilter` mapea con status fijo 400**, sin tabla código→status (F3): todo `DomainError` existente es de validación; una tabla de mapeo para statuses que no existen todavía sería especulativa.
 
 ### ADR existentes
 - `docs/adr/README.md` — índice y proceso.
 - `docs/adr/0004-domain-package.md` — **aceptado**. Paquete de dominio puro + política YAGNI de carpetas.
-- `docs/adr/0006-value-object-strategy.md` — **aceptado**. Checklist de 5 preguntas para admitir un VO; `Breed` descartado (ya es entidad de catálogo), `Sex` aceptado.
+- `docs/adr/0006-value-object-strategy.md` — **aceptado**. Checklist de 5 preguntas para admitir un VO; `Breed` descartado (ya es entidad de catálogo), `Sex` aceptado. **Extendido en F3** a `DomainError`: catálogo especulativo de T3.1 diferido íntegro a F4.
 - Pendientes (F8): 0001 Monolito Modular, 0002 PGlite+PostgreSQL, 0003 Offline-First, 0005 Event Bus, 0007 Sync Handler registry.
 
 ### Principios que gobiernan el proyecto
@@ -138,18 +140,28 @@ Ver §8 (Reglas permanentes). En síntesis: dominio puro, una regla en un solo l
 **Resultado:** 76 tests totales verdes. Sin migrar consumidores.
 **Validación:** build puro, suite completa verde, madge 0.
 
+### F3 — `DomainExceptionFilter`; catálogo de errores nuevo diferido
+**Objetivo:** que los `DomainError` existentes puedan atravesar la capa HTTP sin romper el contrato, aplicando el mismo criterio de admisión de abstracciones (ahora también a errores) antes de construir una jerarquía nueva.
+**Qué:**
+- **Inventario previo** de los ~65 códigos de error de `apps/api` (grep exhaustivo), clasificados en 6 grupos (auth, campos faltantes, not-found, reglas reales, protocolo de sync, media/infra). Ninguno de los 5 candidatos originales de T3.1 (`DuplicateTag`, `InvalidPregnancy`, `AnimalAlreadyExists`, `TreatmentExpired`, `InvalidMovement`) tiene hoy una función pura de dominio que lo necesite — todos requieren I/O. **Se difieren a F4**, y solo si el servicio de dominio puro correspondiente termina necesitándolos.
+- **Verificación empírica del contrato HTTP** (api corriendo + `curl`, con token real): confirmado que `BadRequestException`/`NotFoundException`/`UnauthorizedException` con `{code,title}` serializan **exactamente** `{"code":"...","title":"..."}`, sin `statusCode`/`message`/`error` — y que rutas que no pasan por esta convención (404 de Nest genuino) usan un shape totalmente distinto, que el filtro no debe tocar.
+- **`DomainExceptionFilter`** (`apps/api/src/common/domain-exception.filter.ts`): `@Catch(DomainError)`, produce `{code, title}` con status 400 fijo (todo `DomainError` de hoy es de validación; sin mapa código→status especulativo). Registrado globalmente en `main.ts`.
+- **`@cowinance/domain` agregado como dependencia real de `apps/api`** (faltaba — solo `sync-core` estaba declarado).
+- Decisión documentada como **extensión de ADR-0006**: el criterio "invariante real antes que patrón" generalizado a toda abstracción de dominio, con un checklist adaptado a errores (regla que representa, decisión que habilita, por qué no alcanza un error genérico, capa que debe conocerlo, estabilidad como contrato).
+**Resultado:** 78 tests totales verdes (incluye prueba de cableado del filtro). Regresión HTTP verificada byte a byte idéntica; `auth-e2e` 15/15 y `sync-e2e` 19/19 re-verificados con el filtro activo.
+**Validación:** build puro, `nest build`, suite completa verde, madge 0, E2E verdes, curl manual antes/después.
+
 ---
 
 ## 4. Trabajo pendiente (por prioridad)
 
 ### Sprint actual (Foundation Hardening) — lo inmediato
-1. **F3** Domain Errors + `DomainExceptionFilter` ← siguiente paso (ver §9).
-2. **F4** Servicios de dominio (elimina la duplicación de reglas) + adopción de VOs en consumidores.
-3. **F6** Sync → SyncHandler registry.
-4. **F5** Event Bus + Outbox.
-7. **F7** Dashboard → service + costura de proyección.
-8. **F8** ADRs restantes.
-9. **F9** Métricas de calidad (formalizar tooling + `npm run audit:arch`).
+1. **F4** Servicios de dominio (elimina la duplicación de reglas) + adopción de VOs en consumidores ← siguiente paso (ver §9). Nuevos `DomainError` específicos, si surgen, se justifican ahí (ver ADR-0006).
+2. **F6** Sync → SyncHandler registry.
+3. **F5** Event Bus + Outbox.
+4. **F7** Dashboard → service + costura de proyección.
+5. **F8** ADRs restantes (0006 ya cubre parte de lo previsto para ADR de estrategia de VOs/errores).
+6. **F9** Métricas de calidad (formalizar tooling + `npm run audit:arch`).
 
 ### Próximo sprint (tras el hardening): reanudar features de Fase 1
 - **Onboarding de 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min").
@@ -175,8 +187,8 @@ Inventario, Compras/Ventas/CRM, Finanzas/Contabilidad, Agricultura, Pasturas, Le
 | **F2.1** | VOs de identidad (TenantId, FarmId, AnimalId, LotId) | ✅ Completado |
 | **F2.2** | VO `TagNumber` (caravana visual) | ✅ Completado |
 | **F2.3** | VO `Weight` (kg canónico + presentación lb) | ✅ Completado |
-| **F2.4** | VO `Sex`; `Breed` evaluado y descartado (ADR-0006) | ✅ Completado ← **siguiente: F3** |
-| **F3** | Domain Errors + `DomainExceptionFilter` (mapea a HTTP actual) | ⏳ Pendiente |
+| **F2.4** | VO `Sex`; `Breed` evaluado y descartado (ADR-0006) | ✅ Completado |
+| **F3** | `DomainExceptionFilter` (T3.1 catálogo de errores reducido — ver ADR-0006 extensión) | ✅ Completado ← **siguiente: F4** |
 | **F4** | Servicios de dominio (retiro/gestación/categoría) + adopción de VOs + recompute en sync | ⏳ Pendiente |
 | **F5** | Event Bus (EventEmitter2) + Outbox (instalar, no migrar consumidores) | ⏳ Pendiente |
 | **F6** | Sync → `SyncHandler` registry (elimina el switch de `sync.service`) | ⏳ Pendiente |
@@ -240,16 +252,11 @@ Acordadas y **obligatorias**:
 
 > **Único siguiente paso recomendado:**
 
-**Implementar F3 — Domain Errors + `DomainExceptionFilter`**, en `packages/domain/src/shared/` (jerarquía de errores) y `apps/api/src/common/domain-exception.filter.ts` (mapeo a la respuesta HTTP RFC 9457 **actual**, sin cambiarla).
+**Implementar F4 — Servicios de dominio** (el núcleo del sprint: elimina la triplicación de reglas). Funciones puras en `packages/domain` (T4.1 del sprint doc): `computeWithdrawal(product, appliedAt)`, `computeExpectedDueDate(serviceDate)`, `classifyCategory(...)` — usando el oráculo de `docs/golden/business-rules.md` para no cambiar comportamiento. Luego reescribir `health.service`, `repro.service` y `SyncContext` móvil para usar **las mismas** funciones (fuente única), y hacer que el servidor de sync recompute (servidor = fuente de verdad).
 
-Alcance (T3.1/T3.2 del sprint):
-- `DomainError` base ya existe (F2.1, mínima). Agregar los errores específicos que F4 va a necesitar: `DuplicateTag`, `InvalidPregnancy`, `AnimalAlreadyExists`, `TreatmentExpired`, `InvalidMovement` (y los que surjan al escribir los servicios de dominio de F4) — **cada uno solo si F4 lo va a usar de inmediato** (YAGNI; no adelantar errores sin consumidor, mismo criterio que ADR-0006 aplicado a errores).
-- `DomainExceptionFilter`: filtro NestJS que atrapa `DomainError` y lo mapea a la misma forma HTTP que hoy producen los `BadRequestException`/similares — **behavior-preserving**, se verifica con diff de respuesta antes/después.
-- Sin migrar todavía los `throw new BadRequestException(...)` existentes a `DomainError` (eso ocurre en F4, junto con la extracción de los servicios de dominio que los usan).
+Es también el momento de **migrar los VOs existentes a sus consumidores** (Opción B se cierra acá: `TagNumber`, `Weight`, `Sex` dejan de estar sin usar) y de **evaluar, caso por caso, si algún `DomainError` nuevo es necesario** — con el criterio ya fijado en ADR-0006 (extensión F3): solo si la función pura de dominio recién escrita necesita señalar esa violación específica, no antes.
 
-Antes de escribir cualquier error nuevo, releer la Regla Permanente 9 (`DomainError` extremadamente simple) y confirmar con Jose si algún error propuesto necesita ese mismo criterio explícito que se aplicó a los VOs en F2.4.
-
-Después de F3 → pausa de revisión → F4 (el núcleo del sprint: elimina la triplicación de reglas).
+Después de F4 → pausa de revisión → F6 (Sync → SyncHandler registry, usa los servicios de dominio recién creados).
 
 ---
 
@@ -261,8 +268,8 @@ Después de F3 → pausa de revisión → F4 (el núcleo del sprint: elimina la 
 4. **Este handoff** (`docs/handoff/session-handoff-2026-07-10.md`).
 5. **`docs/quality-baseline.md`** — números de partida y estrategia de métricas.
 6. **`docs/golden/business-rules.md`** — comportamiento congelado de las reglas (retiro, gestación, dup-tag, convergencia). **Oráculo para no romper nada.**
-7. **`docs/adr/`** — `README.md` + `0004-domain-package.md` + `0006-value-object-strategy.md` (checklist de 5 preguntas para admitir un VO nuevo — **leer antes de proponer cualquier VO**).
-8. **`packages/domain/src/`** — `shared/brand.ts`, `shared/domain-error.ts`, `value-objects/identifier.ts`, `value-objects/ids.ts`, `value-objects/tag-number.ts`, `value-objects/weight.ts`, `value-objects/sex.ts` (el patrón companion a seguir en F3+).
+7. **`docs/adr/`** — `README.md` + `0004-domain-package.md` + `0006-value-object-strategy.md` (checklist de 5 preguntas para admitir un VO **y** un `DomainError` nuevo, extensión F3 — **leer antes de proponer cualquier abstracción de dominio**).
+8. **`packages/domain/src/`** — `shared/brand.ts`, `shared/domain-error.ts`, `value-objects/identifier.ts`, `value-objects/ids.ts`, `value-objects/tag-number.ts`, `value-objects/weight.ts`, `value-objects/sex.ts` (el patrón companion a seguir en F4+). `apps/api/src/common/domain-exception.filter.ts` — cómo un `DomainError` llega a HTTP.
 9. **`packages/sync-core/src/`** — motor de sync (HLC, changesets, merge, sim). Setup de package puro a replicar.
 10. **`apps/api/src/`** — `db/db.service.ts`, `db/query.ts`, `common/request-context.ts` (RLS + tx), `modules/sync/sync.service.ts` (God object a partir en F6), `modules/dashboard/dashboard.controller.ts` (SQL a extraer en F7).
 11. **Especificación del producto** (`.docx` en `docs/`): `Cowinance_Arquitectura`, `Cowinance_Roadmap`, `Cowinance_Catalogo_Modulos`, `Cowinance_Modelo_Datos`, `Cowinance_Design_System`, `Cowinance_APIs`, y los módulos.
@@ -274,7 +281,7 @@ Después de F3 → pausa de revisión → F4 (el núcleo del sprint: elimina la 
 
 | Métrica | Baseline (F0) | Actual (2026-07-10) | Objetivo |
 |---|---|---|---|
-| **Tests** | 34 verdes | **76 verdes** (9 archivos) | crecer con cada fase |
+| **Tests** | 34 verdes | **78 verdes** (10 archivos) | crecer con cada fase |
 | **Cobertura** | no medida | no medida formalmente (dominio bien cubierto) | dominio ≥ 90% (F9) |
 | **Dependencias circulares** (madge) | **1** | **0** ✅ | 0 |
 | **Duplicación** (jscpd) | 0.89% sintáctica | ~igual; duplicación **semántica** de reglas **aún presente** | ≤1% y **0 reglas duplicadas** (F4) |
@@ -288,10 +295,10 @@ Comandos: `npm test` (Vitest) · `npm run build -w @cowinance/domain` · `cd app
 
 ## 12. Resumen final — "¿Qué necesita saber un arquitecto para no cometer errores?"
 
-Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. **Hoy NO se agregan features**: estamos en un **Foundation Hardening Sprint** que mejora la arquitectura **sin cambiar comportamiento** (F0-F2.4 hechas; sigue F3 Domain Errors). La regla número uno: **behavior-preserving** — antes y después de cada cambio, la API, la convergencia de sync y la UI deben ser idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `auth-e2e` 15/15, `sync-e2e` 19/19, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
+Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. **Hoy NO se agregan features**: estamos en un **Foundation Hardening Sprint** que mejora la arquitectura **sin cambiar comportamiento** (F0-F3 hechas; sigue F4, el núcleo del sprint). La regla número uno: **behavior-preserving** — antes y después de cada cambio, la API, la convergencia de sync y la UI deben ser idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `auth-e2e` 15/15, `sync-e2e` 19/19, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
 
-El corazón de la deuda es **una misma regla de negocio escrita en 3 lugares** (retiro sanitario y fecha de parto, en `health.service`, `repro.service` y el `SyncContext` móvil). No la "arregles" ad-hoc: **se elimina en F4** creando servicios de dominio puros en `packages/domain`, y por eso **no migramos consumidores todavía** (Opción B) — así cada archivo se toca una sola vez. `packages/domain` es **sagrado: 100% puro**, sin ninguna dependencia de infraestructura (el `tsconfig` lo fuerza; si un import no compila, es a propósito). Aplicá **YAGNI** con rigor: nada de Result/Either, fábricas de errores, carpetas vacías ni abstracciones "por si acaso"; si diferís algo, escribí un ADR. Un **Value Object** solo existe si aporta validación, type-safety, comportamiento, inmutabilidad o elimina duplicación — y desde F2.4 (**ADR-0006**) esto se verifica con un checklist explícito de 5 preguntas **antes** de escribir código; no asumas que un concepto del lenguaje ubicuo necesita VO solo porque está en la lista (`Breed` es el caso de estudio: ya era una entidad de catálogo, no un VO).
+El corazón de la deuda es **una misma regla de negocio escrita en 3 lugares** (retiro sanitario y fecha de parto, en `health.service`, `repro.service` y el `SyncContext` móvil). No la "arregles" ad-hoc: **se elimina en F4** creando servicios de dominio puros en `packages/domain`, y por eso **no migramos consumidores todavía** (Opción B) — así cada archivo se toca una sola vez. `packages/domain` es **sagrado: 100% puro**, sin ninguna dependencia de infraestructura (el `tsconfig` lo fuerza; si un import no compila, es a propósito). Aplicá **YAGNI** con rigor: nada de Result/Either, fábricas de errores, carpetas vacías ni abstracciones "por si acaso"; si diferís algo, escribí un ADR. Un **Value Object** solo existe si aporta validación, type-safety, comportamiento, inmutabilidad o elimina duplicación — y desde F2.4 (**ADR-0006**) esto se verifica con un checklist explícito de 5 preguntas **antes** de escribir código; no asumas que un concepto del lenguaje ubicuo necesita VO solo porque está en la lista (`Breed` es el caso de estudio: ya era una entidad de catálogo, no un VO). **F3 extendió el mismo principio a `DomainError`**: no se crea un error de dominio nuevo sin que exista ya una función pura de dominio (o caso de uso concreto) que lo necesite lanzar — el catálogo especulativo original de F3 (`DuplicateTag`, `InvalidPregnancy`, `AnimalAlreadyExists`, `TreatmentExpired`, `InvalidMovement`) quedó diferido a F4 por esta misma razón. En general: **ninguna abstracción de dominio se crea sin demostrar antes qué problema real resuelve.**
 
 Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q`; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`). No hay CI ni remoto Git — **creá el remoto pronto** (todo vive local) y corré los gates a mano. El servidor es la fuente de verdad en sync. Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
 
-**Siguiente acción concreta:** implementar **F3 — Domain Errors + `DomainExceptionFilter`** (§9).
+**Siguiente acción concreta:** implementar **F4 — servicios de dominio** (§9), el núcleo del sprint.

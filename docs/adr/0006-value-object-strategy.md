@@ -71,3 +71,31 @@ del Foundation Hardening Sprint y en adelante.
 - **Explícitamente fuera de alcance:** modelar la composición racial (`animal_breeds`, suma de
   fracciones) como agregado de dominio — se evalúa cuando exista una necesidad concreta de
   validarla (p. ej. al construir alta de composición racial en UI, o en F4).
+
+## Extensión (F3) — el mismo criterio aplica a Domain Errors
+
+F3 (Domain Errors + `DomainExceptionFilter`) partía de un catálogo propuesto de antemano:
+`DuplicateTag`, `InvalidPregnancy`, `AnimalAlreadyExists`, `TreatmentExpired`, `InvalidMovement`.
+Antes de implementarlo, se aplicó el mismo principio de esta ADR — generalizado a **toda**
+abstracción de dominio, no solo Value Objects — con un criterio adaptado a errores:
+
+1. Qué regla de dominio representa (¿la reconoce un usuario, o es un detalle técnico?).
+2. Qué decisión distinta permite tomar al consumidor (UI, recuperación, auditoría).
+3. Por qué un error genérico no alcanza.
+4. Qué capa debe conocerlo (dominio / application / infraestructura).
+5. Qué estabilidad tiene como contrato interno (evitar explosión de tipos).
+
+Un inventario completo de los ~65 códigos de error de `apps/api` mostró que **ninguno de los 5
+candidatos originales tiene hoy una función pura de dominio que lo necesite**: todos requieren
+leer estado externo (existencia previa del animal, diagnóstico reproductivo abierto, catálogos) —
+exactamente el mismo problema que tenía `Breed` como VO. Se diferieron los 5, sin excepción.
+
+**Regla general que queda fijada** (no solo para VOs): **no se crea una abstracción de dominio
+nueva sin demostrar antes qué problema real resuelve y por qué las abstracciones existentes no
+alcanzan.** Para Domain Errors específicamente: no se crea un error de dominio sin que exista ya
+una función pura de dominio (o un caso de uso concreto) que lo necesite lanzar.
+
+F3 sí implementó `DomainExceptionFilter` (la plomería que traduce `DomainError` → HTTP), porque
+eso **sí** tiene necesidad concreta hoy: los 4 `DomainError` de F2 (`InvalidIdentifier`,
+`InvalidTagNumber`, `InvalidWeight`, `InvalidSex`) necesitan poder atravesar la capa HTTP sin
+romper el contrato cuando se migren consumidores en F4.
