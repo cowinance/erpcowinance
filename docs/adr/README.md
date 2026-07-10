@@ -14,6 +14,7 @@ numerado `NNNN-titulo.md`. Estados: `propuesto` · `aceptado` · `reemplazado po
 | [0006](0006-value-object-strategy.md) | Estrategia de Value Objects: invariante real antes que patrón DDD | aceptado |
 | [0007](0007-server-authority-derived-values.md) | Server Authority sobre valores derivados de reglas de dominio | aceptado |
 | [0008](0008-sync-handler-ownership.md) | Ownership de SyncHandlers: el dominio los posee, sync coordina | aceptado |
+| [0009](0009-animal-history-bounded-context.md) | `AnimalHistoryModule`: bounded context permanente para la línea de tiempo del animal | aceptado |
 
 Pendientes (se documentan en F8 del Foundation Hardening Sprint):
 `0001` Monolito Modular · `0002` PGlite y PostgreSQL · `0003` Arquitectura Offline-First · `0005` Event Bus interno.
