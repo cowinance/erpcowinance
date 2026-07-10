@@ -13,7 +13,13 @@ import { computeWithdrawal } from '@cowinance/domain';
  * `@cowinance/domain`. Que esta MISMA tabla de valores siga pasando es la
  * prueba de que la extracción no cambió el comportamiento.
  *
- * Gestación — todavía copia verbatim (pendiente F4.2).
+ * Gestación — todavía copia verbatim (pendiente F4.2). Tiene DOS modos que
+ * hoy están duplicados de forma consistente en repro.service.ts:68-70 y
+ * SyncContext.tsx:557: Modo A (a partir de un servicio conocido) YA estaba
+ * pineado acá; Modo B (diagnóstico sin servicio conocido, heurística de
+ * -45 días) NO tenía golden test — gap encontrado durante el análisis de
+ * F4.2, cerrado acá ANTES de extraer nada (regla: no se puede probar que
+ * una extracción no cambia comportamiento que nunca se capturó).
  */
 
 /** health.service.ts (antes) / packages/domain/health/withdrawal.ts (ahora, F4.1). */
@@ -26,10 +32,20 @@ function referenceMilkWithdrawal(appliedAtISO: string, hours: number | null): st
   return computeWithdrawal(new Date(appliedAtISO), null, hours).milkWithdrawalUntil;
 }
 
-/** repro.service.ts: fecha probable de parto = fecha de servicio + 283 días (solo fecha). */
+/** repro.service.ts (Modo A): fecha probable de parto = fecha de servicio + 283 días (solo fecha). */
 const GESTATION_DAYS = 283;
 function referenceExpectedDue(serviceISO: string): string {
   return new Date(new Date(serviceISO).getTime() + GESTATION_DAYS * 86400000).toISOString().slice(0, 10);
+}
+
+/**
+ * repro.service.ts (Modo B, sin servicio conocido): fecha probable de parto
+ * = fecha de diagnóstico + (283 − 45) días. Heurística: se asume que ya
+ * transcurrieron ~45 días de gestación al momento del diagnóstico (p. ej.
+ * vientre comprado ya preñado, sin registro de servicio en el sistema).
+ */
+function referenceExpectedDueFromDiagnosis(diagnosisISO: string): string {
+  return new Date(new Date(diagnosisISO).getTime() + (GESTATION_DAYS - 45) * 86400000).toISOString().slice(0, 10);
 }
 
 describe('GOLDEN · retiro de carne (días)', () => {
@@ -66,7 +82,7 @@ describe('GOLDEN · retiro de leche (horas)', () => {
   });
 });
 
-describe('GOLDEN · gestación (fecha probable de parto)', () => {
+describe('GOLDEN · gestación, Modo A (fecha probable de parto desde servicio)', () => {
   it.each([
     ['2026-06-02T08:00:00.000Z', '2027-03-12'], // confirmado en la app (vaca 126)
     ['2026-01-01T00:00:00.000Z', '2026-10-11'],
@@ -79,5 +95,30 @@ describe('GOLDEN · gestación (fecha probable de parto)', () => {
     const due = referenceExpectedDue(service);
     const diff = (Date.parse(`${due}T00:00:00.000Z`) - Date.parse('2026-05-20T00:00:00.000Z')) / 86400000;
     expect(diff).toBe(283);
+  });
+});
+
+describe('GOLDEN · gestación, Modo B (fecha probable de parto desde diagnóstico sin servicio conocido)', () => {
+  it.each([
+    ['2026-06-02T00:00:00.000Z', '2027-01-26'],
+    ['2026-01-01T00:00:00.000Z', '2026-08-27'],
+    ['2026-11-20T00:00:00.000Z', '2027-07-16'],
+  ])('diagnóstico %s + 238 días (283 − 45) → %s', (diagnosis, expected) => {
+    expect(referenceExpectedDueFromDiagnosis(diagnosis)).toBe(expected);
+  });
+
+  it('propiedad: son exactamente 238 días (283 − 45)', () => {
+    const diagnosis = '2026-05-20T00:00:00.000Z';
+    const due = referenceExpectedDueFromDiagnosis(diagnosis);
+    const diff = (Date.parse(`${due}T00:00:00.000Z`) - Date.parse('2026-05-20T00:00:00.000Z')) / 86400000;
+    expect(diff).toBe(238);
+  });
+
+  it('Modo A y Modo B difieren en exactamente 45 días para la misma fecha de entrada', () => {
+    const date = '2026-05-20T00:00:00.000Z';
+    const dueA = referenceExpectedDue(date);
+    const dueB = referenceExpectedDueFromDiagnosis(date);
+    const diff = (Date.parse(`${dueA}T00:00:00.000Z`) - Date.parse(`${dueB}T00:00:00.000Z`)) / 86400000;
+    expect(diff).toBe(45);
   });
 });
