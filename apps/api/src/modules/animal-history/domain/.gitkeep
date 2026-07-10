@@ -1,0 +1,5 @@
+Carpeta preparada, deliberadamente vacía (ADR-0009).
+Se puebla cuando exista una regla de dominio real de la línea de tiempo
+del animal — no antes (Regla Permanente 4). No es precedente para crear
+estructura vacía en otros módulos: la excepción está justificada
+específicamente en ADR-0009.

@@ -5,6 +5,7 @@ import { HerdModule } from './modules/herd/herd.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { SyncRegistryModule } from './modules/sync/registry/sync-registry.module';
+import { AnimalHistoryModule } from './modules/animal-history/animal-history.module';
 import { HealthModule } from './modules/health/health.module';
 import { ReproModule } from './modules/repro/repro.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -19,6 +20,6 @@ import { MediaModule } from './modules/media/media.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, SyncRegistryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule],
+  imports: [DbModule, SyncRegistryModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule],
 })
 export class AppModule {}

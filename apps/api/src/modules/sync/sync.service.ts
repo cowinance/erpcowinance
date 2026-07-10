@@ -38,7 +38,8 @@ const ANIMAL_FIELDS = new Set([
 const PREGNANCY_FIELDS = new Set(['animal_id', 'status', 'diagnosis_date', 'expected_due_date', 'method', 'closed_at']);
 
 // 'treatments' migró al registry (F6.1, TreatmentSyncHandler) — ya no pasa por applyEvent.
-const EVENT_TABLES = new Set(['weighings', 'animal_events', 'vaccinations', 'breeding_events', 'calvings', 'calving_offspring']);
+// 'animal_events' migró al registry (F6.3, AnimalEventSyncHandler en animal-history/) — ya no pasa por applyEvent.
+const EVENT_TABLES = new Set(['weighings', 'vaccinations', 'breeding_events', 'calvings', 'calving_offspring']);
 
 @Injectable()
 export class SyncService {
@@ -521,7 +522,7 @@ export class SyncService {
     return conflicts;
   }
 
-  /** Tablas evento restantes (sin lógica de negocio) — 'treatments' migró al registry (F6.1). */
+  /** Tablas evento restantes (sin lógica de negocio) — 'treatments' (F6.1) y 'animal_events' (F6.3) migraron al registry. */
   private async applyEvent(q: Q, table: string, rowId: string, row: Record<string, unknown>): Promise<void> {
     const t = this.db.tenant;
     if (table === 'weighings') {
@@ -537,20 +538,6 @@ export class SyncService {
           row['method'] ?? 'scale',
           row['body_condition'] ?? null,
           null, // device_id referencia a dispositivos IoT (báscula), no al sync_device
-        ],
-      );
-    } else if (table === 'animal_events') {
-      await q.query(
-        `INSERT INTO animal_events (id, tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'manual') ON CONFLICT (id) DO NOTHING`,
-        [
-          rowId,
-          t,
-          row['animal_id'],
-          row['event_type'] ?? 'note',
-          JSON.stringify(row['payload'] ?? {}),
-          row['occurred_at'] ?? new Date().toISOString(),
-          row['recorded_at'] ?? new Date().toISOString(),
         ],
       );
     } else if (table === 'vaccinations') {

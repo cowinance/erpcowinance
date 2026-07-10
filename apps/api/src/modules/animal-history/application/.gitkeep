@@ -1,0 +1,4 @@
+Carpeta preparada, deliberadamente vacía (ADR-0009).
+Se puebla cuando exista un caso de uso real de esta capa — no antes
+(Regla Permanente 4). No es precedente para crear estructura vacía en
+otros módulos: la excepción está justificada específicamente en ADR-0009.
