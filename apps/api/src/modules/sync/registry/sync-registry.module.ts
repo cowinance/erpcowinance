@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { SyncHandlerRegistry } from './sync-handler.registry';
 import { SyncConflictWriter } from './sync-conflict.writer';
+import { SyncVersionStore } from './sync-version.store';
 
 /**
  * Infraestructura transversal de sync (ADR-0008), disponible en cualquier
@@ -13,7 +14,7 @@ import { SyncConflictWriter } from './sync-conflict.writer';
  */
 @Global()
 @Module({
-  providers: [SyncHandlerRegistry, SyncConflictWriter],
-  exports: [SyncHandlerRegistry, SyncConflictWriter],
+  providers: [SyncHandlerRegistry, SyncConflictWriter, SyncVersionStore],
+  exports: [SyncHandlerRegistry, SyncConflictWriter, SyncVersionStore],
 })
 export class SyncRegistryModule {}

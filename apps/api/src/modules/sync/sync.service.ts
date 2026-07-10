@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { applyPut, hlcNode, HlcClock, TERMINAL_STATUS, Changeset, PutOp, RowState } from '@cowinance/sync-core';
+import { applyPut, HlcClock, Changeset, PutOp, RowState } from '@cowinance/sync-core';
 import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
@@ -19,20 +19,6 @@ import { SyncHandlerRegistry } from './registry/sync-handler.registry';
  * participa del mismo mecanismo de HLC que los dispositivos — ver
  * `serverClock` — para no quedar vulnerable a que un push posterior la pise.
  */
-
-/** Columnas de animals que un changeset puede escribir (whitelist v0). */
-const ANIMAL_FIELDS = new Set([
-  'name',
-  'status',
-  'current_lot_id',
-  'current_paddock_id',
-  'notes',
-  'birth_date',
-  'sex',
-  'coat_color',
-  'dam_id',
-  'sire_id',
-]);
 
 /** Columnas de pregnancies que un changeset puede escribir (diagnóstico/cierre offline). */
 const PREGNANCY_FIELDS = new Set(['animal_id', 'status', 'diagnosis_date', 'expected_due_date', 'method', 'closed_at']);
@@ -87,8 +73,6 @@ export class SyncService {
           const handler = this.handlers.get(op.table);
           if (handler) {
             csConflicts.push(...(await handler.apply(q, op, inserted.id)));
-          } else if (op.kind === 'put' && op.table === 'animals') {
-            csConflicts.push(...(await this.applyAnimalPut(q, op, inserted.id)));
           } else if (op.kind === 'put' && op.table === 'pregnancies') {
             csConflicts.push(...(await this.applyPregnancyPut(q, op, inserted.id)));
           } else {
@@ -284,115 +268,6 @@ export class SyncService {
   }
 
   // ── Aplicación de operaciones ─────────────────────────────────────────
-
-  private async applyAnimalPut(q: Q, op: PutOp, changesetDbId: string) {
-    const conflicts: { type: string; entity_id: string; detail: string }[] = [];
-    const t = this.db.tenant;
-
-    const stateRow = await q.one<any>(
-      `SELECT versions FROM sync_row_state WHERE tenant_id = $1 AND table_name = 'animals' AND row_id = $2`,
-      [t, op.rowId],
-    );
-    const existing = await q.one<any>(`SELECT id, status FROM animals WHERE id = $1 AND tenant_id = $2`, [op.rowId, t]);
-    const prev: RowState | undefined = stateRow
-      ? { fields: { status: existing?.status }, versions: stateRow.versions }
-      : undefined;
-
-    // Conflicto semántico: dos estados terminales de nodos distintos
-    const nextStatus = op.fields['status'];
-    const prevStatusHlc = prev?.versions?.['status'];
-    if (
-      typeof nextStatus === 'string' &&
-      TERMINAL_STATUS.has(nextStatus) &&
-      typeof existing?.status === 'string' &&
-      TERMINAL_STATUS.has(existing.status) &&
-      prevStatusHlc &&
-      hlcNode(prevStatusHlc) !== hlcNode(op.hlc)
-    ) {
-      conflicts.push({
-        type: 'semantic',
-        entity_id: op.rowId,
-        detail: `Estado terminal concurrente: '${existing.status}' (previo) vs '${nextStatus}' (entrante)`,
-      });
-    }
-
-    // Duplicado de campo: misma caravana visual creada para otro animal
-    const tag = op.fields['visual_tag'];
-    if (typeof tag === 'string') {
-      const owner = await q.one<any>(
-        `SELECT ai.animal_id FROM animal_identifiers ai
-         WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = $2 AND ai.deleted_at IS NULL
-           AND ai.animal_id != $3 LIMIT 1`,
-        [t, tag, op.rowId],
-      );
-      if (owner) {
-        conflicts.push({
-          type: 'duplicate',
-          entity_id: op.rowId,
-          detail: `Caravana '${tag}' ya existe en otro animal — propuesta de fusión`,
-        });
-      }
-    }
-
-    // LWW por campo con HLC
-    const { state, changed } = applyPut(prev ?? { fields: {}, versions: {} }, op);
-
-    if (!existing) {
-      const species = await q.one<any>(`SELECT id FROM species WHERE code = 'bovine'`);
-      await q.query(
-        `INSERT INTO animals (id, tenant_id, farm_id, species_id, sex, origin, status, created_by)
-         VALUES ($1,$2,$3,$4,$5,'born','active',$6) ON CONFLICT (id) DO NOTHING`,
-        [op.rowId, t, await this.db.defaultFarm(), species.id, (op.fields['sex'] as string) ?? 'F', this.db.user],
-      );
-    }
-
-    // category_code (campo lógico del cliente) → category_id
-    if (typeof op.fields['category_code'] === 'string' && changed.includes('category_code')) {
-      const cat = await q.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [op.fields['category_code']]);
-      if (cat)
-        await q.query(`UPDATE animals SET category_id = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
-          op.rowId,
-          t,
-          cat.id,
-        ]);
-    }
-
-    const columns = changed.filter((f) => ANIMAL_FIELDS.has(f));
-    if (columns.length) {
-      const sets = columns.map((c, i) => `"${c}" = $${i + 3}`).join(', ');
-      await q.query(`UPDATE animals SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
-        op.rowId,
-        t,
-        ...columns.map((c) => op.fields[c]),
-      ]);
-    }
-
-    if (typeof tag === 'string' && changed.includes('visual_tag')) {
-      await q.query(
-        `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value)
-         SELECT $1::uuid, $2::uuid, 'visual', $3::varchar
-         WHERE NOT EXISTS (
-           SELECT 1 FROM animal_identifiers WHERE animal_id = $2::uuid AND type = 'visual' AND value = $3::varchar AND deleted_at IS NULL)`,
-        [t, op.rowId, tag],
-      );
-    }
-
-    await q.query(
-      `INSERT INTO sync_row_state (tenant_id, table_name, row_id, versions)
-       VALUES ($1,'animals',$2,$3)
-       ON CONFLICT (tenant_id, table_name, row_id) DO UPDATE SET versions = $3, updated_at = now()`,
-      [t, op.rowId, JSON.stringify(state.versions)],
-    );
-
-    for (const c of conflicts) {
-      await q.query(
-        `INSERT INTO sync_conflicts (tenant_id, changeset_id, entity_type, entity_id, conflict_type, detail)
-         VALUES ($1,$2,'animals',$3,$4,$5)`,
-        [t, changesetDbId, c.entity_id, c.type, c.detail],
-      );
-    }
-    return conflicts;
-  }
 
   /** Preñeces: el diagnóstico offline crea la fila; el parto/aborto la cierra (LWW por campo). */
   private async applyPregnancyPut(q: Q, op: PutOp, changesetDbId: string) {
