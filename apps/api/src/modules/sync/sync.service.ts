@@ -37,10 +37,6 @@ const ANIMAL_FIELDS = new Set([
 /** Columnas de pregnancies que un changeset puede escribir (diagnóstico/cierre offline). */
 const PREGNANCY_FIELDS = new Set(['animal_id', 'status', 'diagnosis_date', 'expected_due_date', 'method', 'closed_at']);
 
-// 'treatments' migró al registry (F6.1, TreatmentSyncHandler) — ya no pasa por applyEvent.
-// 'animal_events', 'vaccinations' y 'weighings' migraron al registry (F6.3/F6.3-B) — ya no pasan por applyEvent.
-const EVENT_TABLES = new Set(['breeding_events', 'calvings', 'calving_offspring']);
-
 @Injectable()
 export class SyncService {
   /** Nodo HLC del servidor (ADR-0007): un participante más del sistema
@@ -95,8 +91,6 @@ export class SyncService {
             csConflicts.push(...(await this.applyAnimalPut(q, op, inserted.id)));
           } else if (op.kind === 'put' && op.table === 'pregnancies') {
             csConflicts.push(...(await this.applyPregnancyPut(q, op, inserted.id)));
-          } else if (op.kind === 'event' && EVENT_TABLES.has(op.table)) {
-            await this.applyEvent(q, op.table, op.rowId, op.row);
           } else {
             throw new BadRequestException({
               code: 'sync.unsupported_op',
@@ -520,49 +514,6 @@ export class SyncService {
       );
     }
     return conflicts;
-  }
-
-  /** Tablas evento restantes (sin lógica de negocio) — treatments/animal_events/vaccinations/weighings ya migraron al registry. */
-  private async applyEvent(q: Q, table: string, rowId: string, row: Record<string, unknown>): Promise<void> {
-    const t = this.db.tenant;
-    if (table === 'breeding_events') {
-      await q.query(
-        `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-        [
-          rowId,
-          t,
-          row['animal_id'],
-          row['type'] ?? 'heat',
-          row['occurred_at'] ?? new Date().toISOString(),
-          row['sire_id'] ?? null,
-          row['notes'] ?? null,
-          this.db.user,
-        ],
-      );
-    } else if (table === 'calvings') {
-      await q.query(
-        `INSERT INTO calvings (id, tenant_id, pregnancy_id, dam_id, calving_date, ease, offspring_count, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
-        [
-          rowId,
-          t,
-          row['pregnancy_id'] ?? null,
-          row['dam_id'],
-          (row['calving_date'] as string) ?? new Date().toISOString().slice(0, 10),
-          row['ease'] ?? null,
-          row['offspring_count'] ?? 1,
-          row['notes'] ?? null,
-          this.db.user,
-        ],
-      );
-    } else if (table === 'calving_offspring') {
-      await q.query(
-        `INSERT INTO calving_offspring (id, tenant_id, calving_id, animal_id, birth_weight_kg, vitality, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
-        [rowId, t, row['calving_id'], row['animal_id'] ?? null, row['birth_weight_kg'] ?? null, row['vitality'] ?? 'live', this.db.user],
-      );
-    }
   }
 
   private async globalCursor(): Promise<number> {
