@@ -82,16 +82,16 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 - **T5.3** Tabla `outbox` + publicación *después del commit*. Los writes actuales **emiten** el evento (dual-write: se mantiene `insertAnimalEvent` para el timeline y se **agrega** la emisión). Un suscriptor trivial de logging + su test prueban el cableado. **Sin cambiar comportamiento de consumidores.**
 
 ### Fase 6 — Refactor de sync a `SyncHandler` registry
-- **T6.1** Interface `SyncHandler` (`table`, `apply(ctx, op)`), recibiendo el handle transaccional `Q` (mismas fronteras de tx que hoy).
-- **T6.2** Extraer la lógica por tabla del `switch` a handlers **co-ubicados con su módulo** (herd → animal/weighing; health → vaccination/treatment; repro → breeding/pregnancy/calving).
-- **T6.3** Registry que resuelve el handler por tabla; `sync.service` queda como orquestación. **Open/Closed:** módulo nuevo = handler nuevo, cero ediciones a `sync.service`.
+- **T6.1 — hecho.** Interface `SyncHandler` (`sync/contracts/sync-handler.interface.ts`: `table`, `apply(q, op, changesetDbId)`), recibiendo el handle transaccional `Q` (mismas fronteras de tx que hoy — ver análisis F6 §3: la transacción real vive alrededor de la request HTTP completa, abierta por `AuthInterceptor`, no por changeset).
+- **T6.2 — piloto hecho (`treatments`), resto pendiente.** F6.1 migró `TreatmentSyncHandler` primero **dentro de `sync/`** (desviación del plan original); revisado y corregido en el mismo ciclo (**ADR-0008**) a **co-ubicado con su módulo** (`health/sync/treatment-sync.handler.ts`) — que era el diseño original de este ítem. `animals`→herd, `pregnancies`→repro, y las 6 tablas evento restantes quedan pendientes (oleadas 2-4, ver análisis F6 §5).
+- **T6.3 — hecho.** `SyncHandlerRegistry` (`sync/registry/`) resuelve el handler por tabla; `sync.service` queda como orquestación pura, sin importar módulos de dominio. **Open/Closed a nivel de módulo** (no solo de tabla, ADR-0008): un handler nuevo se auto-registra vía `OnModuleInit` desde su propio módulo — cero ediciones a `sync.service` **y** cero ediciones a `sync.module.ts`. Mecanismo: `SyncRegistryModule` (`@Global()`, mismo patrón que `DbModule`) expone el registry a cualquier módulo sin imports cruzados.
 
 ### Fase 7 — Costura de desacople del dashboard
 - **T7.1** Crear `dashboard.service`; mover las 22 consultas SQL fuera del controlador.
 - **T7.2** Interface `DashboardProjection` con una impl `LiveQueryProjection` (hoy el mismo SQL; mañana proyecciones). Dirección fijada, comportamiento idéntico. **Sin CQRS materializado aún.**
 
 ### Fase 8 — Architecture Decision Records
-- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. Agregar ADR-008 (Sync Handler registry) que este sprint decide. ADR-006 (estrategia de Value Objects, F2.4) y ADR-007 (Server Authority sobre valores derivados, F4.4) ya se escribieron al surgir la decisión.
+- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. ADR-006 (estrategia de Value Objects, F2.4), ADR-007 (Server Authority sobre valores derivados, F4.4) y **ADR-008 (ownership de SyncHandlers, F6.1)** ya se escribieron al surgir la decisión — quedan pendientes solo los ADR retrospectivos (0001-0003, 0005).
 
 ### Fase 9 — Estrategia de métricas de calidad
 - **T9.1** Tooling: `vitest` (cobertura), regla de complejidad ciclomática (`eslint`/`ts-complex`), `dpdm`/`madge` (dependencias circulares + grafo de acoplamiento), `jscpd` (duplicación), log de tiempo de compilación.
