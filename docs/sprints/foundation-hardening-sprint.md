@@ -95,9 +95,12 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 
 **Fase 6 completa.** Siguiente: **F5** (Event Bus + Outbox).
 
-### Fase 7 — Costura de desacople del dashboard
-- **T7.1** Crear `dashboard.service`; mover las 22 consultas SQL fuera del controlador.
-- **T7.2** Interface `DashboardProjection` con una impl `LiveQueryProjection` (hoy el mismo SQL; mañana proyecciones). Dirección fijada, comportamiento idéntico. **Sin CQRS materializado aún.**
+### Fase 7 — Costura de desacople del dashboard — **COMPLETA** (Opción C)
+- **T7.1 — hecho.** `DashboardService` creado; las **8** consultas SQL cross-domain (no 22 — el número original estaba inflado) movidas **verbatim** del controlador. `DashboardController` queda delgado. Respuesta de `GET /dashboard/kpis` verificada **idéntica byte a byte** (4612 bytes, diff vacío antes/después con datos seed).
+- **T7.2 — reformulado: `DashboardProjection` DIFERIDO.** El diseño original proponía una interfaz `DashboardProjection` con una impl `LiveQueryProjection`. Re-escrutado contra la disciplina del sprint (no crear abstracción sin un segundo consumidor real — misma regla que difirió `SyncVersionStore`, el `ServerClock` compartido, `recompute_mismatch`, el VO `Breed`): una interfaz con **una sola implementación** es prematura, y **no hace falta** para proteger al consumidor — el **método `DashboardService.kpis()` ya es la costura**: el día que su interior pase de live-query a un read model event-fed, el controller no cambia. La interfaz se difiere hasta que exista una **segunda implementación real** (el proyector event-fed). **Sin CQRS materializado, sin conectar eventos con proyecciones.** El objetivo de largo plazo sigue siendo CQRS-lite (eventos F5 → proyectores → read models); F7 solo prepara la separación de capas.
+- **Fuera de F7 (explícito):** `bootstrap()` de sync — sigue como **deuda arquitectónica separada y registrada** (handoff §7), no se resuelve ni se absorbe en F7; se reconsiderará junto con dashboard/reportes/alerts cuando se aborden read models event-fed (post-sprint).
+
+**Fase 7 completa.** Siguiente (orden aprobado): **F8** (ADRs retrospectivos 0001-0003) → **F9** (métricas de calidad).
 
 ### Fase 8 — Architecture Decision Records
 - **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. ADR-006 (estrategia de Value Objects, F2.4), ADR-007 (Server Authority sobre valores derivados, F4.4) y **ADR-008 (ownership de SyncHandlers, F6.1)** ya se escribieron al surgir la decisión — quedan pendientes solo los ADR retrospectivos (0001-0003, 0005).
