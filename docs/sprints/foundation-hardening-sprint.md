@@ -89,7 +89,7 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 - **T7.2** Interface `DashboardProjection` con una impl `LiveQueryProjection` (hoy el mismo SQL; mañana proyecciones). Dirección fijada, comportamiento idéntico. **Sin CQRS materializado aún.**
 
 ### Fase 8 — Architecture Decision Records
-- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. Agregar ADR-007 (Sync Handler registry) que este sprint decide. ADR-006 (estrategia de Value Objects) ya se escribió en F2.4, al surgir la decisión.
+- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. Agregar ADR-008 (Sync Handler registry) que este sprint decide. ADR-006 (estrategia de Value Objects, F2.4) y ADR-007 (Server Authority sobre valores derivados, F4.4) ya se escribieron al surgir la decisión.
 
 ### Fase 9 — Estrategia de métricas de calidad
 - **T9.1** Tooling: `vitest` (cobertura), regla de complejidad ciclomática (`eslint`/`ts-complex`), `dpdm`/`madge` (dependencias circulares + grafo de acoplamiento), `jscpd` (duplicación), log de tiempo de compilación.

@@ -12,10 +12,13 @@ numerado `NNNN-titulo.md`. Estados: `propuesto` · `aceptado` · `reemplazado po
 |---|---|---|
 | [0004](0004-domain-package.md) | Paquete de dominio puro (`packages/domain`) | aceptado |
 | [0006](0006-value-object-strategy.md) | Estrategia de Value Objects: invariante real antes que patrón DDD | aceptado |
+| [0007](0007-server-authority-derived-values.md) | Server Authority sobre valores derivados de reglas de dominio | aceptado |
 
 Pendientes (se documentan en F8 del Foundation Hardening Sprint):
-`0001` Monolito Modular · `0002` PGlite y PostgreSQL · `0003` Arquitectura Offline-First · `0005` Event Bus interno.
+`0001` Monolito Modular · `0002` PGlite y PostgreSQL · `0003` Arquitectura Offline-First · `0005` Event Bus interno · `0008` Sync Handler registry (renumerado; el slot `0007` original lo tomó Server Authority al surgir en F4).
 
-> Nota de numeración: `0004` se escribe primero porque F1 (paquete de dominio) es lo
-> primero que se implementa en el sprint. Los ADR retrospectivos (0001-0003, 0005)
-> documentan decisiones ya tomadas y se redactan en F8.
+> Nota de numeración: los ADR se numeran en el orden en que la decisión realmente se
+> toma, no en el orden planeado originalmente — `0004` se escribió primero porque F1
+> (paquete de dominio) fue lo primero que se implementó; `0006` y `0007` surgieron de
+> decisiones tomadas en F2.4/F4 antes de lo previsto. Los ADR retrospectivos puros
+> (0001-0003, 0005) documentan decisiones ya tomadas y se redactan en F8.
