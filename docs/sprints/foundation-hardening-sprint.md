@@ -107,10 +107,16 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 
 **Fase 8 completa.** Siguiente: **F9** (métricas de calidad — formalizar tooling + `npm run audit:arch`).
 
-### Fase 9 — Estrategia de métricas de calidad
-- **T9.1** Tooling: `vitest` (cobertura), regla de complejidad ciclomática (`eslint`/`ts-complex`), `dpdm`/`madge` (dependencias circulares + grafo de acoplamiento), `jscpd` (duplicación), log de tiempo de compilación.
-- **T9.2** `docs/quality-baseline.md` con los números iniciales y umbrales objetivo.
-- **T9.3** Script único `npm run audit:arch`. No bloquea CI todavía (no hay CI), pero queda documentado.
+### Fase 9 — Estrategia de métricas de calidad — **COMPLETA**
+- **T9.1 — hecho, con ajuste.** Tooling: `vitest --coverage` (ya instalado), `madge` (ciclos) y `jscpd` (duplicación) como devDeps con versión **fijada** (reproducibilidad sobre `npx`). **Sin ESLint/complejidad ciclomática** (decisión aprobada: dependencia pesada, señal marginal — el God-service se detectó por líneas, no por complejidad; se usa conteo de líneas para el God-object watch).
+- **T9.2 — hecho.** `docs/quality-baseline.md` **refrescado** a números post-sprint (el de F0 quedó obsoleto), con la separación explícita **Architecture Gates** (bloquean) vs. **Quality Indicators** (informan) y la estrategia de evolución de cada métrica.
+- **T9.3 — hecho.** `npm run audit:arch` (`scripts/audit-arch.mjs`): estático y rápido (sin server). **Gates** (typecheck + tests + 0 ciclos) → exit ≠ 0 si fallan; **Indicators** (cobertura acotada a domain+sync-core, jscpd, tamaños) → delta vs baseline, nunca bloquean. CI-ready (el exit code es el entrypoint de un futuro CI); E2E/sim quedan como gates de runtime separados. Verificado: verde exit 0; test roto → gate ✗ → exit 1.
+
+---
+
+## Cierre del sprint
+
+**Foundation Hardening Sprint COMPLETO (F0-F9).** La base técnica de Cowinance quedó fortalecida sin cambiar comportamiento: dominio puro con VOs y servicios (una regla en un solo lugar), Server Authority en sync, sync partido en handlers por bounded context (`sync.service` 687→271 líneas), Event Bus + Outbox como fundación, dashboard desacoplado, 9 ADRs, y `audit:arch` como verificación reproducible. Todos los gates verdes; toda la deuda diferida está registrada conscientemente (principal: `bootstrap()` read-side, y la evolución futura a read models event-fed / CQRS-lite). Siguiente etapa (fuera del sprint): reanudar features de Fase 1.
 
 ## 4. Orden definitivo de implementación (aprobado)
 

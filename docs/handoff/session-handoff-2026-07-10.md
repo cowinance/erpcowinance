@@ -34,7 +34,7 @@ Cowinance es una **plataforma ERP para ganadería, agricultura y administración
 - **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras cada commit de F4**, incluyendo T4.4 con la nueva lógica de Server Authority activa. Además, verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos (cliente desactualizado simulado): el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date` en los tres casos probados, y un push con valores ya correctos no generó ningún conflicto espurio (ver §3, F4).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint** en curso. Completadas: **F0-F8** (F8: ADRs retrospectivos 0001-0003 redactados; índice de ADRs completo 0001-0009). Siguiente y **última: F9** (métricas de calidad). Ver §5.
+**Foundation Hardening Sprint COMPLETO (F0-F9).** Última fase F9: `npm run audit:arch` (gates bloqueantes + indicators informativos), `quality-baseline.md` refrescado. Todos los gates verdes. **Siguiente etapa (fuera del sprint): reanudar features de Fase 1** (onboarding, documentos formales, facturación SaaS). Ver §5.
 
 ---
 
@@ -205,7 +205,7 @@ Inventario, Compras/Ventas/CRM, Finanzas/Contabilidad, Agricultura, Pasturas, Le
 | **F6** | Sync → `SyncHandler` registry — 9/9 tablas en handlers por bounded context; `sync.service.ts` 687→271 líneas, orquestador puro (ADR-0008, `AnimalHistoryModule` ADR-0009) | ✅ Completado |
 | **F7** | Dashboard → `DashboardService` (8 SQL fuera del controller); `DashboardProjection` diferido (Opción C) | ✅ Completado |
 | **F8** | ADRs retrospectivos 0001-0003; índice completo 0001-0009 | ✅ Completado ← **siguiente: F9** |
-| **F9** | Métricas de calidad (tooling + `npm run audit:arch`) | ⏳ Pendiente (baseline ya registrado en F0) |
+| **F9** | `npm run audit:arch` (gates + indicators); `quality-baseline.md` refrescado | ✅ Completado ← **sprint cerrado** |
 
 > Orden de ejecución aprobado: F0 → F1 → F2 → F3 → F4 → **F6** → **F5** → F7 → F8 → F9.
 > Regla de revisión: **hacer pausa de revisión al terminar cada sub-fase** antes de continuar.
