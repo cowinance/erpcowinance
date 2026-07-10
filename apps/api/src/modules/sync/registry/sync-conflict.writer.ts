@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { DbService, Q } from '../../db/db.service';
-import type { SyncConflict } from './sync-handler';
-import type { SyncTable } from './sync-table';
+import { DbService, Q } from '../../../db/db.service';
+import type { SyncConflict } from '../contracts/sync-handler.interface';
+import type { SyncTable } from '../contracts/sync-table';
 
 /**
  * Persiste conflictos en sync_conflicts. Extraído (F6) de la duplicación
@@ -9,8 +9,9 @@ import type { SyncTable } from './sync-table';
  * solo si el conflicto queda auto-resuelto (server_wins, F4.4/ADR-0007) o
  * pendiente de revisión humana en el panel de flota.
  *
- * Servicio de infraestructura chico y de un solo propósito — no un
- * "SyncHelperService" que vuelva a concentrar todo lo que F6 separa.
+ * Infraestructura de sync (ADR-0008): expuesta vía SyncRegistryModule
+ * (@Global) para que cualquier handler de dominio la use sin acoplarse a
+ * `sync.module.ts`.
  */
 @Injectable()
 export class SyncConflictWriter {

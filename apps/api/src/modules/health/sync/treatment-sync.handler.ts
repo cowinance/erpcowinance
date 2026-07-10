@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { computeWithdrawal } from '@cowinance/domain';
 import type { Op } from '@cowinance/sync-core';
 import { DbService, Q } from '../../../db/db.service';
-import type { SyncHandler, SyncConflict } from '../sync-handler';
-import { SyncConflictWriter } from '../sync-conflict-writer';
+import type { SyncHandler, SyncConflict } from '../../sync/contracts/sync-handler.interface';
+import { SyncConflictWriter } from '../../sync/registry/sync-conflict.writer';
+import { SyncHandlerRegistry } from '../../sync/registry/sync-handler.registry';
 
 /**
  * treatments: evento inmutable (insert-once, ON CONFLICT DO NOTHING — sin
@@ -12,19 +13,28 @@ import { SyncConflictWriter } from '../sync-conflict-writer';
  * dominio, no una preferencia del cliente — el servidor los recalcula y, si
  * difieren, usa su valor y deja traza (sin tolerancia: inocuidad alimentaria).
  *
- * Piloto de F6 (SyncHandler registry, ver docs/sprints — análisis F6 §5):
- * el candidato más simple con lógica real, para probar el contrato del
- * registry sin mezclarlo todavía con la complejidad de LWW (animals,
- * pregnancies quedan en sync.service.ts hasta la próxima oleada).
+ * Vive en `health/` (ADR-0008), no en `sync/`: es la misma regla de sanidad
+ * que `health.service.ts`/`computeWithdrawal`, solo que llega por el canal
+ * de sync en vez de REST. Se auto-registra en `SyncHandlerRegistry` al
+ * arrancar (`OnModuleInit`) — `sync/` nunca importa este módulo.
+ *
+ * Piloto de F6 (ver docs/sprints — análisis F6 §5): el candidato más simple
+ * con lógica real, para probar el contrato del registry sin mezclarlo
+ * todavía con la complejidad de LWW (animals, pregnancies quedan pendientes).
  */
 @Injectable()
-export class TreatmentSyncHandler implements SyncHandler {
+export class TreatmentSyncHandler implements SyncHandler, OnModuleInit {
   readonly table = 'treatments' as const;
 
   constructor(
     private readonly db: DbService,
     private readonly conflictWriter: SyncConflictWriter,
+    private readonly registry: SyncHandlerRegistry,
   ) {}
+
+  onModuleInit(): void {
+    this.registry.register(this);
+  }
 
   async apply(q: Q, op: Op, changesetDbId: string): Promise<SyncConflict[]> {
     if (op.kind !== 'event') {
@@ -88,9 +98,7 @@ export class TreatmentSyncHandler implements SyncHandler {
 
     await this.conflictWriter.write(q, changesetDbId, this.table, conflicts);
     // autoResolved es una instrucción de persistencia (SyncConflictWriter),
-    // no parte del contrato HTTP de /sync/push — antes de F6.1 esta rama no
-    // exponía ese campo en la respuesta (verificado por comparación directa
-    // antes/después); se preserva ese shape acá.
+    // no parte del contrato HTTP de /sync/push.
     return conflicts.map(({ autoResolved: _autoResolved, ...c }) => c);
   }
 }

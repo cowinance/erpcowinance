@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { applyPut, hlcNode, HlcClock, TERMINAL_STATUS, Changeset, PutOp, RowState } from '@cowinance/sync-core';
 import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
-import { SyncHandlerRegistry } from './sync-handler.registry';
+import { SyncHandlerRegistry } from './registry/sync-handler.registry';
 
 /**
  * Servidor de sincronización v0 sobre Postgres — misma semántica que
