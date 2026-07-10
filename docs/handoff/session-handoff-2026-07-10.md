@@ -34,7 +34,7 @@ Cowinance es una **plataforma ERP para ganadería, agricultura y administración
 - **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras cada commit de F4**, incluyendo T4.4 con la nueva lógica de Server Authority activa. Además, verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos (cliente desactualizado simulado): el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date` en los tres casos probados, y un push con valores ya correctos no generó ningún conflicto espurio (ver §3, F4).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint** en curso. Completadas: **F0, F1, F2, F3, F4 (completa, incluye T4.4/ADR-0007)**. Siguiente: **F6**. Ver §5.
+**Foundation Hardening Sprint** en curso. Completadas: **F0, F1, F2, F3, F4, F6 (completa — 9/9 tablas de sync migradas a handlers por bounded context; `sync.service.ts` sin reglas de dominio, ADR-0008/0009)**. Siguiente: **F5** (Event Bus + Outbox). Ver §5.
 
 ---
 
@@ -200,11 +200,11 @@ Inventario, Compras/Ventas/CRM, Finanzas/Contabilidad, Agricultura, Pasturas, Le
 | **F2.3** | VO `Weight` (kg canónico + presentación lb) | ✅ Completado |
 | **F2.4** | VO `Sex`; `Breed` evaluado y descartado (ADR-0006) | ✅ Completado |
 | **F3** | `DomainExceptionFilter` (T3.1 catálogo de errores reducido — ver ADR-0006 extensión) | ✅ Completado |
-| **F4** | `computeWithdrawal`, `computeExpectedDueDate{FromService,FromDiagnosis}`, `newbornCategoryCode` + migración de consumidores + Server Authority en sync (T4.4, ADR-0007) | ✅ Completado ← **siguiente: F6** |
+| **F4** | `computeWithdrawal`, `computeExpectedDueDate{FromService,FromDiagnosis}`, `newbornCategoryCode` + migración de consumidores + Server Authority en sync (T4.4, ADR-0007) | ✅ Completado |
 | **F5** | Event Bus (EventEmitter2) + Outbox (instalar, no migrar consumidores) | ⏳ Pendiente |
-| **F6** | Sync → `SyncHandler` registry (elimina el switch de `sync.service`) | ⏳ Pendiente |
+| **F6** | Sync → `SyncHandler` registry — 9/9 tablas en handlers por bounded context; `sync.service.ts` 687→271 líneas, orquestador puro (ADR-0008, `AnimalHistoryModule` ADR-0009) | ✅ Completado ← **siguiente: F5** |
 | **F7** | Dashboard → `dashboard.service` + costura de proyección | ⏳ Pendiente |
-| **F8** | ADRs 0001-0003, 0005, 0008 (Sync Handler registry) | ⏳ Pendiente (0004, 0006, 0007 ya escritos) |
+| **F8** | ADRs 0001-0003, 0005 retrospectivos (0004, 0006, 0007, 0008, 0009 ya escritos) | ⏳ Pendiente |
 | **F9** | Métricas de calidad (tooling + `npm run audit:arch`) | ⏳ Pendiente (baseline ya registrado en F0) |
 
 > Orden de ejecución aprobado: F0 → F1 → F2 → F3 → F4 → **F6** → **F5** → F7 → F8 → F9.
