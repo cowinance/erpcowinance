@@ -4,3 +4,5 @@ export type { Brand } from './shared';
 export { DomainError } from './shared';
 // Value Objects de identidad (F2.1).
 export * from './value-objects';
+// Servicios de dominio — sanidad (F4.1).
+export * from './health';

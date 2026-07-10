@@ -9,6 +9,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, PushResult, PullResult } from '@cowinance/sync-core';
+import { computeWithdrawal } from '@cowinance/domain';
 import { createStorage } from './storage';
 import type { DeviceStorage, PersistedMeta } from './storage.types';
 
@@ -472,12 +473,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const now = new Date();
         const product = store()?.getRow('products_veterinary', productId)?.fields as any;
         // Cálculo LOCAL de retiros (el operario necesita saberlo en el campo, sin señal)
-        const meatUntil = product?.withdrawal_meat_days
-          ? new Date(now.getTime() + product.withdrawal_meat_days * 86400000).toISOString().slice(0, 10)
-          : null;
-        const milkUntil = product?.withdrawal_milk_hours
-          ? new Date(now.getTime() + product.withdrawal_milk_hours * 3600000).toISOString()
-          : null;
+        const { meatWithdrawalUntil: meatUntil, milkWithdrawalUntil: milkUntil } = computeWithdrawal(
+          now,
+          product?.withdrawal_meat_days ?? null,
+          product?.withdrawal_milk_hours ?? null,
+        );
         d.addEvent('treatments', Crypto.randomUUID(), {
           animal_id: animalId,
           product_id: productId,

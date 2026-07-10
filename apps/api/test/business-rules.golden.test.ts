@@ -1,28 +1,29 @@
 import { describe, it, expect } from 'vitest';
+import { computeWithdrawal } from '@cowinance/domain';
 
 /**
  * GOLDEN / CHARACTERIZATION TESTS — Fase 0 (red de seguridad).
  *
- * Pinean el comportamiento ACTUAL de las reglas de negocio que la Fase 4
- * extraerá a `packages/domain` (hoy duplicadas en health.service.ts,
- * repro.service.ts y apps/mobile/SyncContext.tsx).
+ * Pinean el comportamiento de las reglas de negocio que la Fase 4 extrae a
+ * `packages/domain` (antes duplicadas en health.service.ts, repro.service.ts
+ * y apps/mobile/SyncContext.tsx).
  *
- * Las `reference*` son copias VERBATIM de la fórmula vigente. En la Fase 4,
- * estas funciones se reemplazan por el import de `@cowinance/domain` y esta
- * MISMA tabla de valores debe seguir pasando → prueba de que la función
- * extraída no cambia el comportamiento.
+ * Retiro (carne/leche) — MIGRADO (F4.1): `referenceMeatWithdrawal`/
+ * `referenceMilkWithdrawal` ahora delegan en `computeWithdrawal` real de
+ * `@cowinance/domain`. Que esta MISMA tabla de valores siga pasando es la
+ * prueba de que la extracción no cambió el comportamiento.
+ *
+ * Gestación — todavía copia verbatim (pendiente F4.2).
  */
 
-// --- Copias verbatim del código actual (fuente: health.service.ts:62, repro.service.ts) ---
-
-/** health.service.ts: meatUntil = appliedAt + withdrawal_meat_days (solo fecha). 0/null → sin retiro. */
+/** health.service.ts (antes) / packages/domain/health/withdrawal.ts (ahora, F4.1). */
 function referenceMeatWithdrawal(appliedAtISO: string, days: number | null): string | null {
-  return days ? new Date(new Date(appliedAtISO).getTime() + days * 86400000).toISOString().slice(0, 10) : null;
+  return computeWithdrawal(new Date(appliedAtISO), days, null).meatWithdrawalUntil;
 }
 
-/** health.service.ts: milkUntil = appliedAt + withdrawal_milk_hours (timestamp completo). 0/null → sin retiro. */
+/** health.service.ts (antes) / packages/domain/health/withdrawal.ts (ahora, F4.1). */
 function referenceMilkWithdrawal(appliedAtISO: string, hours: number | null): string | null {
-  return hours ? new Date(new Date(appliedAtISO).getTime() + hours * 3600000).toISOString() : null;
+  return computeWithdrawal(new Date(appliedAtISO), null, hours).milkWithdrawalUntil;
 }
 
 /** repro.service.ts: fecha probable de parto = fecha de servicio + 283 días (solo fecha). */

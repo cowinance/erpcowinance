@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "0.1.0",
   "dependencies": {
+    "@cowinance/domain": "file:../../packages/domain",
     "@cowinance/sync-core": "file:../../packages/sync-core",
     "@expo/ui": "~57.0.3",
     "@expo/vector-icons": "^15.1.1",

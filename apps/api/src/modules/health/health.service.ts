@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { computeWithdrawal } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 
@@ -59,12 +60,11 @@ export class HealthService {
     const product = await this.requireProduct(body.product_id);
     const appliedAt = new Date(body.applied_at ?? Date.now());
 
-    const meatUntil = product.withdrawal_meat_days
-      ? new Date(appliedAt.getTime() + product.withdrawal_meat_days * 86400000).toISOString().slice(0, 10)
-      : null;
-    const milkUntil = product.withdrawal_milk_hours
-      ? new Date(appliedAt.getTime() + product.withdrawal_milk_hours * 3600000).toISOString()
-      : null;
+    const { meatWithdrawalUntil: meatUntil, milkWithdrawalUntil: milkUntil } = computeWithdrawal(
+      appliedAt,
+      product.withdrawal_meat_days,
+      product.withdrawal_milk_hours,
+    );
 
     const row = await this.db.one<any>(
       `INSERT INTO treatments (tenant_id, animal_id, product_id, applied_at, dose, dose_unit, route, meat_withdrawal_until, milk_withdrawal_until, notes, cost, created_by)
