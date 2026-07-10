@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
+import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 
@@ -115,7 +115,7 @@ export class ReproService {
     for (const o of offspring) {
       let calfId: string | null = null;
       if (o.vitality !== 'stillborn') {
-        const catCode = o.sex === 'M' ? 'ternero' : 'ternera';
+        const catCode = newbornCategoryCode(o.sex);
         const cat = await this.db.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [catCode]);
         const damRow = await this.db.one<any>(`SELECT farm_id, current_lot_id, current_paddock_id FROM animals WHERE id = $1`, [body.dam_id]);
         const calf = await this.db.one<any>(

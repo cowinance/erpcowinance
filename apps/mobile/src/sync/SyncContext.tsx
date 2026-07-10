@@ -9,7 +9,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, PushResult, PullResult } from '@cowinance/sync-core';
-import { computeWithdrawal, computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis } from '@cowinance/domain';
+import {
+  computeWithdrawal,
+  computeExpectedDueDateFromService,
+  computeExpectedDueDateFromDiagnosis,
+  newbornCategoryCode,
+} from '@cowinance/domain';
 import { createStorage } from './storage';
 import type { DeviceStorage, PersistedMeta } from './storage.types';
 
@@ -599,14 +604,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (pm) for (const [id, st] of pm) if (st.fields.animal_id === damId && st.fields.status === 'open') pregnancyId = id;
 
         const calfId = Crypto.randomUUID();
+        const categoryCode = newbornCategoryCode(calf.sex);
         d.setFields('animals', calfId, {
           visual_tag: calf.tag ?? null,
           name: null,
           status: 'active',
           sex: calf.sex,
           birth_date: today,
-          category: calf.sex === 'M' ? 'Ternero' : 'Ternera',
-          category_code: calf.sex === 'M' ? 'ternero' : 'ternera',
+          category: categoryCode === 'ternero' ? 'Ternero' : 'Ternera',
+          category_code: categoryCode,
           dam_id: damId,
           lot_name: dam?.lot_name ?? null,
           last_weight_kg: null,
