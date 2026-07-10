@@ -15,10 +15,13 @@
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "audit:arch": "node scripts/audit-arch.mjs"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^3.2.4",
+    "jscpd": "5.0.12",
+    "madge": "8.0.0",
     "vitest": "^3.2.4"
   },
   "engines": {
