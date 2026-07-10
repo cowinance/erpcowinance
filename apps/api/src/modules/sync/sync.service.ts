@@ -38,8 +38,8 @@ const ANIMAL_FIELDS = new Set([
 const PREGNANCY_FIELDS = new Set(['animal_id', 'status', 'diagnosis_date', 'expected_due_date', 'method', 'closed_at']);
 
 // 'treatments' migró al registry (F6.1, TreatmentSyncHandler) — ya no pasa por applyEvent.
-// 'animal_events' migró al registry (F6.3, AnimalEventSyncHandler en animal-history/) — ya no pasa por applyEvent.
-const EVENT_TABLES = new Set(['weighings', 'vaccinations', 'breeding_events', 'calvings', 'calving_offspring']);
+// 'animal_events' (F6.3) y 'vaccinations' (F6.3-B) migraron al registry — ya no pasan por applyEvent.
+const EVENT_TABLES = new Set(['weighings', 'breeding_events', 'calvings', 'calving_offspring']);
 
 @Injectable()
 export class SyncService {
@@ -538,23 +538,6 @@ export class SyncService {
           row['method'] ?? 'scale',
           row['body_condition'] ?? null,
           null, // device_id referencia a dispositivos IoT (báscula), no al sync_device
-        ],
-      );
-    } else if (table === 'vaccinations') {
-      await q.query(
-        `INSERT INTO vaccinations (id, tenant_id, animal_id, product_id, applied_at, dose, dose_unit, batch_number, next_due_date, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
-        [
-          rowId,
-          t,
-          row['animal_id'],
-          row['product_id'],
-          row['applied_at'] ?? new Date().toISOString(),
-          row['dose'] ?? null,
-          row['dose_unit'] ?? null,
-          row['batch_number'] ?? null,
-          row['next_due_date'] ?? null,
-          this.db.user,
         ],
       );
     } else if (table === 'breeding_events') {
