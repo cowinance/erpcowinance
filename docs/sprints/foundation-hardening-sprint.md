@@ -66,10 +66,13 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 - **T3.2** `DomainExceptionFilter` en NestJS — **implementado**. Mapea cualquier `DomainError` a la misma forma HTTP verificada empíricamente hoy: `{code, title}`, status 400 (todo `DomainError` actual es de validación). Registrado globalmente en `main.ts`. Confirmado behavior-preserving: respuestas de `BadRequestException`/`NotFoundException`/`UnauthorizedException` existentes, byte a byte idénticas antes/después; `auth-e2e` y `sync-e2e` verdes.
 
 ### Fase 4 — Servicios de dominio (matar la triplicación)
-- **T4.1** Funciones puras en `packages/domain/health` y `/reproduction`: `computeWithdrawal(product, appliedAt)`, `computeExpectedDueDate(serviceDate)`, `classifyCategory(...)`.
-- **T4.2** Reescribir `health.service` y `repro.service` para usarlas (camino REST).
-- **T4.3** Reescribir el cliente móvil (`SyncContext`) para importar **las mismas** funciones (fuente única).
-- **T4.4** Hacer que el servidor de sync **recompute** con la misma función en lugar de confiar en el valor del cliente (**servidor = fuente de verdad**). Determinista: para un cliente correcto el resultado es idéntico; para uno con bug, el servidor corrige y deja **traza de auditoría** (p. ej. el valor entrante vs el recalculado en el payload del evento/outbox) sin afectar al usuario.
+- **T4.1 — hecho.** `computeWithdrawal(appliedAt, meatDays, milkHours)` en `packages/domain/health`. Función pura, sin VO, sin clase, sin estado.
+- **T4.2 — hecho** (junto con T4.1/T4.3, un candidato a la vez). `health.service.ts` y `repro.service.ts` reescritos para usar las funciones de dominio.
+- **T4.3 — hecho.** `SyncContext.tsx` (mobile) reescrito para importar las mismas funciones (`@cowinance/domain` linkeado al workspace mobile, mismo patrón `file:` que `sync-core`).
+  - `computeExpectedDueDateFromService`/`computeExpectedDueDateFromDiagnosis` en `packages/domain/reproduction` (F4.2) — dos funciones explícitas, no una con rama oculta. Golden test del Modo B (diagnóstico sin servicio) agregado antes de extraer (gap encontrado, ver commit `56d6a38`).
+  - `newbornCategoryCode(sex)` en `packages/domain/reproduction` (F4.3-A) — regla acotada (solo nacimiento, solo bovino); comportamiento permisivo actual preservado tal cual, sin validar con el VO `Sex` (evita cambiar comportamiento). `classifyCategory` completo (especie+sexo+edad, catálogo configurable) **descartado**: no existe como comportamiento hoy, sería feature nueva — ver ADR-0006 extensión F4.3.
+  - Los tres candidatos verificados end-to-end (llamadas reales a la api con la api corriendo) además de gates automatizados.
+- **T4.4 — pendiente, documento de diseño en curso** (`Server Authority en reglas calculadas`, sin aprobar todavía — decisión arquitectónica más importante de F4, no es refactor puro sino cambio de contrato operacional cliente↔servidor).
 
 ### Fase 5 — Event Bus + Outbox (fundación, cableado mínimo)
 - **T5.1** Contratos de eventos versionados en `packages/domain/events`: `AnimalRegistered`, `WeighingRecorded`, `TreatmentApplied`, `PregnancyDiagnosed`, etc.
