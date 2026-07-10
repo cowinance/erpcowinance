@@ -72,7 +72,9 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
   - `computeExpectedDueDateFromService`/`computeExpectedDueDateFromDiagnosis` en `packages/domain/reproduction` (F4.2) — dos funciones explícitas, no una con rama oculta. Golden test del Modo B (diagnóstico sin servicio) agregado antes de extraer (gap encontrado, ver commit `56d6a38`).
   - `newbornCategoryCode(sex)` en `packages/domain/reproduction` (F4.3-A) — regla acotada (solo nacimiento, solo bovino); comportamiento permisivo actual preservado tal cual, sin validar con el VO `Sex` (evita cambiar comportamiento). `classifyCategory` completo (especie+sexo+edad, catálogo configurable) **descartado**: no existe como comportamiento hoy, sería feature nueva — ver ADR-0006 extensión F4.3.
   - Los tres candidatos verificados end-to-end (llamadas reales a la api con la api corriendo) además de gates automatizados.
-- **T4.4 — pendiente, documento de diseño en curso** (`Server Authority en reglas calculadas`, sin aprobar todavía — decisión arquitectónica más importante de F4, no es refactor puro sino cambio de contrato operacional cliente↔servidor).
+- **T4.4 — hecho.** Server Authority (ADR-0007): `sync.service.ts` recalcula `meat_withdrawal_until`/`milk_withdrawal_until` (evento inmutable) y `expected_due_date` (put LWW, corrección vía `HlcClock` propio del servidor) en vez de confiar en el valor del cliente; discrepancias → `sync_conflicts` auto-resuelto (`conflict_type='semantic'`, `resolution='server_wins'`). Verificado end-to-end contra la api real (cliente incorrecto → servidor corrige; cliente correcto → cero ruido). `category_code` queda fuera (candidato futuro).
+
+**Fase 4 completa.** Siguiente: F6 (Sync → SyncHandler registry, usa los servicios de dominio recién creados).
 
 ### Fase 5 — Event Bus + Outbox (fundación, cableado mínimo)
 - **T5.1** Contratos de eventos versionados en `packages/domain/events`: `AnimalRegistered`, `WeighingRecorded`, `TreatmentApplied`, `PregnancyDiagnosed`, etc.

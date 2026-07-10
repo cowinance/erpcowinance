@@ -9,7 +9,7 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP para ganadería, agricultura y administración de fincas**, offline-first y multi-tenant, especificada en 14 documentos (`docs/*.docx`). El **alcance funcional ganadero de la Fase 1 del producto está completo y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa de potreros, Reportes, Alertas, Fotos, Planes sanitarios, Vademécum), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 2 packages (`sync-core`, `domain`). En este momento el proyecto está **pausado en features** y en curso de un **Foundation Hardening Sprint** (mejora de arquitectura sin cambiar comportamiento). Vamos por **F3 completada** (`DomainExceptionFilter`; catálogo de errores nuevos diferido a F4, ver ADR-0006); el siguiente paso es **F4 (servicios de dominio — elimina la triplicación de reglas)**.
+Cowinance es una **plataforma ERP para ganadería, agricultura y administración de fincas**, offline-first y multi-tenant, especificada en 14 documentos (`docs/*.docx`). El **alcance funcional ganadero de la Fase 1 del producto está completo y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa de potreros, Reportes, Alertas, Fotos, Planes sanitarios, Vademécum), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 2 packages (`sync-core`, `domain`). En este momento el proyecto está **pausado en features** y en curso de un **Foundation Hardening Sprint** (mejora de arquitectura sin cambiar comportamiento). Vamos por **F4 completada** — el núcleo del sprint: `computeWithdrawal`, `computeExpectedDueDate{FromService,FromDiagnosis}`, `newbornCategoryCode` extraídos a `packages/domain` y migrados en api+mobile, y **Server Authority** (T4.4, ADR-0007) para que el servidor de sync deje de confiar ciegamente en los valores calculados por el cliente. El siguiente paso es **F6 (Sync → SyncHandler registry)**.
 
 ### Estado general del repositorio
 - **Working tree:** limpio (solo `.claude/settings.local.json` sin trackear/ignorar; irrelevante).
@@ -20,21 +20,21 @@ Cowinance es una **plataforma ERP para ganadería, agricultura y administración
 `main` (siempre se trabaja acá; los commits son pequeños y directos).
 
 ### Último commit
-`feat(api): DomainExceptionFilter (F3)` (ver git log; commits F2.3 `Weight`, F2.4 `Sex` y F3 `DomainExceptionFilter` posteriores a `12897d0`)
+`feat(sync): Server Authority sobre valores derivados (T4.4, ADR-0007)` (`ceeb83d`) — ver git log para la secuencia completa de F4: `434cc59` F4.1, `e4ef4e2` F4.2, `cb6b6c2` F4.3-A, `f3def38` ADR-0007, `ceeb83d` T4.4.
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
-- `next build` (web) — **limpio** (última verificación 15 páginas).
-- `tsc` (mobile) — **limpio**.
+- `next build` (web) — **limpio** (última verificación 15 páginas; no re-verificado en esta sesión, F4 no tocó web).
+- `tsc` (mobile) — **limpio** (re-verificado tras cada migración de F4).
 - `tsc` (packages/domain, puro) — **limpio**.
 
 ### Estado de las pruebas
-- **78 tests verdes**, 10 archivos (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio, VOs de dominio (Brand, ids, TagNumber, Weight, Sex) y `DomainExceptionFilter` (prueba de cableado).
+- **102 tests verdes**, 13 archivos (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio (retiro + gestación Modo A/B, delegando en las funciones reales del dominio), VOs de dominio (Brand, ids, TagNumber, Weight, Sex), `DomainExceptionFilter`, y los 3 servicios de dominio de F4 (`withdrawal`, `gestation`, `newborn-category`).
 - **Suite de convergencia de sync:** 2000/2000 (100%).
-- **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras F3** con la api corriendo y el filtro registrado; respuestas de error byte a byte idénticas al baseline pre-F3 (verificación empírica con `curl`, ver §3).
+- **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras cada commit de F4**, incluyendo T4.4 con la nueva lógica de Server Authority activa. Además, verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos (cliente desactualizado simulado): el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date` en los tres casos probados, y un push con valores ya correctos no generó ningún conflicto espurio (ver §3, F4).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint** en curso. Completadas: **F0, F1, F2.1, F2.2, F2.3, F2.4, F3**. Siguiente: **F4**. Ver §5.
+**Foundation Hardening Sprint** en curso. Completadas: **F0, F1, F2, F3, F4 (completa, incluye T4.4/ADR-0007)**. Siguiente: **F6**. Ver §5.
 
 ---
 
@@ -151,17 +151,28 @@ Ver §8 (Reglas permanentes). En síntesis: dominio puro, una regla en un solo l
 **Resultado:** 78 tests totales verdes (incluye prueba de cableado del filtro). Regresión HTTP verificada byte a byte idéntica; `auth-e2e` 15/15 y `sync-e2e` 19/19 re-verificados con el filtro activo.
 **Validación:** build puro, `nest build`, suite completa verde, madge 0, E2E verdes, curl manual antes/después.
 
+### F4 — Servicios de dominio + Server Authority (núcleo del sprint)
+**Objetivo:** eliminar la triplicación real de reglas (no construir servicios "por catálogo"). Antes de tocar código, análisis de estado actual por candidato (dónde vive la duplicación, cuántos sitios, qué consumidores, qué tests protegen) — cambió el alcance original: `classifyCategory` completo no existe como comportamiento hoy (se hubiera sido feature nueva, prohibida durante el sprint).
+
+- **F4.1 `computeWithdrawal`** (`packages/domain/health/withdrawal.ts`): función pura, sin VO/clase/estado. Elimina la duplicación `health.service.ts` ↔ `SyncContext.tsx`. Migrados ambos consumidores. Commit `434cc59`.
+- **F4.2 `computeExpectedDueDateFromService`/`computeExpectedDueDateFromDiagnosis`** (`packages/domain/reproduction/gestation.ts`): dos modos duplicados, **dos funciones explícitas** (no una con rama oculta — un parámetro opcional escondería una decisión de negocio). Gap encontrado: el oráculo golden de F0 solo pineaba el Modo A (desde servicio); se agregó el golden test del Modo B (diagnóstico sin servicio, heurística −45 días) **antes** de extraer (commit `56d6a38`), luego la extracción (commit `e4ef4e2`). Verificado end-to-end: `POST /pregnancy-diagnoses` sin servicio previo produce `expected_due_date` idéntico al golden.
+- **F4.3 — `classifyCategory` completo (especie+sexo+edad, catálogo configurable) descartado**: no existe como comportamiento en el sistema hoy (categoría es elegida manualmente por el usuario en un `<select>`; las columnas `min_age_months`/`max_age_months` no las lee ningún código de runtime). Construirlo sería una feature nueva, no una extracción — queda en backlog de producto.
+  - **F4.3-A `newbornCategoryCode`** (`packages/domain/reproduction/newborn-category.ts`): regla real y menor sí encontrada — categoría de una cría al nacer según sexo (`ternero`/`ternera`), duplicada en `repro.service.ts` y `SyncContext.tsx`. Comportamiento permisivo actual preservado tal cual (no valida con el VO `Sex`, evita cambiar comportamiento). Commit `cb6b6c2`.
+- **T4.4 — Server Authority** (`ADR-0007`, commit `f3def38` para el ADR + `ceeb83d` para la implementación): el servidor de sync dejaba de confiar ciegamente en los valores que el cliente calculaba. Ahora recalcula con las funciones de F4.1/F4.2 y, si difieren, corrige — sin tolerancia (son campos derivados de reglas, no preferencias). Mecanismo distinto según el tipo de operación de sync: `treatments` (evento inmutable, insert-once) es un recompute puntual sin interacción con LWW; `pregnancies.expected_due_date` (campo `put`, LWW por HLC) requirió que la corrección del servidor **participe del mismo mecanismo de HLC** que los dispositivos (`HlcClock` propio, `node='server'`) — un `UPDATE` directo por fuera de ese mecanismo habría dejado la corrección vulnerable a que un push posterior la pisara. Auditoría reutilizando `sync_conflicts` existente (`conflict_type='semantic'`, `resolution='server_wins'`, auto-resuelto — no ensucia el panel de flota), sin ampliar su `CHECK` (mismo criterio de ADR-0006: no crear una categoría de conflicto nueva con un solo consumidor). `category_code` queda fuera de esta ronda.
+
+**Resultado:** 102 tests totales verdes. Cada candidato verificado end-to-end contra la api real corriendo (no solo tests automatizados): llamadas HTTP directas con valores deliberadamente incorrectos confirmando que el servidor corrige y persiste el valor correcto, y que un cliente ya correcto no genera ruido.
+**Validación:** build puro, `nest build`, `tsc` mobile, suite completa verde, madge 0, sim de sync-core 2000/2000, `auth-e2e` 15/15, `sync-e2e` 19/19 (re-verificados tras cada commit), verificación dirigida por HTTP de T4.4.
+
 ---
 
 ## 4. Trabajo pendiente (por prioridad)
 
 ### Sprint actual (Foundation Hardening) — lo inmediato
-1. **F4** Servicios de dominio (elimina la duplicación de reglas) + adopción de VOs en consumidores ← siguiente paso (ver §9). Nuevos `DomainError` específicos, si surgen, se justifican ahí (ver ADR-0006).
-2. **F6** Sync → SyncHandler registry.
-3. **F5** Event Bus + Outbox.
-4. **F7** Dashboard → service + costura de proyección.
-5. **F8** ADRs restantes (0006 ya cubre parte de lo previsto para ADR de estrategia de VOs/errores).
-6. **F9** Métricas de calidad (formalizar tooling + `npm run audit:arch`).
+1. **F6** Sync → SyncHandler registry (elimina el switch de `sync.service`) ← siguiente paso (ver §9). Usa los servicios de dominio de F4; cuidado extra al tocar `applyEvent`/`applyPregnancyPut` (T4.4 les agregó lógica de Server Authority — los handlers nuevos deben conservarla, no perderla al partir el switch).
+2. **F5** Event Bus + Outbox.
+3. **F7** Dashboard → service + costura de proyección.
+4. **F8** ADRs restantes: 0001-0003, 0005, 0008 (Sync Handler registry — renumerado, ver `docs/adr/README.md`).
+5. **F9** Métricas de calidad (formalizar tooling + `npm run audit:arch`).
 
 ### Próximo sprint (tras el hardening): reanudar features de Fase 1
 - **Onboarding de 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min").
@@ -188,12 +199,12 @@ Inventario, Compras/Ventas/CRM, Finanzas/Contabilidad, Agricultura, Pasturas, Le
 | **F2.2** | VO `TagNumber` (caravana visual) | ✅ Completado |
 | **F2.3** | VO `Weight` (kg canónico + presentación lb) | ✅ Completado |
 | **F2.4** | VO `Sex`; `Breed` evaluado y descartado (ADR-0006) | ✅ Completado |
-| **F3** | `DomainExceptionFilter` (T3.1 catálogo de errores reducido — ver ADR-0006 extensión) | ✅ Completado ← **siguiente: F4** |
-| **F4** | Servicios de dominio (retiro/gestación/categoría) + adopción de VOs + recompute en sync | ⏳ Pendiente |
+| **F3** | `DomainExceptionFilter` (T3.1 catálogo de errores reducido — ver ADR-0006 extensión) | ✅ Completado |
+| **F4** | `computeWithdrawal`, `computeExpectedDueDate{FromService,FromDiagnosis}`, `newbornCategoryCode` + migración de consumidores + Server Authority en sync (T4.4, ADR-0007) | ✅ Completado ← **siguiente: F6** |
 | **F5** | Event Bus (EventEmitter2) + Outbox (instalar, no migrar consumidores) | ⏳ Pendiente |
 | **F6** | Sync → `SyncHandler` registry (elimina el switch de `sync.service`) | ⏳ Pendiente |
 | **F7** | Dashboard → `dashboard.service` + costura de proyección | ⏳ Pendiente |
-| **F8** | ADRs 0001-0003, 0005 (+ 0006, 0007) | ⏳ Pendiente (0004 ya escrito) |
+| **F8** | ADRs 0001-0003, 0005, 0008 (Sync Handler registry) | ⏳ Pendiente (0004, 0006, 0007 ya escritos) |
 | **F9** | Métricas de calidad (tooling + `npm run audit:arch`) | ⏳ Pendiente (baseline ya registrado en F0) |
 
 > Orden de ejecución aprobado: F0 → F1 → F2 → F3 → F4 → **F6** → **F5** → F7 → F8 → F9.
@@ -252,11 +263,11 @@ Acordadas y **obligatorias**:
 
 > **Único siguiente paso recomendado:**
 
-**Implementar F4 — Servicios de dominio** (el núcleo del sprint: elimina la triplicación de reglas). Funciones puras en `packages/domain` (T4.1 del sprint doc): `computeWithdrawal(product, appliedAt)`, `computeExpectedDueDate(serviceDate)`, `classifyCategory(...)` — usando el oráculo de `docs/golden/business-rules.md` para no cambiar comportamiento. Luego reescribir `health.service`, `repro.service` y `SyncContext` móvil para usar **las mismas** funciones (fuente única), y hacer que el servidor de sync recompute (servidor = fuente de verdad).
+**Implementar F6 — Sync → `SyncHandler` registry.** `sync.service.ts` es hoy un God object (switch gigante por tabla en `applyEvent`/dispatch de ops) — partirlo en handlers co-ubicados con su módulo (herd → animal/weighing; health → treatment/vaccination; repro → breeding/pregnancy/calving), con un registry central que resuelve por tabla. Open/Closed: un módulo nuevo debe ser un handler nuevo, cero ediciones a `sync.service`.
 
-Es también el momento de **migrar los VOs existentes a sus consumidores** (Opción B se cierra acá: `TagNumber`, `Weight`, `Sex` dejan de estar sin usar) y de **evaluar, caso por caso, si algún `DomainError` nuevo es necesario** — con el criterio ya fijado en ADR-0006 (extensión F3): solo si la función pura de dominio recién escrita necesita señalar esa violación específica, no antes.
+**Punto de cuidado real (no presente antes de esta sesión):** T4.4 (F4) le agregó a `applyEvent` (rama `treatments`) y a `applyPregnancyPut` lógica de **Server Authority** — recompute con las funciones de dominio, comparación, y auditoría en `sync_conflicts` con `HlcClock` propio del servidor para el campo LWW. Al partir el switch en handlers, **esa lógica tiene que migrar completa a los handlers `treatments` y `pregnancies`** — no es solo mover el INSERT/UPDATE, es mover el recompute + el HLC del servidor + el registro de conflictos. Usar los tests E2E dirigidos que se corrieron para T4.4 (§3, F4) como referencia de qué comportamiento no debe cambiar al partir el switch.
 
-Después de F4 → pausa de revisión → F6 (Sync → SyncHandler registry, usa los servicios de dominio recién creados).
+Después de F6 → pausa de revisión → F5 (Event Bus + Outbox, fundación sin migrar consumidores).
 
 ---
 
@@ -268,10 +279,10 @@ Después de F4 → pausa de revisión → F6 (Sync → SyncHandler registry, usa
 4. **Este handoff** (`docs/handoff/session-handoff-2026-07-10.md`).
 5. **`docs/quality-baseline.md`** — números de partida y estrategia de métricas.
 6. **`docs/golden/business-rules.md`** — comportamiento congelado de las reglas (retiro, gestación, dup-tag, convergencia). **Oráculo para no romper nada.**
-7. **`docs/adr/`** — `README.md` + `0004-domain-package.md` + `0006-value-object-strategy.md` (checklist de 5 preguntas para admitir un VO **y** un `DomainError` nuevo, extensión F3 — **leer antes de proponer cualquier abstracción de dominio**).
-8. **`packages/domain/src/`** — `shared/brand.ts`, `shared/domain-error.ts`, `value-objects/identifier.ts`, `value-objects/ids.ts`, `value-objects/tag-number.ts`, `value-objects/weight.ts`, `value-objects/sex.ts` (el patrón companion a seguir en F4+). `apps/api/src/common/domain-exception.filter.ts` — cómo un `DomainError` llega a HTTP.
-9. **`packages/sync-core/src/`** — motor de sync (HLC, changesets, merge, sim). Setup de package puro a replicar.
-10. **`apps/api/src/`** — `db/db.service.ts`, `db/query.ts`, `common/request-context.ts` (RLS + tx), `modules/sync/sync.service.ts` (God object a partir en F6), `modules/dashboard/dashboard.controller.ts` (SQL a extraer en F7).
+7. **`docs/adr/`** — `README.md` + `0004-domain-package.md` + `0006-value-object-strategy.md` (checklist de 5 preguntas para admitir un VO/`DomainError` nuevo) + `0007-server-authority-derived-values.md` (Server Authority sobre valores derivados — **leer antes de tocar `sync.service.ts`**).
+8. **`packages/domain/src/`** — `shared/brand.ts`, `shared/domain-error.ts`, `value-objects/*`, `health/withdrawal.ts`, `reproduction/gestation.ts`, `reproduction/newborn-category.ts` (el patrón companion + servicios de dominio a seguir en F5+).
+9. **`packages/sync-core/src/`** — motor de sync (HLC, changesets, merge, sim, `HlcClock`). Setup de package puro a replicar.
+10. **`apps/api/src/modules/sync/sync.service.ts`** — God object a partir en **F6**; contiene ahora la lógica de Server Authority (T4.4) que hay que preservar al partirlo en handlers. `apps/api/src/db/db.service.ts`, `db/query.ts`, `common/request-context.ts` (RLS + tx), `modules/dashboard/dashboard.controller.ts` (SQL a extraer en F7).
 11. **Especificación del producto** (`.docx` en `docs/`): `Cowinance_Arquitectura`, `Cowinance_Roadmap`, `Cowinance_Catalogo_Modulos`, `Cowinance_Modelo_Datos`, `Cowinance_Design_System`, `Cowinance_APIs`, y los módulos.
 12. **`packages/db/cowinance_schema.sql`** — DDL canónico de 140 tablas (fuente de verdad del modelo).
 
@@ -281,13 +292,13 @@ Después de F4 → pausa de revisión → F6 (Sync → SyncHandler registry, usa
 
 | Métrica | Baseline (F0) | Actual (2026-07-10) | Objetivo |
 |---|---|---|---|
-| **Tests** | 34 verdes | **78 verdes** (10 archivos) | crecer con cada fase |
+| **Tests** | 34 verdes | **102 verdes** (13 archivos) | crecer con cada fase |
 | **Cobertura** | no medida | no medida formalmente (dominio bien cubierto) | dominio ≥ 90% (F9) |
 | **Dependencias circulares** (madge) | **1** | **0** ✅ | 0 |
-| **Duplicación** (jscpd) | 0.89% sintáctica | ~igual; duplicación **semántica** de reglas **aún presente** | ≤1% y **0 reglas duplicadas** (F4) |
-| **Build** | api/web/mobile/domain limpios | limpios ✅ | no-regresión |
+| **Duplicación semántica de reglas** | presente (retiro, gestación, categoría de cría en 2-3 lugares) | **eliminada** ✅ (F4: fuente única en `packages/domain`, servidor recomputa en sync) | 0 reglas duplicadas |
+| **Build** | api/web/mobile/domain limpios | limpios ✅ (api, mobile, domain re-verificados en F4; web no tocado) | no-regresión |
 | **Simulación de sync** | 2000/2000 (100%) | **2000/2000** ✅ | ≥99% |
-| **E2E** | auth 15/15 · sync 19/19 | **15/15 · 19/19** ✅ | verde |
+| **E2E** | auth 15/15 · sync 19/19 | **15/15 · 19/19** ✅ (re-verificados tras T4.4, incluye verificación dirigida de Server Authority) | verde |
 
 Comandos: `npm test` (Vitest) · `npm run build -w @cowinance/domain` · `cd apps/api && npx nest build` · `npx madge --extensions ts --circular apps/api/src` · `npm run sim -w @cowinance/sync-core` · `node apps/api/scripts/{auth,sync}-e2e.mjs` (requieren api corriendo).
 
@@ -295,10 +306,12 @@ Comandos: `npm test` (Vitest) · `npm run build -w @cowinance/domain` · `cd app
 
 ## 12. Resumen final — "¿Qué necesita saber un arquitecto para no cometer errores?"
 
-Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. **Hoy NO se agregan features**: estamos en un **Foundation Hardening Sprint** que mejora la arquitectura **sin cambiar comportamiento** (F0-F3 hechas; sigue F4, el núcleo del sprint). La regla número uno: **behavior-preserving** — antes y después de cada cambio, la API, la convergencia de sync y la UI deben ser idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `auth-e2e` 15/15, `sync-e2e` 19/19, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
+Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. **Hoy NO se agregan features**: estamos en un **Foundation Hardening Sprint** que mejora la arquitectura **sin cambiar comportamiento** (F0-F4 hechas, incluye Server Authority; sigue F6). La regla número uno: **behavior-preserving** — antes y después de cada cambio, la API, la convergencia de sync y la UI deben ser idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `auth-e2e` 15/15, `sync-e2e` 19/19, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
 
-El corazón de la deuda es **una misma regla de negocio escrita en 3 lugares** (retiro sanitario y fecha de parto, en `health.service`, `repro.service` y el `SyncContext` móvil). No la "arregles" ad-hoc: **se elimina en F4** creando servicios de dominio puros en `packages/domain`, y por eso **no migramos consumidores todavía** (Opción B) — así cada archivo se toca una sola vez. `packages/domain` es **sagrado: 100% puro**, sin ninguna dependencia de infraestructura (el `tsconfig` lo fuerza; si un import no compila, es a propósito). Aplicá **YAGNI** con rigor: nada de Result/Either, fábricas de errores, carpetas vacías ni abstracciones "por si acaso"; si diferís algo, escribí un ADR. Un **Value Object** solo existe si aporta validación, type-safety, comportamiento, inmutabilidad o elimina duplicación — y desde F2.4 (**ADR-0006**) esto se verifica con un checklist explícito de 5 preguntas **antes** de escribir código; no asumas que un concepto del lenguaje ubicuo necesita VO solo porque está en la lista (`Breed` es el caso de estudio: ya era una entidad de catálogo, no un VO). **F3 extendió el mismo principio a `DomainError`**: no se crea un error de dominio nuevo sin que exista ya una función pura de dominio (o caso de uso concreto) que lo necesite lanzar — el catálogo especulativo original de F3 (`DuplicateTag`, `InvalidPregnancy`, `AnimalAlreadyExists`, `TreatmentExpired`, `InvalidMovement`) quedó diferido a F4 por esta misma razón. En general: **ninguna abstracción de dominio se crea sin demostrar antes qué problema real resuelve.**
+El corazón de la deuda **ya se eliminó en F4**: retiro sanitario, gestación (dos modos) y categoría de cría al nacer vivían triplicados en `health.service`/`repro.service`/`SyncContext` móvil — ahora son funciones puras en `packages/domain` (`health/withdrawal.ts`, `reproduction/gestation.ts`, `reproduction/newborn-category.ts`), consumidas por los tres lugares. Y desde **T4.4/ADR-0007**, el servidor de sync **ya no confía ciegamente** en lo que calcula el cliente: recomputa y corrige (sin tolerancia) para los campos derivados de reglas — con un mecanismo distinto según si el dato es un evento inmutable o un campo LWW (para este último, la corrección del servidor participa del mismo `HlcClock` que los dispositivos, no es un `UPDATE` por fuera del mecanismo de sync). `classifyCategory` completo (edad+sexo+especie, catálogo configurable) **no se construyó**: no existía como comportamiento real, hubiera sido una feature nueva disfrazada de refactor — quedó en backlog de producto.
 
-Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q`; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`). No hay CI ni remoto Git — **creá el remoto pronto** (todo vive local) y corré los gates a mano. El servidor es la fuente de verdad en sync. Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
+`packages/domain` es **sagrado: 100% puro**, sin ninguna dependencia de infraestructura (el `tsconfig` lo fuerza; si un import no compila, es a propósito). Aplicá **YAGNI** con rigor: nada de Result/Either, fábricas de errores, carpetas vacías ni abstracciones "por si acaso"; si diferís algo, escribí un ADR. **Ninguna abstracción de dominio (VO, `DomainError`, servicio, categoría de conflicto de sync) se crea sin demostrar antes qué problema real resuelve y por qué lo existente no alcanza** — regla confirmada tres veces en este sprint (`Breed` como VO en F2.4, el catálogo de errores en F3, `recompute_mismatch` como tipo de conflicto en T4.4) y ya generalizada más allá de los VOs. Antes de proponer cualquier abstracción nueva, investigá el estado real del código (no asumas duplicación ni necesidad — verificala).
 
-**Siguiente acción concreta:** implementar **F4 — servicios de dominio** (§9), el núcleo del sprint.
+Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q` **y preservar la lógica de Server Authority que T4.4 agregó a `applyEvent`/`applyPregnancyPut`** al partirlos en handlers; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`, ya usado también para `domain` desde F4.1). No hay CI ni remoto Git — **creá el remoto pronto** (todo vive local) y corré los gates a mano. Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
+
+**Siguiente acción concreta:** implementar **F6 — Sync → SyncHandler registry** (§9).
