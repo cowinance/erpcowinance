@@ -25,8 +25,8 @@ export class DbService implements OnModuleInit {
 
   /**
    * Infra dev v0 (pendiente de incorporar al DDL canónico): cursor global de
-   * changesets, versiones HLC por campo (LWW), credenciales de login y
-   * refresh tokens con rotación.
+   * changesets, versiones HLC por campo (LWW), credenciales de login,
+   * refresh tokens con rotación, y outbox de eventos de dominio (F5).
    */
   private static readonly SYNC_MIGRATION = `
     CREATE SEQUENCE IF NOT EXISTS sync_changesets_server_seq;
@@ -51,6 +51,19 @@ export class DbService implements OnModuleInit {
       revoked_at timestamptz,
       created_at timestamptz DEFAULT now() NOT NULL
     );
+    -- Outbox de eventos de dominio (F5, ADR-0005). Sin RLS a propósito (como
+    -- auth_refresh_tokens): el relay es un proceso interno de confianza que
+    -- drena cross-tenant post-commit. tenant_id se guarda para trazabilidad.
+    CREATE TABLE IF NOT EXISTS event_outbox (
+      id uuid PRIMARY KEY,
+      tenant_id uuid NOT NULL,
+      type varchar(255) NOT NULL,
+      payload jsonb NOT NULL,
+      occurred_at timestamptz NOT NULL,
+      created_at timestamptz DEFAULT now() NOT NULL,
+      published_at timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS ix_event_outbox_unpublished ON event_outbox (created_at) WHERE published_at IS NULL;
   `;
 
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */

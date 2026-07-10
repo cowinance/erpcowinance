@@ -8,3 +8,5 @@ export * from './value-objects';
 export * from './health';
 // Servicios de dominio — reproducción (F4.2).
 export * from './reproduction';
+// Contratos de eventos de dominio (F5, ADR-0005).
+export * from './events';

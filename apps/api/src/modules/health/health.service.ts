@@ -1,11 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { computeWithdrawal } from '@cowinance/domain';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { computeWithdrawal, TREATMENT_APPLIED } from '@cowinance/domain';
+import type { TreatmentApplied } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
+import { EVENT_PUBLISHER } from '../../application/ports/event-publisher.port';
+import type { EventPublisher } from '../../application/ports/event-publisher.port';
 
 @Injectable()
 export class HealthService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    @Inject(EVENT_PUBLISHER) private readonly events: EventPublisher,
+  ) {}
 
   async products() {
     return this.db.query(
@@ -79,6 +86,22 @@ export class HealthService {
       { product: product.name, dose: body.dose, withdrawal_meat_until: meatUntil, withdrawal_milk_until: milkUntil },
       appliedAt.toISOString(),
     );
+
+    // Evento de dominio (F5, ADR-0005): se registra en el outbox dentro de la
+    // MISMA tx que el tratamiento — atómico. El relay lo publica post-commit.
+    const event: TreatmentApplied = {
+      eventId: randomUUID(),
+      type: TREATMENT_APPLIED,
+      occurredAt: appliedAt.toISOString(),
+      treatmentId: row.id,
+      animalId: body.animal_id,
+      productId: body.product_id,
+      appliedAt: appliedAt.toISOString(),
+      meatWithdrawalUntil: meatUntil,
+      milkWithdrawalUntil: milkUntil,
+    };
+    await this.events.publish(event);
+
     return { ...row, tag: animal.tag, product: product.name };
   }
 
