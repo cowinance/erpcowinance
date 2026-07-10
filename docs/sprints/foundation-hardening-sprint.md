@@ -102,8 +102,10 @@ Fortalecer la base técnica de Cowinance para que soporte el crecimiento hacia u
 
 **Fase 7 completa.** Siguiente (orden aprobado): **F8** (ADRs retrospectivos 0001-0003) → **F9** (métricas de calidad).
 
-### Fase 8 — Architecture Decision Records
-- **T8.1** `docs/adr/` + plantilla + ADR-001 Monolito Modular, ADR-002 PGlite y PostgreSQL, ADR-003 Offline-First, ADR-004 Domain Package, ADR-005 Event Bus. ADR-006 (estrategia de Value Objects, F2.4), ADR-007 (Server Authority sobre valores derivados, F4.4) y **ADR-008 (ownership de SyncHandlers, F6.1)** ya se escribieron al surgir la decisión — quedan pendientes solo los ADR retrospectivos (0001-0003, 0005).
+### Fase 8 — Architecture Decision Records — **COMPLETA**
+- **T8.1 — hecho.** Índice de ADRs completo (0001-0009). Los ADR de decisiones surgidas durante el sprint se escribieron al tomarse (0004 F1, 0006 F2.4, 0007 F4.4, 0008 F6.1, 0009 F6.3, 0005 F5). En F8 se redactaron los **retrospectivos** de decisiones de fundación: **0001 Monolito Modular, 0002 PGlite/PostgreSQL, 0003 Offline-First** — en formato MADR, separando explícitamente lo implementado/verificado de la evolución futura (roadmap).
+
+**Fase 8 completa.** Siguiente: **F9** (métricas de calidad — formalizar tooling + `npm run audit:arch`).
 
 ### Fase 9 — Estrategia de métricas de calidad
 - **T9.1** Tooling: `vitest` (cobertura), regla de complejidad ciclomática (`eslint`/`ts-complex`), `dpdm`/`madge` (dependencias circulares + grafo de acoplamiento), `jscpd` (duplicación), log de tiempo de compilación.
