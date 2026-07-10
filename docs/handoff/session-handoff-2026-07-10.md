@@ -229,8 +229,9 @@ Inventario, Compras/Ventas/CRM, Finanzas/Contabilidad, Agricultura, Pasturas, Le
 
 ## 7. Deuda técnica (vigente y por qué no se resolvió aún)
 
-1. **Regla de negocio duplicada** (retiro carne/leche y fecha probable de parto en `health.service`, `repro.service` y `apps/mobile/SyncContext`). *Por qué sigue:* se resuelve en **F4** (servicios de dominio); F2 crea los VOs que F4 usará, evitando tocar los archivos dos veces.
-2. **`sync.service` es un God object (581 líneas)** que escribe en todas las tablas vía un switch central. *Por qué:* se parte en handlers en **F6**.
+1. **Regla de negocio duplicada** (retiro carne/leche y fecha probable de parto en `health.service`, `repro.service` y `apps/mobile/SyncContext`). *Resuelto en F4* (servicios de dominio en `packages/domain`).
+2. **`sync.service` God object del camino de escritura.** *Resuelto en F6:* 9/9 tablas en `SyncHandler` por bounded context; `sync.service.ts` 687→271 líneas.
+2b. **`bootstrap()` de sync todavía contiene lógica de proyección de dominio** (`sync.service.ts:116-207`): arma a mano la forma de `animals` (con joins a categorías/lotes/caravanas/pesajes), `pregnancies` y `products_veterinary` al formato de sync. Hallazgo de la revisión de cierre de F6. *Por qué sigue:* estuvo **fuera del alcance declarado de F6** (T6.1-T6.3 fueron el camino de *apply*/escritura, no el de *snapshot*/lectura). Es el contrapeso simétrico del `SyncHandler`: un `SyncSnapshot`/`BootstrapProvider` por módulo lo descompondría. **Deuda arquitectónica registrada** (revisión F6); se evaluará dentro de una evolución de snapshots/proyecciones con ownership por dominio (posiblemente ligado a F7). No se abre ahora para no mezclar una refactorización lateral con Event Bus + Outbox (F5).
 3. **`dashboard.controller` con 22 SQL cross-domain**. *Por qué:* se extrae a service + proyección en **F7**.
 4. **Sin Event Bus**: los efectos (alertas, timeline) están acoplados a los writes. *Por qué:* se para el bus en **F5**; migrar consumidores es post-sprint.
 5. **Cobertura de tests no medida formalmente** (solo dominio + sync-core + golden). *Por qué:* F9 activa `--coverage`.

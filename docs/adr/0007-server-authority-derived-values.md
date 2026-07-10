@@ -87,9 +87,18 @@ cliente), recién ahí se evalúa una categoría de conflicto propia.
   derivados, pero el servidor mantiene la autoridad sobre los valores calculados por reglas de
   dominio"* — reutilizable para cálculos genéticos, índices productivos o predicciones de IA, sin
   rediseñar el mecanismo de sync cada vez.
-- **Costo:** `applyEvent` y `applyPregnancyPut` ganan una consulta adicional (producto veterinario;
-  último servicio reproductivo) y, en `pregnancies`, un `HlcClock` propio del proceso servidor.
-  Complejidad concentrada en dos funciones ya existentes, no en una capa nueva.
+- **Costo:** el camino de sync gana una consulta adicional (producto veterinario; último servicio
+  reproductivo) y, en `pregnancies`, un `HlcClock` propio del proceso servidor. Complejidad
+  concentrada en el recompute, no en una capa nueva.
 - **Explícitamente diferido:** `category_code`, cualquier campo derivado fuera de retiro/gestación,
   y la categoría de conflicto `recompute_mismatch` — se evalúan cuando (y si) aparece evidencia de
   necesidad real, mismo criterio que el resto del sprint.
+
+> **Nota post-F6 (actualización de referencias, decisión sin cambios):** este ADR se escribió en
+> F4.4, cuando la lógica vivía en `sync.service.ts` (`applyEvent`, rama `treatments`; y
+> `applyPregnancyPut`). En **F6** esos métodos se eliminaron y la lógica de Server Authority se
+> movió **verbatim** a los `SyncHandler` de cada dominio: el recompute de retiro está en
+> `apps/api/src/modules/health/sync/treatment-sync.handler.ts` y el de `expected_due_date` (con el
+> `HlcClock('server')`) en `apps/api/src/modules/repro/sync/pregnancy-sync.handler.ts`. La
+> **decisión** de este ADR no cambia; solo se actualizan las referencias para no apuntar a métodos
+> que ya no existen (ver ADR-0008).
