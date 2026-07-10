@@ -9,6 +9,7 @@
     "start:dev": "nest start --watch"
   },
   "dependencies": {
+    "@cowinance/domain": "*",
     "@cowinance/sync-core": "*",
     "@electric-sql/pglite": "^0.3.14",
     "@nestjs/common": "^11.0.0",
