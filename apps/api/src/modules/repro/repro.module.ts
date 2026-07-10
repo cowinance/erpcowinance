@@ -4,9 +4,10 @@ import { ReproService } from './repro.service';
 import { BreedingEventSyncHandler } from './sync/breeding-event-sync.handler';
 import { CalvingSyncHandler } from './sync/calving-sync.handler';
 import { CalvingOffspringSyncHandler } from './sync/calving-offspring-sync.handler';
+import { PregnancySyncHandler } from './sync/pregnancy-sync.handler';
 
 @Module({
   controllers: [ReproController],
-  providers: [ReproService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler],
+  providers: [ReproService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler, PregnancySyncHandler],
 })
 export class ReproModule {}
