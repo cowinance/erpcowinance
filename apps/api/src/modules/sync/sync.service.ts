@@ -38,8 +38,8 @@ const ANIMAL_FIELDS = new Set([
 const PREGNANCY_FIELDS = new Set(['animal_id', 'status', 'diagnosis_date', 'expected_due_date', 'method', 'closed_at']);
 
 // 'treatments' migró al registry (F6.1, TreatmentSyncHandler) — ya no pasa por applyEvent.
-// 'animal_events' (F6.3) y 'vaccinations' (F6.3-B) migraron al registry — ya no pasan por applyEvent.
-const EVENT_TABLES = new Set(['weighings', 'breeding_events', 'calvings', 'calving_offspring']);
+// 'animal_events', 'vaccinations' y 'weighings' migraron al registry (F6.3/F6.3-B) — ya no pasan por applyEvent.
+const EVENT_TABLES = new Set(['breeding_events', 'calvings', 'calving_offspring']);
 
 @Injectable()
 export class SyncService {
@@ -522,25 +522,10 @@ export class SyncService {
     return conflicts;
   }
 
-  /** Tablas evento restantes (sin lógica de negocio) — 'treatments' (F6.1) y 'animal_events' (F6.3) migraron al registry. */
+  /** Tablas evento restantes (sin lógica de negocio) — treatments/animal_events/vaccinations/weighings ya migraron al registry. */
   private async applyEvent(q: Q, table: string, rowId: string, row: Record<string, unknown>): Promise<void> {
     const t = this.db.tenant;
-    if (table === 'weighings') {
-      await q.query(
-        `INSERT INTO weighings (id, tenant_id, animal_id, weighed_at, weight_kg, method, body_condition, device_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-        [
-          rowId,
-          t,
-          row['animal_id'],
-          row['weighed_at'] ?? new Date().toISOString(),
-          row['weight_kg'],
-          row['method'] ?? 'scale',
-          row['body_condition'] ?? null,
-          null, // device_id referencia a dispositivos IoT (báscula), no al sync_device
-        ],
-      );
-    } else if (table === 'breeding_events') {
+    if (table === 'breeding_events') {
       await q.query(
         `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, notes, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
