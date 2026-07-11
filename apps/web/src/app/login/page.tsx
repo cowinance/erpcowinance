@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { login } from '@/lib/auth';
 
 const inputCls =
-  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
+  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -41,11 +41,11 @@ export default function LoginPage() {
             C
           </div>
           <h1 className="text-xl font-semibold">Cowinance</h1>
-          <p className="mt-1 text-[13px] text-ink-3">El sistema operativo de tu finca</p>
+          <p className="mt-1 text-body text-ink-3">El sistema operativo de tu finca</p>
         </div>
         <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
           <label className="block">
-            <span className="mb-1 block text-[12px] font-medium text-ink-2">Email</span>
+            <span className="mb-1 block text-label font-medium text-ink-2">Email</span>
             <input
               name="email"
               type="email"
@@ -59,7 +59,7 @@ export default function LoginPage() {
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] font-medium text-ink-2">Contraseña</span>
+            <span className="mb-1 block text-label font-medium text-ink-2">Contraseña</span>
             <input
               name="password"
               type="password"
@@ -70,18 +70,18 @@ export default function LoginPage() {
             />
           </label>
           {error && (
-            <p role="alert" className="text-[12px] text-danger">
+            <p role="alert" className="text-label text-danger">
               {error}
             </p>
           )}
           <button
             type="submit"
             disabled={busy}
-            className="h-10 w-full rounded-md bg-brand text-[14px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="h-10 w-full rounded-md bg-brand text-input font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {busy ? 'Ingresando…' : 'Ingresar'}
           </button>
-          <div className="flex items-center justify-between text-[12px]">
+          <div className="flex items-center justify-between text-label">
             <Link href="/register" className="font-medium text-brand hover:underline">
               Crear cuenta
             </Link>

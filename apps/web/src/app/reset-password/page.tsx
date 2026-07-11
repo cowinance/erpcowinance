@@ -53,7 +53,7 @@ export default function ResetPasswordPage() {
     return (
       <AuthShell title="Contraseña actualizada">
         <div role="status" className="space-y-4">
-          <p className="text-center text-[13px] text-ink-2">
+          <p className="text-center text-body text-ink-2">
             Tu contraseña se restableció. Iniciá sesión con la nueva contraseña.
           </p>
           <PrimaryLink href="/login">Ir a iniciar sesión</PrimaryLink>
@@ -66,13 +66,13 @@ export default function ResetPasswordPage() {
     return (
       <AuthShell title="Enlace no válido">
         <div className="space-y-4">
-          <p role="alert" className="text-center text-[13px] text-ink-2">
+          <p role="alert" className="text-center text-body text-ink-2">
             {state === 'missing'
               ? 'Este enlace no incluye un código de restablecimiento.'
               : 'El enlace de restablecimiento no es válido, expiró o ya se usó.'}
           </p>
           <PrimaryLink href="/forgot-password">Solicitar un enlace nuevo</PrimaryLink>
-          <p className="text-center text-[12px] text-ink-3">
+          <p className="text-center text-label text-ink-3">
             <Link href="/login" className="font-medium text-brand hover:underline">
               Volver a iniciar sesión
             </Link>
@@ -87,7 +87,7 @@ export default function ResetPasswordPage() {
     <AuthShell title="Nueva contraseña" subtitle="Elegí una contraseña para tu cuenta">
       <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
         <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">Nueva contraseña</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">Nueva contraseña</span>
           <input
             name="password"
             type="password"
@@ -100,7 +100,7 @@ export default function ResetPasswordPage() {
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">Repetir contraseña</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">Repetir contraseña</span>
           <input
             name="confirm"
             type="password"
@@ -112,7 +112,7 @@ export default function ResetPasswordPage() {
           />
         </label>
         {error && (
-          <p role="alert" className="text-[12px] text-danger">
+          <p role="alert" className="text-label text-danger">
             {error}
           </p>
         )}

@@ -11,7 +11,7 @@ export function Card({ children, className = '' }: { children: React.ReactNode; 
 export function CardTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-center justify-between">
-      <h2 className="text-[15px] font-semibold">{children}</h2>
+      <h2 className="text-subheading font-semibold">{children}</h2>
       {action}
     </div>
   );
@@ -61,7 +61,7 @@ const STATUS_STYLE: Record<string, string> = {
 export function StatusBadge({ status, label }: { status: string; label: string }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[status] ?? STATUS_STYLE.active}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-caption font-medium ${STATUS_STYLE[status] ?? STATUS_STYLE.active}`}
     >
       {label}
     </span>
@@ -69,7 +69,7 @@ export function StatusBadge({ status, label }: { status: string; label: string }
 }
 
 export function TagMono({ children }: { children: React.ReactNode }) {
-  return <span className="font-mono text-[13px] font-medium tracking-wide">{children}</span>;
+  return <span className="font-mono text-body font-medium tracking-wide">{children}</span>;
 }
 
 export function EmptyState({
@@ -85,12 +85,12 @@ export function EmptyState({
 }) {
   return (
     <div className="py-14 text-center">
-      <div className="text-[15px] font-medium">{title}</div>
-      <p className="mx-auto mt-1 max-w-sm text-[13px] text-ink-3">{body}</p>
+      <div className="text-subheading font-medium">{title}</div>
+      <p className="mx-auto mt-1 max-w-sm text-body text-ink-3">{body}</p>
       {actionHref && actionLabel && (
         <Link
           href={actionHref}
-          className="mt-4 inline-flex h-9 items-center rounded-md bg-brand px-4 text-[13px] font-medium text-white"
+          className="mt-4 inline-flex h-9 items-center rounded-md bg-brand px-4 text-body font-medium text-white"
         >
           {actionLabel}
         </Link>

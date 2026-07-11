@@ -86,7 +86,7 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors duration-75 ${
+      className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-body transition-colors duration-75 ${
         active ? 'bg-brand-soft font-medium text-ink' : 'text-ink-2 hover:bg-sunken hover:text-ink'
       }`}
     >
@@ -94,7 +94,7 @@ function NavItem({
       <span className="flex-1">{label}</span>
       {badge != null && badge > 0 && (
         <span
-          className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white ${
+          className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-compat-10 font-semibold text-white ${
             badgeTone === 'danger' ? 'bg-danger' : 'bg-warning'
           }`}
         >
@@ -130,28 +130,28 @@ export function Sidebar({
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sunken px-3 pt-4 pb-3 max-lg:hidden">
       {/* Cabecera de contexto: Organización → Finca */}
       <button className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-brand-soft">
-        <div className="flex size-7 items-center justify-center rounded-md bg-brand text-[12px] font-semibold text-white">
+        <div className="flex size-7 items-center justify-center rounded-md bg-brand text-label font-semibold text-white">
           {initials || 'CW'}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold">{farm}</div>
-          <div className="truncate text-[11px] text-ink-3">{orgName ?? '—'}</div>
+          <div className="truncate text-body font-semibold">{farm}</div>
+          <div className="truncate text-caption text-ink-3">{orgName ?? '—'}</div>
         </div>
         <ChevronsUpDown size={14} className="text-ink-3" />
       </button>
 
       {/* Buscador global (command palette ⌘K, próximamente) */}
-      <button className="mt-3 flex h-8 items-center gap-2 rounded-md border border-subtle bg-surface px-2.5 text-[13px] text-ink-3">
+      <button className="mt-3 flex h-8 items-center gap-2 rounded-md border border-subtle bg-surface px-2.5 text-body text-ink-3">
         <Search size={15} strokeWidth={1.75} />
         <span className="flex-1 text-left">Buscar…</span>
-        <kbd className="rounded border border-subtle bg-sunken px-1 font-mono text-[10px]">⌘K</kbd>
+        <kbd className="rounded border border-subtle bg-sunken px-1 font-mono text-compat-10">⌘K</kbd>
       </button>
 
       <nav className="mt-4 flex-1 space-y-5 overflow-y-auto">
         {SECTIONS.map((s) => (
           <div key={s.title}>
             {s.title && (
-              <div className="mb-1 px-2.5 text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+              <div className="mb-1 px-2.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
                 {s.title}
               </div>
             )}
@@ -185,7 +185,7 @@ export function Sidebar({
             document.cookie = `${REFRESH_COOKIE}=; path=/; max-age=0`;
             window.location.href = '/login';
           }}
-          className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink"
+          className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-body text-ink-2 hover:bg-sunken hover:text-ink"
         >
           <LogOut size={18} strokeWidth={1.75} />
           <span className="truncate">Cerrar sesión{userName ? ` (${userName.split(' ')[0]})` : ''}</span>
@@ -193,7 +193,7 @@ export function Sidebar({
         {/* Indicador de sincronización: información de primera clase (doc §3.1) */}
         <Link
           href="/sincronizacion"
-          className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-ink-3 hover:bg-sunken hover:text-ink"
+          className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-label text-ink-3 hover:bg-sunken hover:text-ink"
         >
           <span className="relative flex size-2">
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40" />

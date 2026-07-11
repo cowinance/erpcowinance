@@ -6,7 +6,7 @@ import { API_URL } from '@/lib/api';
 import { login, readErrorTitle } from '@/lib/auth';
 
 const inputCls =
-  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
+  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
 
 interface Country {
   code: string;
@@ -89,13 +89,13 @@ export default function RegisterPage() {
     return (
       <Shell>
         <div role="status" className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 text-center shadow-[var(--shadow-1)]">
-          <h2 className="text-[15px] font-semibold">Tu cuenta fue creada</h2>
-          <p className="text-[13px] text-ink-2">
+          <h2 className="text-subheading font-semibold">Tu cuenta fue creada</h2>
+          <p className="text-body text-ink-2">
             No pudimos iniciar tu sesión automáticamente. Ingresá con tu email y contraseña para continuar.
           </p>
           <Link
             href={`/login?email=${encodeURIComponent(created.email)}`}
-            className="inline-flex h-10 w-full items-center justify-center rounded-md bg-brand text-[14px] font-medium text-white hover:opacity-90"
+            className="inline-flex h-10 w-full items-center justify-center rounded-md bg-brand text-input font-medium text-white hover:opacity-90"
           >
             Iniciar sesión
           </Link>
@@ -143,30 +143,30 @@ export default function RegisterPage() {
               ))}
             </select>
           ) : countriesError ? (
-            <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-strong bg-surface px-3 py-2 text-[13px] text-danger">
+            <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-strong bg-surface px-3 py-2 text-body text-danger">
               <span>No se pudieron cargar los países.</span>
               <button type="button" onClick={loadCountries} className="font-medium text-brand hover:underline">
                 Reintentar
               </button>
             </div>
           ) : (
-            <p className="text-[13px] text-ink-3">Cargando países…</p>
+            <p className="text-body text-ink-3">Cargando países…</p>
           )}
         </Field>
 
         {error && (
-          <p role="alert" className="text-[12px] text-danger">
+          <p role="alert" className="text-label text-danger">
             {error}
           </p>
         )}
         <button
           type="submit"
           disabled={busy || !countries}
-          className="h-10 w-full rounded-md bg-brand text-[14px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="h-10 w-full rounded-md bg-brand text-input font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {busy ? 'Creando cuenta…' : 'Crear cuenta'}
         </button>
-        <p className="text-center text-[12px] text-ink-3">
+        <p className="text-center text-label text-ink-3">
           ¿Ya tenés cuenta?{' '}
           <Link href="/login" className="font-medium text-brand hover:underline">
             Iniciá sesión
@@ -184,7 +184,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-brand text-[17px] font-bold text-white">C</div>
           <h1 className="text-xl font-semibold">Crear tu cuenta</h1>
-          <p className="mt-1 text-[13px] text-ink-3">Empezá a gestionar tu finca en minutos</p>
+          <p className="mt-1 text-body text-ink-3">Empezá a gestionar tu finca en minutos</p>
         </div>
         {children}
       </div>
@@ -195,7 +195,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[12px] font-medium text-ink-2">{label}</span>
+      <span className="mb-1 block text-label font-medium text-ink-2">{label}</span>
       {children}
     </label>
   );

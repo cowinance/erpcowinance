@@ -30,10 +30,10 @@ export default function ForgotPasswordPage() {
     return (
       <AuthShell title="Revisá tu correo">
         <div role="status" className="space-y-4">
-          <p className="text-center text-[13px] text-ink-2">
+          <p className="text-center text-body text-ink-2">
             Si existe una cuenta con ese email, te enviamos un enlace para restablecer tu contraseña.
           </p>
-          <p className="text-center text-[12px] text-ink-3">
+          <p className="text-center text-label text-ink-3">
             <Link href="/login" className="font-medium text-brand hover:underline">
               Volver a iniciar sesión
             </Link>
@@ -47,18 +47,18 @@ export default function ForgotPasswordPage() {
     <AuthShell title="Restablecer contraseña" subtitle="Te enviaremos un enlace a tu email">
       <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
         <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">Email</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">Email</span>
           <input name="email" type="email" required autoFocus autoComplete="email" placeholder="tu@email.com" className={inputCls} />
         </label>
         {error && (
-          <p role="alert" className="text-[12px] text-danger">
+          <p role="alert" className="text-label text-danger">
             {error}
           </p>
         )}
         <button type="submit" disabled={busy} className={primaryBtnCls}>
           {busy ? 'Enviando…' : 'Enviar enlace'}
         </button>
-        <p className="text-center text-[12px] text-ink-3">
+        <p className="text-center text-label text-ink-3">
           <Link href="/login" className="font-medium text-brand hover:underline">
             Volver a iniciar sesión
           </Link>

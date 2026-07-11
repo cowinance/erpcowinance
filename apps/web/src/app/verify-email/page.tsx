@@ -29,7 +29,7 @@ export default function VerifyEmailPage() {
   if (state === 'verifying') {
     return (
       <AuthShell title="Verificando tu email" subtitle="Un momento…">
-        <p role="status" className="text-center text-[13px] text-ink-2">
+        <p role="status" className="text-center text-body text-ink-2">
           Estamos confirmando tu cuenta.
         </p>
       </AuthShell>
@@ -40,7 +40,7 @@ export default function VerifyEmailPage() {
     return (
       <AuthShell title="Email verificado" subtitle="Tu cuenta quedó confirmada.">
         <div role="status" className="space-y-3">
-          <p className="text-center text-[13px] text-ink-2">Ya podés seguir usando Cowinance.</p>
+          <p className="text-center text-body text-ink-2">Ya podés seguir usando Cowinance.</p>
           {hasSession() ? <PrimaryLink href="/">Ir al panel</PrimaryLink> : <PrimaryLink href="/login">Ir a iniciar sesión</PrimaryLink>}
         </div>
       </AuthShell>
@@ -59,11 +59,11 @@ export default function VerifyEmailPage() {
   return (
     <AuthShell title={title}>
       <div className="space-y-4">
-        <p role="alert" className="text-center text-[13px] text-ink-2">
+        <p role="alert" className="text-center text-body text-ink-2">
           {message}
         </p>
         <ResendVerification />
-        <p className="text-center text-[12px] text-ink-3">
+        <p className="text-center text-label text-ink-3">
           <Link href="/login" className="font-medium text-brand hover:underline">
             Ir a iniciar sesión
           </Link>
@@ -97,7 +97,7 @@ function ResendVerification() {
 
   if (sent) {
     return (
-      <p role="status" className="rounded-md border border-subtle bg-sunken px-3 py-2 text-center text-[13px] text-ink-2">
+      <p role="status" className="rounded-md border border-subtle bg-sunken px-3 py-2 text-center text-body text-ink-2">
         Si el email corresponde a una cuenta sin verificar, te enviamos un nuevo enlace.
       </p>
     );
@@ -106,11 +106,11 @@ function ResendVerification() {
   return (
     <form onSubmit={submit} className="space-y-3">
       <label className="block">
-        <span className="mb-1 block text-[12px] font-medium text-ink-2">Reenviar verificación a tu email</span>
+        <span className="mb-1 block text-label font-medium text-ink-2">Reenviar verificación a tu email</span>
         <input name="email" type="email" required autoFocus autoComplete="email" placeholder="tu@email.com" className={inputCls} />
       </label>
       {error && (
-        <p role="alert" className="text-[12px] text-danger">
+        <p role="alert" className="text-label text-danger">
           {error}
         </p>
       )}

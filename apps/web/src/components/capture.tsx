@@ -5,8 +5,8 @@ import { API_URL, authHeaders } from '@/lib/api';
 import { Check, X } from 'lucide-react';
 
 export const inputCls =
-  'h-9 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
-export const labelCls = 'mb-1 block text-[12px] font-medium text-ink-2';
+  'h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
+export const labelCls = 'mb-1 block text-label font-medium text-ink-2';
 
 export function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onChange: (t: string) => void }) {
   return (
@@ -16,7 +16,7 @@ export function Tabs({ tabs, active, onChange }: { tabs: string[]; active: strin
           key={t}
           type="button"
           onClick={() => onChange(t)}
-          className={`h-7 flex-1 rounded px-3 text-[12px] font-medium whitespace-nowrap transition-colors ${
+          className={`h-7 flex-1 rounded px-3 text-label font-medium whitespace-nowrap transition-colors ${
             active === t ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2 hover:text-ink'
           }`}
         >
@@ -68,8 +68,8 @@ export function AnimalPicker({ animal, onSelect }: { animal: PickedAnimal | null
   if (animal) {
     return (
       <div className="flex items-center gap-3 rounded-md border border-subtle bg-sunken px-3 py-2">
-        <span className="font-mono text-[15px] font-semibold">{animal.tag}</span>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">
+        <span className="font-mono text-subheading font-semibold">{animal.tag}</span>
+        <span className="min-w-0 flex-1 truncate text-label text-ink-2">
           {animal.name ? `${animal.name} · ` : ''}
           {animal.category ?? ''}
           {animal.last_weight_kg ? ` · ${Math.round(animal.last_weight_kg)} kg` : ''}
@@ -96,12 +96,12 @@ export function AnimalPicker({ animal, onSelect }: { animal: PickedAnimal | null
           type="button"
           onClick={lookup}
           disabled={busy || !value.trim()}
-          className="h-9 shrink-0 rounded-md border border-strong px-3 text-[13px] font-medium text-ink-2 hover:bg-sunken disabled:opacity-50"
+          className="h-9 shrink-0 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken disabled:opacity-50"
         >
           {busy ? '…' : 'Buscar'}
         </button>
       </div>
-      {error && <p className="mt-1 text-[12px] text-danger">{error}</p>}
+      {error && <p className="mt-1 text-label text-danger">{error}</p>}
     </div>
   );
 }
@@ -136,7 +136,7 @@ export function useSubmit() {
 }
 
 export function SubmitFeedback({ state, message }: { state: string; message: string }) {
-  if (state === 'saved') return <p className="text-[12px] font-medium text-success">✓ {message}</p>;
-  if (state === 'error') return <p className="text-[12px] text-danger">{message}</p>;
+  if (state === 'saved') return <p className="text-label font-medium text-success">✓ {message}</p>;
+  if (state === 'error') return <p className="text-label text-danger">{message}</p>;
   return null;
 }
