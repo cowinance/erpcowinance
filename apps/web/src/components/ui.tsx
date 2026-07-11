@@ -32,14 +32,14 @@ export function KpiCard({
 }) {
   return (
     <Card>
-      <div className="text-[12px] text-ink-2">{label}</div>
-      <div className="tnum mt-1 text-[30px] leading-9 font-semibold">
+      <div className="text-label text-ink-2">{label}</div>
+      <div className="tnum mt-1 text-display leading-9 font-semibold">
         {value}
-        {unit && <span className="ml-1 text-[13px] font-normal text-ink-2">{unit}</span>}
+        {unit && <span className="ml-1 text-body font-normal text-ink-2">{unit}</span>}
       </div>
       {hint && (
         <div
-          className={`mt-1 text-[12px] ${
+          className={`mt-1 text-label ${
             tone === 'success' ? 'text-success' : tone === 'warning' ? 'text-warning' : tone === 'danger' ? 'text-danger' : 'text-ink-3'
           }`}
         >
