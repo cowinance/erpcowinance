@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AuthShell, PrimaryLink, inputCls, primaryBtnCls } from '@/components/AuthShell';
+import { AuthShell, PrimaryLink, inputCls } from '@/components/AuthShell';
 import { postPublic, hasSession } from '@/lib/auth';
+import { Button } from '@/components/Button';
 
 type State = 'verifying' | 'success' | 'missing' | 'invalid' | 'unavailable';
 
@@ -114,9 +115,9 @@ function ResendVerification() {
           {error}
         </p>
       )}
-      <button type="submit" disabled={busy} className={primaryBtnCls}>
+      <Button type="submit" size="lg" fullWidth loading={busy}>
         {busy ? 'Enviando…' : 'Reenviar verificación'}
-      </button>
+      </Button>
     </form>
   );
 }

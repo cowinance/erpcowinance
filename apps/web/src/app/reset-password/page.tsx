@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AuthShell, PrimaryLink, inputCls, primaryBtnCls } from '@/components/AuthShell';
+import { AuthShell, PrimaryLink, inputCls } from '@/components/AuthShell';
 import { postPublic, clearSession } from '@/lib/auth';
+import { Button } from '@/components/Button';
 
 type State = 'form' | 'sending' | 'success' | 'missing' | 'invalid' | 'unavailable';
 
@@ -116,9 +117,9 @@ export default function ResetPasswordPage() {
             {error}
           </p>
         )}
-        <button type="submit" disabled={busy} className={primaryBtnCls}>
+        <Button type="submit" size="lg" fullWidth loading={busy}>
           {busy ? 'Guardando…' : 'Guardar contraseña'}
-        </button>
+        </Button>
       </form>
     </AuthShell>
   );

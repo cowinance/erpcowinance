@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { AuthShell, inputCls, primaryBtnCls } from '@/components/AuthShell';
+import { AuthShell, inputCls } from '@/components/AuthShell';
 import { postPublic } from '@/lib/auth';
+import { Button } from '@/components/Button';
 
 export default function ForgotPasswordPage() {
   const [busy, setBusy] = useState(false);
@@ -55,9 +56,9 @@ export default function ForgotPasswordPage() {
             {error}
           </p>
         )}
-        <button type="submit" disabled={busy} className={primaryBtnCls}>
+        <Button type="submit" size="lg" fullWidth loading={busy}>
           {busy ? 'Enviando…' : 'Enviar enlace'}
-        </button>
+        </Button>
         <p className="text-center text-label text-ink-3">
           <Link href="/login" className="font-medium text-brand hover:underline">
             Volver a iniciar sesión

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { login } from '@/lib/auth';
+import { Button } from '@/components/Button';
 
 const inputCls =
   'h-10 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
@@ -74,13 +75,9 @@ export default function LoginPage() {
               {error}
             </p>
           )}
-          <button
-            type="submit"
-            disabled={busy}
-            className="h-10 w-full rounded-md bg-brand text-input font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
+          <Button type="submit" size="lg" fullWidth loading={busy}>
             {busy ? 'Ingresando…' : 'Ingresar'}
-          </button>
+          </Button>
           <div className="flex items-center justify-between text-label">
             <Link href="/register" className="font-medium text-brand hover:underline">
               Crear cuenta
