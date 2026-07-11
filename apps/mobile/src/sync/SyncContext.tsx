@@ -8,7 +8,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import { SyncDevice, Changeset, Op, PushResult, PullResult } from '@cowinance/sync-core';
+import { SyncDevice, Changeset, Op, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
 import {
   computeWithdrawal,
   computeExpectedDueDateFromService,
@@ -33,34 +33,9 @@ interface PulledChangesetWire {
   ops: Op[];
 }
 
-/**
- * Changeset RECIBIDO por pull. Tipo SEPARADO de `Changeset` (autoría de
- * dispositivo, no-null) para no debilitar el contrato de lo que un dispositivo
- * crea/empuja: uno de origen servidor (ADR-0016) llega con `deviceId`/`seq` nulos.
- */
-interface RemoteChangeset {
-  id: string;
-  deviceId: string | null;
-  seq: number | null;
-  hlc: string;
-  schemaVersion: number;
-  ops: Op[];
-}
-
-/**
- * Adapta un changeset remoto al `Changeset` que consume sync-core (`d.sync`). El
- * merge solo lee `hlc`/`ops` (+ `cursor`); `deviceId`/`seq` no se usan. Hoy no se
- * entregan changesets de origen servidor (no existen filas source='server'), así
- * que aquí `deviceId`/`seq` son no-null. NO se fabrica identidad de dispositivo:
- * si llegara un server-origin antes de su ruta de aplicación de cliente, se
- * rechaza explícitamente (esa ruta llega en una ola posterior).
- */
-function toAppliableChangeset(c: RemoteChangeset): Changeset {
-  if (c.deviceId === null || c.seq === null) {
-    throw new Error('sync: changeset de origen servidor recibido sin soporte de cliente (ADR-0016, ola futura)');
-  }
-  return { id: c.id, deviceId: c.deviceId, seq: c.seq, hlc: c.hlc, schemaVersion: c.schemaVersion, ops: c.ops };
-}
+// `RemoteChangeset` (changeset recibido por pull, con deviceId/seq nullable) vive
+// ahora en sync-core (ADR-0016, P-a). El apply de un server-origin lo hace
+// SyncDevice.sync por ops/hlc/cursor; ya no hace falta puente ni throw en el móvil.
 
 export interface AnimalRow {
   id: string;
@@ -244,7 +219,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         return {
           cursor: j.cursor,
           changesets: j.changesets.map((c) => {
-            const remote: RemoteChangeset = {
+            // Server-origin (deviceId/seq null) se aplica directo por SyncDevice.sync
+            // (ops/hlc/cursor); ya no se rechaza ni se fabrica identidad (ADR-0016).
+            const changeset: RemoteChangeset = {
               id: c.id,
               deviceId: c.device_id,
               seq: c.seq,
@@ -252,7 +229,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
               schemaVersion: c.schema_version,
               ops: c.ops,
             };
-            return { serverSeq: c.server_seq, changeset: toAppliableChangeset(remote) };
+            return { serverSeq: c.server_seq, changeset };
           }),
         };
       },
