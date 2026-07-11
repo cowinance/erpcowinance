@@ -92,11 +92,27 @@ En producción el mismo DDL corre sobre PostgreSQL 17 + PostGIS + TimescaleDB (l
 
 ### Tokens de diseño (fuente única — ADR-0013)
 
-`packages/design-tokens/src/tokens.ts` es la **única fuente editable** de tokens (color/radio/sombra/fuente).
+`packages/design-tokens/src/tokens.ts` es la **única fuente editable** de tokens (color/radio/sombra/fuente,
+**escala tipográfica por roles**, **escala de spacing** y **contrato de densidad** — P1.4.3/ADR-0014).
 Los artefactos por plataforma se **derivan**, no se editan a mano:
 
 - **Web:** `apps/web/src/app/tokens.generated.css` (generado; `globals.css` lo importa). **No editar el `.css`.**
 - **Móvil:** `apps/mobile/src/theme.ts` es un adaptador que reexporta `T` desde la fuente.
+
+**Escala tipográfica (roles semánticos, P1.4.3).** Nada de `text-[Npx]`/`fontSize: N` mágicos: se usan **roles por función**
+(`text-<rol>` en web vía `@theme`; `T.type.<rol>` en móvil, números). Roles estables: `display, title, heading,
+subheading, input, body, label, caption, hero`. **Solo tamaño** — line-height, peso, tracking y color siguen siendo
+ejes separados. `typeCompat` (`text-compat-<n>` / `T.compat['<n>']`) son **aliases temporales de compatibilidad
+(deuda)** para valores no canónicos; no usar en código nuevo.
+
+**Escala de spacing (móvil, P1.4.3).** `T.space['<k>']` (grid 4px + sub-unidad 2px, claves estilo Tailwind:
+`['2']`=8, `['2.5']`=10, `['4']`=16…), solo para layout (padding/margin/gap), no dimensiones/alturas. La **web ya
+consume la escala de Tailwind**, así que `space` no se emite a web.
+
+**Excepciones documentadas** (behavior-preserving; deuda de convergencia futura): `text-xl` y `fontSize` de SVG (web);
+manga como superficie **bespoke** (web y móvil); identificadores mono de caravana, contenido de 14px, inputs de 15px y
+logo (móvil); base raíz `<body>`; `7`/`14` px de spacing móvil. Ver la nota de implementación de
+[ADR-0014](docs/adr/0014-design-system-specification.md).
 
 ```bash
 npm run tokens:build   # edita tokens.ts → regenera el CSS de la web (explícito)
@@ -111,9 +127,10 @@ Sobre la fuente de tokens, la **especificación completa** del sistema visual vi
 [`docs/design-system/P1.4.2-design-system-spec.md`](docs/design-system/P1.4.2-design-system-spec.md)
 (contrato del frontend: escala tipográfica por roles, spacing, densidad ERP, dark mode, iconografía,
 inventario de componentes, motion, accesibilidad AA y responsive). Las decisiones de arquitectura que
-de ella se derivan están en [ADR-0014](docs/adr/0014-design-system-specification.md). La especificación
-está **aprobada pero aún no implementada**: aplicar la escala, los primitivos y la navegación responsive
-es trabajo de P1.4.3+ (behavior-preserving, con Playwright y `tokens:check` como gates).
+de ella se derivan están en [ADR-0014](docs/adr/0014-design-system-specification.md). **P1.4.3 (aplicación de
+la escala tipográfica y de spacing, web + móvil) está cerrado** — behavior-preserving, ver la nota de
+implementación del ADR y el handoff. **Pendiente (P1.4.4+):** primitivos, aplicación de densidad, dark mode,
+iconografía y navegación responsive.
 
 ## E2E web — recorrido de onboarding (Playwright)
 
