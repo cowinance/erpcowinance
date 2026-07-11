@@ -88,7 +88,7 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
         className="hidden"
         onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
       />
-      {error && <p className="mb-2 text-[12px] text-danger">{error}</p>}
+      {error && <p className="mb-2 text-label text-danger">{error}</p>}
 
       {loading ? (
         <div className="flex justify-center py-8 text-ink-3">
@@ -102,7 +102,7 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
             className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-strong text-ink-3 hover:bg-sunken disabled:opacity-50"
           >
             {uploading ? <Loader2 size={20} className="animate-spin" /> : <ImagePlus size={20} strokeWidth={1.75} />}
-            <span className="text-[11px] font-medium">{uploading ? 'Subiendo…' : 'Agregar foto'}</span>
+            <span className="text-caption font-medium">{uploading ? 'Subiendo…' : 'Agregar foto'}</span>
           </button>
 
           {photos.map((p) => (
@@ -110,7 +110,7 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={fileUrl(p) ?? ''} alt={p.caption ?? 'Foto del animal'} className="size-full object-cover" />
               {p.is_primary && (
-                <span className="absolute top-1 left-1 inline-flex items-center gap-1 rounded-full bg-brand px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                <span className="absolute top-1 left-1 inline-flex items-center gap-1 rounded-full bg-brand px-1.5 py-0.5 text-compat-9 font-semibold text-white">
                   <Star size={9} fill="currentColor" /> Principal
                 </span>
               )}
@@ -137,7 +137,7 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
         </div>
       )}
       {!loading && photos.length === 0 && (
-        <p className="mt-2 text-[12px] text-ink-3">
+        <p className="mt-2 text-label text-ink-3">
           Sin fotos todavía. La primera que subas será la foto principal de la ficha.
         </p>
       )}

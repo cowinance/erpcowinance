@@ -32,7 +32,7 @@ export default async function AnimalsPage({
     <Link
       key={href}
       href={href}
-      className={`inline-flex h-7 items-center rounded-full border px-3 text-[12px] font-medium ${
+      className={`inline-flex h-7 items-center rounded-full border px-3 text-label font-medium ${
         active ? 'border-brand bg-brand-soft text-brand' : 'border-subtle bg-surface text-ink-2 hover:bg-sunken'
       }`}
     >
@@ -45,14 +45,14 @@ export default async function AnimalsPage({
       <div className="mb-5 flex items-end justify-between">
         <div>
           <h1 className="text-xl font-semibold">Animales</h1>
-          <p className="mt-0.5 text-[13px] text-ink-3">
+          <p className="mt-0.5 text-body text-ink-3">
             {animals.length} animales{' '}
             {params.status === 'all' ? '' : `${STATUS_LABELS[params.status ?? 'active']?.toLowerCase() ?? 'activo'}${animals.length === 1 ? '' : 's'}`}
           </p>
         </div>
         <Link
           href="/animales/nuevo"
-          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-[13px] font-medium text-white hover:opacity-90"
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-body font-medium text-white hover:opacity-90"
         >
           <Plus size={15} /> Nuevo animal
         </Link>
@@ -67,7 +67,7 @@ export default async function AnimalsPage({
             name="q"
             defaultValue={params.q ?? ''}
             placeholder="Caravana o nombre…"
-            className="h-8 w-64 rounded-md border border-strong bg-surface pl-8 text-[13px] outline-none placeholder:text-ink-3 focus:ring-2 focus:ring-brand"
+            className="h-8 w-64 rounded-md border border-strong bg-surface pl-8 text-body outline-none placeholder:text-ink-3 focus:ring-2 focus:ring-brand"
           />
         </form>
         {chip('/animales', 'Todas las categorías', !params.category)}
@@ -78,9 +78,9 @@ export default async function AnimalsPage({
 
       {/* Tabla maestra (doc diseño §10.4: filas 36 px, números tabulares) */}
       <div className="overflow-hidden rounded-[10px] border border-subtle bg-surface shadow-[var(--shadow-1)]">
-        <table className="w-full text-[13px]">
+        <table className="w-full text-body">
           <thead>
-            <tr className="h-8 border-b border-subtle bg-sunken text-left text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+            <tr className="h-8 border-b border-subtle bg-sunken text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
               <th className="pl-4">Caravana</th>
               <th>Nombre</th>
               <th>Categoría</th>
@@ -114,7 +114,7 @@ export default async function AnimalsPage({
                 <td className="tnum text-right font-medium">
                   {formatKg(a.last_weight_kg)}
                   {a.last_weighed_at && (
-                    <span className="ml-1.5 text-[11px] font-normal text-ink-3">{relativeTime(a.last_weighed_at)}</span>
+                    <span className="ml-1.5 text-caption font-normal text-ink-3">{relativeTime(a.last_weighed_at)}</span>
                   )}
                 </td>
                 <td className="tnum pr-2 text-right text-ink-2">{a.adg != null ? a.adg.toFixed(2) : '—'}</td>

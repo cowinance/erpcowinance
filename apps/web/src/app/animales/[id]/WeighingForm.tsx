@@ -45,7 +45,7 @@ export function WeighingForm({ animalId }: { animalId: string }) {
     <form onSubmit={submit} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">Peso (kg)</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">Peso (kg)</span>
           <input
             type="number"
             required
@@ -53,12 +53,12 @@ export function WeighingForm({ animalId }: { animalId: string }) {
             step="0.5"
             value={kg}
             onChange={(e) => setKg(e.target.value)}
-            className="tnum h-9 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand"
+            className="tnum h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand"
             placeholder="412"
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">Cond. corporal (1–5)</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">Cond. corporal (1–5)</span>
           <input
             type="number"
             min={1}
@@ -66,16 +66,16 @@ export function WeighingForm({ animalId }: { animalId: string }) {
             step="0.5"
             value={cc}
             onChange={(e) => setCc(e.target.value)}
-            className="tnum h-9 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand"
+            className="tnum h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand"
             placeholder="3.5"
           />
         </label>
       </div>
-      {state === 'error' && <p className="text-[12px] text-danger">{error}</p>}
+      {state === 'error' && <p className="text-label text-danger">{error}</p>}
       <button
         type="submit"
         disabled={state === 'saving' || !kg}
-        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-brand text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
       >
         {state === 'saved' ? (
           <>

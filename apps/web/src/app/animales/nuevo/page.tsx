@@ -8,11 +8,11 @@ export default async function NewAnimalPage() {
 
   return (
     <div className="mx-auto max-w-lg">
-      <Link href="/animales" className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-ink-2 hover:text-ink">
+      <Link href="/animales" className="mb-4 inline-flex items-center gap-1.5 text-body text-ink-2 hover:text-ink">
         <ArrowLeft size={14} /> Animales
       </Link>
       <h1 className="text-xl font-semibold">Nuevo animal</h1>
-      <p className="mt-0.5 mb-6 text-[13px] text-ink-3">
+      <p className="mt-0.5 mb-6 text-body text-ink-3">
         Alta manual — el alta por nacimiento, compra o importación masiva llega con el resto del módulo Hato.
       </p>
       <NewAnimalForm categories={categories ?? []} lots={lots ?? []} />

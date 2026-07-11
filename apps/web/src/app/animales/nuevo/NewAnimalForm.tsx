@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 
 const inputCls =
-  'h-9 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand';
-const labelCls = 'mb-1 block text-[12px] font-medium text-ink-2';
+  'h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand';
+const labelCls = 'mb-1 block text-label font-medium text-ink-2';
 
 export function NewAnimalForm({ categories, lots }: { categories: any[]; lots: any[] }) {
   const router = useRouter();
@@ -84,11 +84,11 @@ export function NewAnimalForm({ categories, lots }: { categories: any[]; lots: a
           </select>
         </label>
       </div>
-      {error && <p className="text-[12px] text-danger">{error}</p>}
+      {error && <p className="text-label text-danger">{error}</p>}
       <button
         type="submit"
         disabled={saving}
-        className="inline-flex h-9 w-full items-center justify-center rounded-md bg-brand text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+        className="inline-flex h-9 w-full items-center justify-center rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
       >
         {saving ? 'Guardando…' : 'Registrar animal'}
       </button>
