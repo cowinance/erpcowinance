@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, inputCls, labelCls, useSubmit } from '@/components/capture';
 import { AddProductForm } from './AddProductForm';
 import { Plus } from 'lucide-react';
+import { Button } from '@/components/Button';
 
 export function SanidadCapture({ products }: { products: any[] }) {
   const router = useRouter();
@@ -216,13 +217,9 @@ export function SanidadCapture({ products }: { products: any[] }) {
         )}
 
         <SubmitFeedback state={state} message={message} />
-        <button
-          type="submit"
-          disabled={!animal || state === 'saving'}
-          className="h-9 w-full rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
+        <Button type="submit" size="md" fullWidth loading={state === 'saving'} disabled={!animal}>
           {state === 'saving' ? 'Guardando…' : `Registrar ${tab.toLowerCase()}`}
-        </button>
+        </Button>
       </div>
     </form>
   );
