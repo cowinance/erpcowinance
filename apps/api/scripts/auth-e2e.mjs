@@ -67,6 +67,7 @@ async function main() {
   // 6. /auth/me
   const me = (await api('GET', '/auth/me', undefined, maria.access_token)).json;
   check('/auth/me devuelve actor y organización', me?.email === 'maria@elombu.com' && me?.organization?.name === 'Agropecuaria El Ombú');
+  check('/auth/me expone email_verified (demo sin verificar → false)', me?.email_verified === false, `email_verified=${me?.email_verified}`);
 
   // 7. El access de Jose sigue vivo (la revocación afecta refresh, no access vigentes)
   const stillValid = await api('GET', '/organizations/current', undefined, jose.access_token);

@@ -115,7 +115,20 @@ export class AuthService {
   async me() {
     const ctx = requestContext.getStore()!;
     const org = await this.db.one<any>(`SELECT id, name FROM organizations WHERE id = $1`, [ctx.tenantId]);
-    return { user_id: ctx.userId, name: ctx.name, email: ctx.email, role: ctx.role, organization: org };
+    // Estado de verificación de email (P1.2/P1.3): informativo, no bloquea el
+    // acceso (ADR-0011 C). La UI lo usa para el banner "verificá tu email".
+    const user = await this.db.one<{ email_verified_at: string | null }>(
+      `SELECT email_verified_at FROM users WHERE id = $1`,
+      [ctx.userId],
+    );
+    return {
+      user_id: ctx.userId,
+      name: ctx.name,
+      email: ctx.email,
+      role: ctx.role,
+      email_verified: !!user?.email_verified_at,
+      organization: org,
+    };
   }
 
   private async issueTokens(user: { id: string; email: string; full_name: string }, tenantId: string, role: string) {
