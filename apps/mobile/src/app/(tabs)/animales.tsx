@@ -18,7 +18,7 @@ function Row({ a }: { a: AnimalRow }) {
           {a.category ?? '—'}
           {a.name ? ` · ${a.name}` : ''}
         </Text>
-        <Text style={{ fontSize: 12, color: T.ink3 }}>{a.lot_name ?? 'sin lote'}</Text>
+        <Text style={{ fontSize: T.type.label, color: T.ink3 }}>{a.lot_name ?? 'sin lote'}</Text>
       </View>
       <Text style={styles.weight}>{a.last_weight_kg ? `${Math.round(a.last_weight_kg)} kg` : '—'}</Text>
     </Pressable>
@@ -43,8 +43,8 @@ export default function Animales() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <View style={{ padding: 16, paddingBottom: 8 }}>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: T.ink }}>Animales</Text>
-        <Text style={{ fontSize: 12, color: T.ink3, marginTop: 2 }}>
+        <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Animales</Text>
+        <Text style={{ fontSize: T.type.label, color: T.ink3, marginTop: 2 }}>
           {animals.length} activos · datos locales (funciona sin señal)
         </Text>
         <TextInput
@@ -79,11 +79,11 @@ const styles = StyleSheet.create({
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
     paddingHorizontal: 12,
-    fontSize: 14,
+    fontSize: T.type.input,
     color: T.ink,
     backgroundColor: T.surface,
   },
-  emptyNote: { fontSize: 13, color: T.ink3, textAlign: 'center' },
+  emptyNote: { fontSize: T.type.body, color: T.ink3, textAlign: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   tag: { fontFamily: 'monospace', fontSize: 15, fontWeight: '700', color: T.brand700, width: 56 },
   weight: { fontSize: 14, fontWeight: '600', color: T.ink, fontVariant: ['tabular-nums'] },

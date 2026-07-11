@@ -23,7 +23,7 @@ export default function Home() {
   if (sync.status === 'error') {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={{ fontSize: 16, fontWeight: '600', color: T.ink }}>No se pudo inicializar</Text>
+        <Text style={{ fontSize: T.compat['16'], fontWeight: '600', color: T.ink }}>No se pudo inicializar</Text>
         <Text style={{ color: T.ink2, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }}>
           El primer arranque necesita la API ({sync.errorMsg}). Después, la app funciona 100% offline.
         </Text>
@@ -48,14 +48,14 @@ export default function Home() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <View>
             <Text style={styles.h1}>{firstName ? `${greeting}, ${firstName}` : greeting}</Text>
-            <Text style={{ fontSize: 13, color: T.ink3, marginTop: 2 }}>{sync.farmName ?? 'Cowinance'}</Text>
+            <Text style={{ fontSize: T.type.body, color: T.ink3, marginTop: 2 }}>{sync.farmName ?? 'Cowinance'}</Text>
           </View>
           <SyncDot pending={sync.pendingCount} />
         </View>
 
         {sync.offlineSim && (
           <View style={styles.offlineBanner}>
-            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>
+            <Text style={{ color: '#fff', fontSize: T.type.body, fontWeight: '600' }}>
               Sin conexión (simulada) — {sync.pendingCount} {sync.pendingCount === 1 ? 'registro pendiente' : 'registros pendientes'} de subir
             </Text>
           </View>
@@ -74,18 +74,18 @@ export default function Home() {
         <Card>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
             <Text style={styles.cardTitle}>Sincronización</Text>
-            <Text style={{ fontSize: 12, color: T.brand700, fontWeight: '600' }} onPress={() => router.push('/sincronizacion')}>
+            <Text style={{ fontSize: T.type.label, color: T.brand700, fontWeight: '600' }} onPress={() => router.push('/sincronizacion')}>
               Ver detalle →
             </Text>
           </View>
-          <Text style={{ fontSize: 12, color: T.ink3, marginBottom: 12 }}>
+          <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: 12 }}>
             Automática (al capturar y cada 60 s) · último sync:{' '}
             {sync.lastSyncAt ? new Date(sync.lastSyncAt).toLocaleTimeString('es-AR') : 'nunca'}
           </Text>
           <Button label={sync.syncing ? 'Sincronizando…' : 'Sincronizar ahora'} onPress={doSync} disabled={sync.syncing} />
           {sync.lastSyncResult ? (
             <Text
-              style={{ fontSize: 12, marginTop: 8, color: sync.lastSyncResult.startsWith('Sync OK') ? T.success : T.warning }}
+              style={{ fontSize: T.type.label, marginTop: 8, color: sync.lastSyncResult.startsWith('Sync OK') ? T.success : T.warning }}
             >
               {sync.lastSyncResult}
             </Text>
@@ -101,7 +101,7 @@ export default function Home() {
         ) : (
           <Card>
             <Text style={styles.cardTitle}>Captura de campo</Text>
-            <Text style={{ fontSize: 12, color: T.ink3, marginBottom: 12 }}>
+            <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: 12 }}>
               Pesajes con caravana, offline, en menos de 3 toques.
             </Text>
             <Button label="Abrir modo manga" onPress={() => router.push('/manga')} />
@@ -114,7 +114,7 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
-  h1: { fontSize: 20, fontWeight: '700', color: T.ink },
-  cardTitle: { fontSize: 15, fontWeight: '600', color: T.ink, marginBottom: 4 },
+  h1: { fontSize: T.type.title, fontWeight: '700', color: T.ink },
+  cardTitle: { fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: 4 },
   offlineBanner: { backgroundColor: T.warning, borderRadius: T.radiusSm, paddingVertical: 8, paddingHorizontal: 12 },
 });
