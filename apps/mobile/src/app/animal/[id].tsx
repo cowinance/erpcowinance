@@ -41,12 +41,12 @@ export default function AnimalDetail() {
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
           <Ionicons name="chevron-back" size={16} color={T.ink2} />
-          <Text style={{ fontSize: 13, color: T.ink2 }}>Volver</Text>
+          <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
         </Pressable>
 
         <View>
           <Text style={styles.tag}>{animal.tag ?? '—'}</Text>
-          <Text style={{ fontSize: 13, color: T.ink2, marginTop: 2 }}>
+          <Text style={{ fontSize: T.type.body, color: T.ink2, marginTop: 2 }}>
             {animal.category ?? '—'}
             {animal.name ? ` · ${animal.name}` : ''} · {animal.lot_name ?? 'sin lote'}
           </Text>
@@ -56,14 +56,14 @@ export default function AnimalDetail() {
           <Card style={{ flex: 1 }}>
             <Text style={styles.kpiLabel}>Último peso</Text>
             <Text style={styles.kpiValue}>{animal.last_weight_kg ? `${Math.round(animal.last_weight_kg)} kg` : '—'}</Text>
-            <Text style={{ fontSize: 11, color: T.ink3, marginTop: 2 }}>
+            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginTop: 2 }}>
               {animal.last_weighed_at ? new Date(animal.last_weighed_at).toLocaleDateString('es-AR') : 'sin pesajes'}
             </Text>
           </Card>
           <Card style={{ flex: 1 }}>
             <Text style={styles.kpiLabel}>Estado reproductivo</Text>
             <Text style={styles.kpiValue}>{pregnancy ? 'Preñada' : animal.sex === 'F' ? 'Vacía' : '—'}</Text>
-            <Text style={{ fontSize: 11, color: T.ink3, marginTop: 2 }}>
+            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginTop: 2 }}>
               {pregnancy?.expected_due_date
                 ? `parto probable ${new Date(pregnancy.expected_due_date).toLocaleDateString('es-AR')}`
                 : animal.sex === 'F'
@@ -74,24 +74,24 @@ export default function AnimalDetail() {
         </View>
 
         <Card>
-          <Text style={{ fontSize: 15, fontWeight: '600', color: T.ink, marginBottom: 10 }}>
+          <Text style={{ fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: 10 }}>
             Actividad de este dispositivo
           </Text>
           {events.length === 0 ? (
-            <Text style={{ fontSize: 13, color: T.ink3 }}>
+            <Text style={{ fontSize: T.type.body, color: T.ink3 }}>
               Sin capturas locales todavía. El historial completo vive en el servidor; el móvil guarda lo que capturás
               acá (y lo sube al sincronizar).
             </Text>
           ) : (
             events.map((e) => (
               <View key={e.id} style={styles.eventRow}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: T.ink, width: 130 }}>
+                <Text style={{ fontSize: T.type.body, fontWeight: '600', color: T.ink, width: 130 }}>
                   {EVENT_LABELS[e.type] ?? e.type}
                 </Text>
-                <Text style={{ fontSize: 12, color: T.ink2, flex: 1 }}>
+                <Text style={{ fontSize: T.type.label, color: T.ink2, flex: 1 }}>
                   {e.type === 'weighing' && e.data.weight_kg ? `${e.data.weight_kg} kg` : ''}
                 </Text>
-                <Text style={{ fontSize: 11, color: T.ink3 }}>{new Date(e.at).toLocaleDateString('es-AR')}</Text>
+                <Text style={{ fontSize: T.type.caption, color: T.ink3 }}>{new Date(e.at).toLocaleDateString('es-AR')}</Text>
               </View>
             ))
           )}
@@ -104,8 +104,8 @@ export default function AnimalDetail() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
   tag: { fontFamily: 'monospace', fontSize: 32, fontWeight: '700', color: T.ink },
-  kpiLabel: { fontSize: 12, color: T.ink2 },
-  kpiValue: { fontSize: 24, fontWeight: '700', color: T.ink, marginTop: 4, fontVariant: ['tabular-nums'] },
+  kpiLabel: { fontSize: T.type.label, color: T.ink2 },
+  kpiValue: { fontSize: T.compat['24'], fontWeight: '700', color: T.ink, marginTop: 4, fontVariant: ['tabular-nums'] },
   eventRow: {
     flexDirection: 'row',
     alignItems: 'center',

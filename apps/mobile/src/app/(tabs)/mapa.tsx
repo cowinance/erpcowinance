@@ -9,7 +9,7 @@ export default function Mapa() {
       <View style={styles.iconWrap}>
         <Ionicons name="map-outline" size={26} color={T.brand700} />
       </View>
-      <Text style={{ fontSize: 17, fontWeight: '600', color: T.ink }}>Potreros y Mapa</Text>
+      <Text style={{ fontSize: T.type.heading, fontWeight: '600', color: T.ink }}>Potreros y Mapa</Text>
       <Text style={styles.body}>
         Tiles vectoriales offline, dibujo de potreros y posición GPS de animales llegan en la Fase 2 del roadmap.
       </Text>
@@ -28,5 +28,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
-  body: { fontSize: 13, color: T.ink2, textAlign: 'center', marginTop: 6, lineHeight: 19 },
+  body: { fontSize: T.type.body, color: T.ink2, textAlign: 'center', marginTop: 6, lineHeight: 19 },
 });
