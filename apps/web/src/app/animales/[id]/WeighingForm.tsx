@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Check } from 'lucide-react';
+import { Button } from '@/components/Button';
 
 export function WeighingForm({ animalId }: { animalId: string }) {
   const router = useRouter();
@@ -72,21 +73,17 @@ export function WeighingForm({ animalId }: { animalId: string }) {
         </label>
       </div>
       {state === 'error' && <p className="text-label text-danger">{error}</p>}
-      <button
-        type="submit"
-        disabled={state === 'saving' || !kg}
-        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
-      >
+      <Button type="submit" size="md" fullWidth loading={state === 'saving'} disabled={!kg} className="gap-1.5">
         {state === 'saved' ? (
           <>
-            <Check size={15} /> Guardado
+            <Check size={15} aria-hidden="true" /> Guardado
           </>
         ) : state === 'saving' ? (
           'Guardando…'
         ) : (
           'Guardar pesaje'
         )}
-      </button>
+      </Button>
     </form>
   );
 }
