@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCsv, CsvParseError } from './csv';
+import { parseCsv, CsvParseError, CsvIrregularRowError } from './csv';
 
 /**
  * Pruebas del parser CSV del importador (P2 oleada 3, commit 3.1). Pura, sin DB.
@@ -44,16 +44,26 @@ describe('parseCsv · campos entrecomillados', () => {
   });
 });
 
-describe('parseCsv · filas irregulares (tolerantes)', () => {
-  it('fila con menos columnas → faltantes ausentes, no aborta', () => {
+describe('parseCsv · filas irregulares', () => {
+  it('fila con MENOS columnas → se conserva con los faltantes ausentes', () => {
     const r = parseCsv('a,b,c\n1,2');
     expect(r.rows[0].a).toBe('1');
     expect(r.rows[0].b).toBe('2');
     expect(r.rows[0].c).toBeUndefined();
   });
 
-  it('fila con más columnas → no aborta', () => {
-    expect(() => parseCsv('a,b\n1,2,3')).not.toThrow();
+  it('fila con MÁS columnas → CsvIrregularRowError (no trunca en silencio)', () => {
+    expect(() => parseCsv('a,b\n1,2,3')).toThrow(CsvIrregularRowError);
+  });
+
+  it('CsvIrregularRowError lleva el número de fila (de datos, 1-based) y el código de dominio', () => {
+    try {
+      parseCsv('a,b\n1,2\n3,4,5'); // la 2.ª fila de datos tiene una columna de más
+      expect.unreachable('debía lanzar');
+    } catch (e) {
+      expect((e as CsvIrregularRowError).code).toBe('import.irregular_row');
+      expect((e as CsvIrregularRowError).rowNumber).toBe(2);
+    }
   });
 });
 
