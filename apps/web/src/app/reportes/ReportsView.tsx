@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Download, Loader2 } from 'lucide-react';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 type ReportKey = 'inventory' | 'movements' | 'production' | 'reproduction';
 
@@ -32,7 +34,6 @@ function download(name: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-const inputCls = 'h-9 rounded-md border border-strong bg-surface px-3 text-body outline-none focus:ring-2 focus:ring-brand';
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 
 export function ReportsView() {
@@ -151,26 +152,26 @@ export function ReportsView() {
           <>
             <label className="flex flex-col gap-1">
               <span className="text-caption font-medium text-ink-2">A la fecha</span>
-              <input type="date" value={at} max={today()} onChange={(e) => setAt(e.target.value)} className={inputCls} />
+              <Input type="date" value={at} max={today()} onChange={(e) => setAt(e.target.value)} controlSize="md" fullWidth={false} />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-caption font-medium text-ink-2">Agrupar por</span>
-              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as any)} className={inputCls}>
+              <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as any)} controlSize="md" fullWidth={false}>
                 <option value="category">Categoría</option>
                 <option value="lot">Lote</option>
                 <option value="sex">Sexo</option>
-              </select>
+              </Select>
             </label>
           </>
         ) : (
           <>
             <label className="flex flex-col gap-1">
               <span className="text-caption font-medium text-ink-2">Desde</span>
-              <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+              <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} controlSize="md" fullWidth={false} />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-caption font-medium text-ink-2">Hasta</span>
-              <input type="date" value={to} max={today()} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+              <Input type="date" value={to} max={today()} onChange={(e) => setTo(e.target.value)} controlSize="md" fullWidth={false} />
             </label>
           </>
         )}
