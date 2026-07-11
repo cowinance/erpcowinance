@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Post, UploadedFile, UseFilters, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, UploadedFile, UseFilters, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ImportService } from './import.service';
@@ -46,5 +46,15 @@ export class ImportController {
     }
     const content = file.buffer.toString('utf8');
     return this.imports.createFromCsv(entityType ?? '', file.originalname ?? null, content);
+  }
+
+  @Get('imports/:id')
+  get(@Param('id') id: string) {
+    return this.imports.getBatch(id);
+  }
+
+  @Get('imports/:id/rows')
+  rows(@Param('id') id: string, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {
+    return this.imports.listRows(id, cursor, limit ? Number(limit) : undefined);
   }
 }
