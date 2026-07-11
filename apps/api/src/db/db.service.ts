@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
-import { seed } from './seed';
+import { bootstrapCatalogs, seedDemo } from './seed';
 import { requestContext } from '../common/request-context';
 import type { Q } from './query';
 
@@ -42,6 +42,9 @@ export class DbService implements OnModuleInit {
       PRIMARY KEY (tenant_id, table_name, row_id)
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash varchar(255);
+    -- Verificación de email (P1.1): la columna existe desde ya; el envío y la
+    -- exposición en el token/perfil son P1.2. auth no la lee todavía.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
     CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
       jti uuid PRIMARY KEY,
       user_id uuid NOT NULL,
@@ -137,22 +140,32 @@ export class DbService implements OnModuleInit {
     }
     await this.db.exec(DbService.SYNC_MIGRATION);
     await this.db.exec(DbService.rlsMigration());
+
+    // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
+    // se registra self-service (P1.1) depende de que el rol `owner` exista.
+    await this.runInTx(() => bootstrapCatalogs(this.db), 'Cargando catálogos base…');
+
+    // Datos demo: solo bajo SEED_DEMO (ON en dev, OFF en prod) y si la base no
+    // tiene organizaciones todavía. Sin demo, el sistema arranca vacío y espera
+    // el primer registro real.
     const orgs = await this.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM organizations`);
-    if (orgs.rows[0].n === 0) {
-      this.logger.log('Sembrando datos demo…');
-      await this.db.exec('BEGIN');
-      try {
-        await seed(this.db);
-        await this.db.exec('COMMIT');
-        this.logger.log('Seed completado.');
-      } catch (err) {
-        await this.db.exec('ROLLBACK');
-        throw err;
-      }
+    if (orgs.rows[0].n === 0 && DbService.seedDemoEnabled()) {
+      await this.runInTx(() => seedDemo(this.db), 'Sembrando datos demo…');
+      this.logger.log('Seed demo completado.');
     }
+
+    // Contexto por defecto para código fuera de request (boot, jobs). Con
+    // SEED_DEMO off y sin registros aún, la base está vacía: no hay contexto por
+    // defecto y toda operación pasa por el flujo de request (register/login).
     const org = await this.db.query<{ id: string }>(
       `SELECT id FROM organizations ORDER BY created_at LIMIT 1`,
     );
+    if (!org.rows[0]) {
+      this.logger.log(
+        `Base sin organizaciones (SEED_DEMO off): esperando registro self-service. RLS forzada en ${DbService.RLS_TABLES.length} tablas.`,
+      );
+      return;
+    }
     this.tenantId = org.rows[0].id;
     // GUC de sesión: contexto por defecto para código fuera de request
     // (boot, seed). Las requests lo pisan con SET LOCAL en su transacción.
@@ -161,10 +174,30 @@ export class DbService implements OnModuleInit {
       `SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
       [this.tenantId],
     );
-    this.farmId = farm.rows[0].id;
+    this.farmId = farm.rows[0]?.id;
     const user = await this.db.query<{ id: string }>(`SELECT id FROM users ORDER BY created_at LIMIT 1`);
     this.userId = user.rows[0].id;
     this.logger.log(`Contexto dev: tenant=${this.tenantId} farm=${this.farmId} · RLS forzada en ${DbService.RLS_TABLES.length} tablas`);
+  }
+
+  /** ¿Sembrar datos demo? ON en dev por defecto, OFF en producción. Override con SEED_DEMO. */
+  private static seedDemoEnabled(): boolean {
+    const flag = process.env.SEED_DEMO?.trim().toLowerCase();
+    if (flag) return ['1', 'true', 'on', 'yes'].includes(flag);
+    return process.env.NODE_ENV !== 'production';
+  }
+
+  /** Ejecuta `fn` dentro de una transacción PGlite (BEGIN/COMMIT, ROLLBACK si lanza). */
+  private async runInTx(fn: () => Promise<void>, log?: string): Promise<void> {
+    if (log) this.logger.log(log);
+    await this.db.exec('BEGIN');
+    try {
+      await fn();
+      await this.db.exec('COMMIT');
+    } catch (err) {
+      await this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   private loadSchemaSql(): string {

@@ -2,8 +2,17 @@ import type { PGlite } from '@electric-sql/pglite';
 import { hashPassword } from '../common/passwords';
 
 /**
- * Seed de desarrollo: una organización demo con finca, hato, pesajes,
- * sanidad y reproducción — suficiente para dashboard, lista y ficha 360°.
+ * Seed de desarrollo, dividido en dos responsabilidades independientes (P1.1):
+ *
+ * - `bootstrapCatalogs(db)`: catálogos base y roles de sistema que TODA finca
+ *   necesita (países, monedas, unidades, especies, razas, categorías, roles).
+ *   Idempotente y siempre ejecutado — una finca que se registra self-service
+ *   depende de que estos existan (p. ej. el rol `owner`).
+ * - `seedDemo(db)`: la organización demo "Grupo La Esperanza" + "El Ombú" con
+ *   hato, pesajes, sanidad y reproducción. Solo se ejecuta bajo el flag
+ *   `SEED_DEMO` (ON en dev, OFF en producción). Sin datos demo, el sistema
+ *   arranca vacío y espera el registro real.
+ *
  * Determinista (RNG con semilla) para que la demo sea reproducible.
  */
 
@@ -23,8 +32,16 @@ const pick = <T>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
 const between = (min: number, max: number) => min + rand() * (max - min);
 const daysAgo = (d: number) => new Date(Date.now() - d * 86400000);
 
-export async function seed(db: PGlite) {
+/**
+ * Catálogos globales + roles de sistema. Idempotente: si ya se cargaron
+ * (hay países), no hace nada. Se ejecuta SIEMPRE en el arranque — el registro
+ * self-service de una finca nueva depende de que el rol `owner` exista.
+ */
+export async function bootstrapCatalogs(db: PGlite) {
   const q = async (sql: string, params?: unknown[]) => (await db.query(sql, params)).rows as any[];
+
+  const [{ n }] = await q(`SELECT count(*)::int AS n FROM countries`);
+  if (n > 0) return; // ya inicializado
 
   // ── Catálogos globales ────────────────────────────────────────────────
   for (const [code, name, nameEn, auth] of [
@@ -73,34 +90,49 @@ export async function seed(db: PGlite) {
   );
   await q(`INSERT INTO species (code, name, gestation_days) VALUES ('ovine','Ovino',150), ('equine','Equino',340), ('caprine','Caprino',150)`);
 
-  const breedRows = await q(
+  await q(
     `INSERT INTO breeds (species_id, code, name, purpose) VALUES
      ($1,'angus','Angus','beef'), ($1,'hereford','Hereford','beef'),
      ($1,'brangus','Brangus','beef'), ($1,'braford','Braford','beef'),
-     ($1,'holando','Holando Argentino','dairy') RETURNING id, code`,
+     ($1,'holando','Holando Argentino','dairy')`,
     [bovine],
   );
-  const breed = Object.fromEntries(breedRows.map((r) => [r.code, r.id]));
 
-  const catRows = await q(
+  await q(
     `INSERT INTO animal_categories (species_id, code, name, sex, min_age_months) VALUES
      ($1,'vaca','Vaca','F',36), ($1,'toro','Toro','M',24),
      ($1,'novillo','Novillo','M',12), ($1,'vaquillona','Vaquillona','F',12),
-     ($1,'ternero','Ternero','M',0), ($1,'ternera','Ternera','F',0) RETURNING id, code`,
+     ($1,'ternero','Ternero','M',0), ($1,'ternera','Ternera','F',0)`,
     [bovine],
   );
-  const cat = Object.fromEntries(catRows.map((r) => [r.code, r.id]));
 
-  // ── Identidad y organización ──────────────────────────────────────────
-  const [{ id: ownerRole }] = await q(
-    `INSERT INTO roles (tenant_id, code, name, is_system) VALUES (NULL,'owner','Propietario',true) RETURNING id`,
-  );
+  // ── Roles de sistema (tenant_id NULL): base de RBAC para toda finca ────
   await q(
     `INSERT INTO roles (tenant_id, code, name, is_system) VALUES
-     (NULL,'admin','Administrador',true), (NULL,'veterinarian','Veterinario',true),
-     (NULL,'foreman','Capataz',true), (NULL,'worker','Operario',true), (NULL,'accountant','Contador',true)`,
+     (NULL,'owner','Propietario',true), (NULL,'admin','Administrador',true),
+     (NULL,'veterinarian','Veterinario',true), (NULL,'foreman','Capataz',true),
+     (NULL,'worker','Operario',true), (NULL,'accountant','Contador',true)`,
   );
+}
 
+/**
+ * Datos demo (organización "Grupo La Esperanza" + "El Ombú"). Depende de que
+ * `bootstrapCatalogs` ya haya corrido; resuelve por lookup las entidades base
+ * que necesita (especie bovina, razas, categorías, rol owner) en vez de
+ * recibirlas — así queda desacoplado del bootstrap. Solo corre bajo `SEED_DEMO`.
+ */
+export async function seedDemo(db: PGlite) {
+  const q = async (sql: string, params?: unknown[]) => (await db.query(sql, params)).rows as any[];
+
+  // Entidades base creadas por bootstrapCatalogs
+  const [{ id: bovine }] = await q(`SELECT id FROM species WHERE code = 'bovine'`);
+  const breedRows = await q(`SELECT id, code FROM breeds WHERE species_id = $1`, [bovine]);
+  const breed = Object.fromEntries(breedRows.map((r) => [r.code, r.id]));
+  const catRows = await q(`SELECT id, code FROM animal_categories WHERE species_id = $1`, [bovine]);
+  const cat = Object.fromEntries(catRows.map((r) => [r.code, r.id]));
+  const [{ id: ownerRole }] = await q(`SELECT id FROM roles WHERE code = 'owner' AND tenant_id IS NULL`);
+
+  // ── Identidad y organización ──────────────────────────────────────────
   const [{ id: userId }] = await q(
     `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-AR',$1) RETURNING id`,
     [hashPassword('cowinance')],
