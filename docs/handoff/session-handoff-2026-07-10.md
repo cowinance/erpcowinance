@@ -9,9 +9,9 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto está en la **Fase Producto**: convertir la base en un SaaS que una finca real pueda adoptar. **P1.1 (registro self-service de tenant) está COMPLETO y validado** (commits `851c05f`, `bc501cb`, `ef99c2b`; ADR-0010). **Siguiente acción concreta: P1.2 (email transaccional, verificación de email, reset de contraseña).** Ver §0 abajo.
+Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. Fase Producto: ADR-0010 (P1.1) y ADR-0011 (P1.2). El proyecto está en la **Fase Producto**: convertir la base en un SaaS que una finca real pueda adoptar. **P1.1 (registro self-service) y P1.2 (email transaccional + verificación + reset) están COMPLETOS y validados** (P1.1: ADR-0010; P1.2: ADR-0011). El backend de onboarding SaaS está cerrado end-to-end. **Siguiente acción concreta: UI de onboarding (web + móvil) sobre los endpoints existentes + experiencia de los primeros 5 minutos.** Ver §0 / §0bis / §9.
 
-> **Ver también:** `docs/sprints/foundation-hardening-executive-summary.md` (resumen del sprint), `docs/product/*` (visión, roadmap 2026, personas, monetización, design partners), `docs/adr/0001-0010`.
+> **Ver también:** `docs/sprints/foundation-hardening-executive-summary.md` (resumen del sprint), `docs/product/*` (visión, roadmap 2026, personas, monetización, design partners), `docs/adr/0001-0011`.
 
 ## 0. Fase Producto — P1.1 COMPLETADO ✅ (implementado y validado)
 
@@ -45,6 +45,35 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 - **`audit:arch` verde** (106 tests, 0 ciclos, typechecks incl. mobile).
 - **simulación de sync 2000/2000** (100%).
 
+## 0bis. Fase Producto — P1.2 COMPLETADO ✅ (email transaccional + verificación + reset)
+
+**Objetivo P1.2 (cumplido):** capa de email transaccional y ciclo de vida de credenciales (verificación de email + reset de contraseña) **sin romper la separación** `identity` (usuarios/estado) / `auth` (sesiones) / `infra` (proveedores). **ADR-0011** documenta las 6 decisiones. **Ya no está pendiente.**
+
+**Commits (en `main`):**
+- **`f1de451`** — P1.2.1: tabla `email_action_tokens` (sin RLS) + `EmailActionTokenService` (issue/consume, hash, single-use, supersede, TTL por purpose). 7 tests contra PGlite real.
+- **`1c0ddec`** — P1.2.2: puerto `EmailSender` (`application/ports`) + adaptador `LogEmailSender` (`infra/email`) + `EmailModule` @Global (selección por `EMAIL_PROVIDER`, default `log`).
+- **`2eeb84e`** — P1.2.3: verificación end-to-end (register emite email best-effort; `POST /verify-email`, `POST /resend-verification` anti-enumeración).
+- **`74282ee`** — P1.2.4: reset de contraseña (`POST /forgot-password` anti-enum, `POST /reset-password`) + `AuthService.revokeAllSessions` (identity→auth, decisión F).
+- **`96ba4fc`** — P1.2.5: `identity-email-e2e.mjs` (22 checks).
+
+**Decisiones definitivas (ADR-0011):**
+- **A — Tabla única `email_action_tokens`** con `purpose ∈ {verify_email, password_reset}` (no dos tablas). Sin RLS (plano de identidad, como `auth_refresh_tokens`).
+- **B — Hash del token en DB** (`sha256`); el token en claro viaja solo en el email.
+- **C — Login soft**: no bloquea a no verificados (alineado con ADR-0010 §5). `email_verified_at` queda para gating futuro.
+- **D — Puerto `EmailSender`**; único adaptador `log` en P1.2 (SMTP/SES/Resend = adaptador nuevo + `case`, sin tocar `identity`).
+- **E — Envío por llamada directa** al puerto (no por evento/outbox; el reset es síncrono).
+- **F — Reset revoca sesiones** vía `auth.revokeAllSessions(userId)`; dependencia dirigida `identity → auth` (sin ciclo, `madge` 0).
+- **Garantías del token:** single-use (UPDATE...RETURNING atómico), expiración (verify 24 h / reset 1 h), un token vivo por (user, purpose), purpose no intercambiable.
+
+**Archivos entregados (P1.2):** `db.service.ts` (DDL `email_action_tokens`); `common/action-token.ts` (nuevo); `modules/identity/email-action-token.service.ts` (+ test, nuevo); `application/ports/email-sender.port.ts` (nuevo); `infra/email/{log-email-sender.ts,email.module.ts}` (+ test, nuevo); `modules/identity/identity.service.ts` (verify/resend/forgot/reset); `identity.controller.ts` (+4 endpoints @Public); `identity.module.ts` (importa `AuthModule`); `modules/auth/{auth.service.ts,auth.module.ts}` (`revokeAllSessions` + export); `scripts/identity-email-e2e.mjs` (nuevo); `docs/adr/0011-*.md` (nuevo).
+
+**Gates finales P1.2 — todos verdes:**
+- **`identity-email-e2e` 22/22** (verificación single-use/purpose; reenvío anti-enum; reset: valida antes de consumir, vieja/nueva contraseña, token single-use, revocación de sesiones).
+- **`account-e2e` 23/23** · **`auth-e2e` 15/15** · **`sync-e2e` verde** (regresión).
+- **`audit:arch` verde** (114 tests, 0 ciclos, typechecks incl. mobile) · **sim 2000/2000**.
+
+**Nota operativa e2e:** `identity-email-e2e.mjs` usa `API_URL` (server corriendo) + `SERVER_LOG` (ruta al log del server, buzón del adaptador `log`) para extraer los tokens. Los adaptadores de dev arrancan con `EMAIL_PROVIDER=log` (default).
+
 ---
 
 ### Estado general del repositorio
@@ -56,7 +85,7 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 `main` (los commits son pequeños y directos; `git push` directo, ya trackea origin).
 
 ### Último commit
-`test(identity): P1.1 paso 3 — e2e de provisioning self-service (account-e2e)` (`ef99c2b`). Antes: `bc501cb` (register + endpoint), `851c05f` (split seed + `email_verified_at`), y `25d3d83` (ADR-0010). Los tres commits de código de P1.1 están en `main`.
+`test(identity): P1.2.5 — e2e consolidado de email` (`96ba4fc`), más el commit de docs (ADR-0011 + este handoff) que lo sigue. Cadena P1.2: `f1de451` (tokens) → `1c0ddec` (puerto EmailSender) → `2eeb84e` (verificación) → `74282ee` (reset) → `96ba4fc` (e2e). Antes, P1.1: `851c05f`, `bc501cb`, `ef99c2b`.
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
@@ -65,12 +94,12 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 - `tsc` (packages/domain, puro) — **limpio**.
 
 ### Estado de las pruebas
-- **106 tests verdes** (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio (retiro + gestación Modo A/B, delegando en las funciones reales del dominio), VOs de dominio (Brand, ids, TagNumber, Weight, Sex), `DomainExceptionFilter`, los 3 servicios de dominio de F4 (`withdrawal`, `gestation`, `newborn-category`), y el relay de Outbox (F5).
+- **114 tests verdes** (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio (retiro + gestación Modo A/B), VOs de dominio (Brand, ids, TagNumber, Weight, Sex), `DomainExceptionFilter`, los 3 servicios de dominio de F4 (`withdrawal`, `gestation`, `newborn-category`), el relay de Outbox (F5), el ciclo de vida de `EmailActionTokenService` (P1.2, contra PGlite real) y el adaptador `LogEmailSender`.
 - **Suite de convergencia de sync:** 2000/2000 (100%).
-- **E2E HTTP:** `account-e2e` **23/23** (P1.1: registro→login→primer animal sin demo + aislamiento bidireccional), `auth-e2e` **15/15**, `sync-e2e` **verde**. Re-verificados con Server Authority (T4.4) activa. Verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos: el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date`, y un push ya correcto no generó conflicto espurio (ver §3, F4).
+- **E2E HTTP:** `account-e2e` **23/23** (P1.1: registro→login→primer animal + aislamiento bidireccional), `identity-email-e2e` **22/22** (P1.2: verificación + reset + revocación de sesiones), `auth-e2e` **15/15**, `sync-e2e` **verde**.
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint COMPLETO (F0-F9)** y **pusheado a GitHub**. **Fase Producto en curso** — ver §0: **P1.1 (registro self-service) COMPLETO y validado** (ADR-0010; commits `851c05f`, `bc501cb`, `ef99c2b`). `npm run audit:arch` verde (106 tests, 0 ciclos, cobertura 72.54% domain+sync-core). **Siguiente: P1.2** (email transaccional + verificación + reset de contraseña).
+**Foundation Hardening Sprint COMPLETO (F0-F9)**. **Fase Producto en curso** — **P1.1 (registro self-service, ADR-0010) y P1.2 (email/verificación/reset, ADR-0011) COMPLETOS y validados** (ver §0 y §0bis). `npm run audit:arch` verde (114 tests, 0 ciclos, cobertura 72.54% domain+sync-core). **Siguiente: UI de onboarding (web + móvil) + experiencia de 5 minutos** (§9).
 
 ---
 
@@ -293,17 +322,15 @@ Acordadas y **obligatorias**:
 
 ## 9. Próximos pasos
 
-> **Único siguiente paso recomendado: P1.2.**
+> **Único siguiente paso recomendado: UI de onboarding + experiencia de 5 minutos.**
 
-**P1.2 — Ciclo de vida del email y credenciales.** Con el provisioning self-service ya en producción (P1.1), lo que falta para que una finca real opere su cuenta con seguridad:
-- **Email transaccional** (proveedor de envío detrás de un puerto; el envío real requiere integración/API key).
-- **Verificación de email** (consumir la columna `users.email_verified_at` que P1.1 ya dejó lista: token de verificación, endpoint, y **decidir la política definitiva de `email_verified`** — si bloquea login, si es soft-gate, y su exposición en el token/`/auth/me`).
-- **Reset de contraseña** (flujo por email con token de un solo uso).
-- **Restricción arquitectónica:** **mantener la separación `identity` / `auth`** — `identity` posee el provisioning y el ciclo de vida de la cuenta; `auth` sigue solo con autenticación/sesiones. La verificación de email vive en `identity`; `auth` solo la consulta si la política decide que login la exige.
+El **backend del onboarding SaaS está completo end-to-end** (P1.1 provisioning + P1.2 email/verificación/reset). Lo que falta es la **cara de usuario**:
+- **UI de onboarding (web + móvil)** sobre los endpoints ya existentes: registro (`POST /register`), verificación (`/verify-email`, `/resend-verification`), y recuperación (`/forgot-password`, `/reset-password`). Hoy todo existe solo como HTTP, sin pantallas. Sugerencia: mostrar un banner "verificá tu email" (política soft, no bloquea), y las pantallas de reset con el token que llega por link.
+- **Experiencia de los primeros 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min" del roadmap): del registro al primer animal cargado, con fricción mínima.
 
-**También falta (producto, no cubierto por P1.1/P1.2):**
-- **UI de onboarding** en web y móvil (formulario de registro, primeros pasos) — hoy `register` existe solo como endpoint HTTP, sin pantalla.
-- **Experiencia de los primeros 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min" del roadmap de producto).
+**Candidatos siguientes de producto** (ver §4): documentos formales con vencimiento (completa A6, reusa alertas); facturación SaaS (planes + uso; cobro real requiere pasarela).
+
+**Deuda visible de P1.2 (registrada, no bloqueante):** proveedor de email real (solo existe el adaptador `log` de dev; SMTP/SES/Resend = adaptador nuevo); rate limiting / anti-abuso en las superficies públicas (`register`/`forgot`/`resend`); gating de acciones sensibles por `email_verified` (el estado existe, su enforcement es futuro). Todo listado en "Fuera de alcance" de ADR-0011.
 
 **Nota histórica (Foundation Hardening, ya cerrado):** F6 partió `sync.service` en `SyncHandler` por bounded context preservando la lógica de Server Authority de T4.4; F5 instaló Event Bus + Outbox. No hay pasos pendientes del sprint de hardening.
 
@@ -330,7 +357,7 @@ Acordadas y **obligatorias**:
 
 | Métrica | Baseline (F0) | Actual (2026-07-10) | Objetivo |
 |---|---|---|---|
-| **Tests** | 34 verdes | **102 verdes** (13 archivos) | crecer con cada fase |
+| **Tests** | 34 verdes | **114 verdes** (Vitest) + e2e (`account` 23, `identity-email` 22, `auth` 15, `sync`) | crecer con cada fase |
 | **Cobertura** | no medida | no medida formalmente (dominio bien cubierto) | dominio ≥ 90% (F9) |
 | **Dependencias circulares** (madge) | **1** | **0** ✅ | 0 |
 | **Duplicación semántica de reglas** | presente (retiro, gestación, categoría de cría en 2-3 lugares) | **eliminada** ✅ (F4: fuente única en `packages/domain`, servidor recomputa en sync) | 0 reglas duplicadas |
