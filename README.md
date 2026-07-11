@@ -78,6 +78,41 @@ npm run web    # web en http://localhost:3000
 
 En producción el mismo DDL corre sobre PostgreSQL 17 + PostGIS + TimescaleDB (los tipos `geography` se degradan a `jsonb` solo en dev).
 
+## Configuración por variables de entorno
+
+| Variable | Ámbito | Propósito | Default / ausencia |
+|---|---|---|---|
+| `SEED_DEMO` | API | Sembrar datos demo al arrancar | `on` en dev, `off` en producción (`NODE_ENV=production`); override `true`/`false` |
+| `EMAIL_PROVIDER` | API | Adaptador de email (puerto `EmailSender`, ADR-0011) | `log` (imprime el email al log) — **solo desarrollo/pruebas**; SMTP/SES/Resend son adaptadores futuros |
+| `APP_BASE_URL` | API | Base del front para armar los **enlaces de email** (verificación/reset) | `http://localhost:3000` — apuntar a la web real en despliegue |
+| `NEXT_PUBLIC_API_URL` | Web | URL de la API que consume la web (se **inlinea en build** para componentes cliente) | `http://localhost:3001/v1` |
+| `EXPO_PUBLIC_WEB_URL` | Móvil | Base pública de la web para el botón "Abrir Cowinance web" del estado vacío del hato (ADR-0012) | **sin default**: si falta, la UI muestra instrucciones en texto **sin** hardcodear dominios y **sin** botón |
+
+> Ningún token de acción se documenta ni se registra: viajan solo en el email y se guardan hasheados (ADR-0011).
+
+## E2E web — recorrido de onboarding (Playwright)
+
+Suite Playwright que protege los cinco flujos de onboarding (registro+auto-login, fallback de auto-login,
+verificación, recuperación+reset, tenant vacío→primer animal). Detalle completo en
+[`apps/web/e2e/README.md`](apps/web/e2e/README.md).
+
+```bash
+# Una sola vez: navegador (en CI Linux, --with-deps)
+npx playwright install chromium
+
+# Correr la suite (compila la API + levanta instancias aisladas + corre 5 escenarios)
+npm run e2e:web
+```
+
+- **Instancias aisladas**: `apps/web/e2e/global-setup.ts` levanta una API (`SEED_DEMO=off`,
+  `EMAIL_PROVIDER=log`) y `next dev` en **puertos de test 3210/3211** (verificados libres; no mata procesos
+  ajenos). No depende de servidores iniciados a mano.
+- **DB y log temporales** viven en `os.tmpdir()/cowinance-web-e2e/` (**fuera del repo**) y se **borran** en el
+  teardown, aun si un test falla. El helper de emails lee ese log (no hay buzón en la app).
+- **Ejecución serial** (`workers: 1`): los cinco escenarios comparten una API, un log y una base PGlite.
+- Comando de CI (deuda inmediata; el repo no tiene workflow todavía): `npx playwright install --with-deps
+  chromium && npm run e2e:web`. `audit:arch` **no** arranca Playwright — el gate E2E es explícito y separado.
+
 ## API (extracto)
 
 Sigue las convenciones del documento de APIs: prefijo `/v1`, paginación por cursor, errores con código de dominio, `Idempotency-Key` en POST.
