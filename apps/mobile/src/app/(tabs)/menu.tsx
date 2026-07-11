@@ -2,12 +2,30 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSync, API_URL } from '@/sync/SyncContext';
+import { useAccount } from '@/account/AccountContext';
 import { Button, Card } from '@/components/ui';
 import { T } from '@/theme';
 
 export default function Menu() {
   const sync = useSync();
+  const account = useAccount();
   const [confirmReset, setConfirmReset] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
+
+  async function doResend() {
+    if (resending) return;
+    setResending(true);
+    setResendMsg('');
+    const result = await account.resendVerification();
+    setResending(false);
+    // Anti-enum: mensaje constante ante 'sent'; solo la red caída se distingue.
+    setResendMsg(
+      result === 'sent'
+        ? 'Si tu email sigue sin verificar, te enviamos un nuevo enlace.'
+        : 'No se pudo conectar. Probá de nuevo.',
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -16,7 +34,9 @@ export default function Menu() {
 
         <Card>
           <Text style={styles.title}>Usuario</Text>
-          <Text style={styles.value}>{sync.userName ?? '—'}</Text>
+          <Text style={styles.value}>{account.name ?? '—'}</Text>
+          {account.email ? <Text style={styles.mono}>{account.email}</Text> : null}
+          {account.role ? <Text style={[styles.value, { marginTop: 2 }]}>Rol: {account.role}</Text> : null}
           <Text style={[styles.title, { marginTop: 12 }]}>Finca</Text>
           <Text style={styles.value}>{sync.farmName ?? '—'}</Text>
           <Text style={[styles.title, { marginTop: 12 }]}>API</Text>
@@ -26,6 +46,41 @@ export default function Menu() {
           <Text style={[styles.title, { marginTop: 12 }]}>Almacenamiento local</Text>
           <Text style={styles.value}>{sync.storageEngine}</Text>
         </Card>
+
+        {account.emailVerified === false && (
+          <Card>
+            <Text style={styles.title}>Verificá tu email</Text>
+            <Text style={{ fontSize: 12, color: T.ink3, marginVertical: 8 }}>
+              Te enviamos un enlace de verificación{account.email ? ` a ${account.email}` : ''}. El enlace se abre en la
+              web, no dentro de la app. Podés seguir usando Cowinance mientras tanto.
+            </Text>
+            {resendMsg ? (
+              <Text
+                accessibilityRole={resendMsg.startsWith('No se pudo') ? 'alert' : 'text'}
+                style={{ fontSize: 12, marginBottom: 8, color: resendMsg.startsWith('No se pudo') ? T.danger : T.success }}
+              >
+                {resendMsg}
+              </Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Button
+                  label={resending ? 'Enviando…' : 'Reenviar email'}
+                  variant="secondary"
+                  onPress={doResend}
+                  disabled={resending}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button
+                  label={account.refreshing ? 'Actualizando…' : 'Ya verifiqué'}
+                  onPress={() => account.refresh()}
+                  disabled={account.refreshing}
+                />
+              </View>
+            </View>
+          </Card>
+        )}
 
         <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

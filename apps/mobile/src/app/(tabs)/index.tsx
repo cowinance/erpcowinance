@@ -2,11 +2,15 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useSync } from '@/sync/SyncContext';
+import { useAccount } from '@/account/AccountContext';
 import { Button, Card, Kpi, SyncDot } from '@/components/ui';
 import { T } from '@/theme';
 
 export default function Home() {
   const sync = useSync();
+  const account = useAccount();
+  // Nombre real de /auth/me (o meta persistida); saludo neutral si aún no hay dato.
+  const firstName = account.name?.split(' ')[0];
 
   if (sync.status === 'boot') {
     return (
@@ -42,7 +46,7 @@ export default function Home() {
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <View>
-            <Text style={styles.h1}>{greeting}, Jose</Text>
+            <Text style={styles.h1}>{firstName ? `${greeting}, ${firstName}` : greeting}</Text>
             <Text style={{ fontSize: 13, color: T.ink3, marginTop: 2 }}>{sync.farmName ?? 'Cowinance'}</Text>
           </View>
           <SyncDot pending={sync.pendingCount} />
