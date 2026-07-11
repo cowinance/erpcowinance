@@ -24,8 +24,9 @@ numerado `NNNN-titulo.md`. Estados: `propuesto` · `aceptado` · `reemplazado po
 | [0012](0012-onboarding-initial-experience.md) | Arquitectura de onboarding y experiencia inicial (web/móvil, aislamiento local, E2E) | aceptado |
 | [0013](0013-design-tokens-single-source.md) | Design System: fuente única de tokens (neutral + generación web, adaptador móvil) | aceptado |
 | [0014](0014-design-system-specification.md) | Design System: escala tipográfica, spacing, densidad, dark mode, iconografía y accesibilidad | aceptado |
+| [0015](0015-density-runtime-primitive-size-axis.md) | Densidad runtime y eje de tamaño de los primitivos (dos ejes size×density, tablas explícitas) | aceptado |
 
-ADR 0001-0009: Foundation Hardening Sprint. ADR 0010-0012: Fase Producto (onboarding). ADR 0013-0014: Fase Producto (P1.4 — sistema de diseño; 0013 pipeline de tokens, 0014 especificación).
+ADR 0001-0009: Foundation Hardening Sprint. ADR 0010-0012: Fase Producto (onboarding). ADR 0013-0015: Fase Producto (P1.4 — sistema de diseño; 0013 pipeline de tokens, 0014 especificación, 0015 mecanismo de densidad + eje de tamaño).
 
 > Nota de numeración: los ADR se numeran en el orden en que la decisión realmente se
 > toma, no en el orden planeado originalmente — `0004` se escribió primero porque F1
