@@ -1,9 +1,24 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
+import { IdentityService } from './identity.service';
+import { Public } from '../auth/public.decorator';
 
 @Controller()
 export class IdentityController {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly identity: IdentityService,
+  ) {}
+
+  /**
+   * Registro self-service (P1.1, ADR-0010). Público: crea identidad + tenant y
+   * responde 201. No auto-loguea — el cliente llama después a /auth/login.
+   */
+  @Public()
+  @Post('register')
+  register(@Body() body: any) {
+    return this.identity.register(body);
+  }
 
   @Get('organizations/current')
   async currentOrganization() {
