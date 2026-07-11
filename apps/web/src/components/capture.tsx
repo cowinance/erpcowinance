@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Check, X } from 'lucide-react';
+import { Button } from '@/components/Button';
 
 export const inputCls =
   'h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
@@ -92,14 +93,9 @@ export function AnimalPicker({ animal, onSelect }: { animal: PickedAnimal | null
           placeholder="Caravana…"
           className={`${inputCls} font-mono`}
         />
-        <button
-          type="button"
-          onClick={lookup}
-          disabled={busy || !value.trim()}
-          className="h-9 shrink-0 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken disabled:opacity-50"
-        >
+        <Button type="button" variant="secondary" size="md" onClick={lookup} loading={busy} disabled={!value.trim()} className="shrink-0">
           {busy ? '…' : 'Buscar'}
-        </button>
+        </Button>
       </div>
       {error && <p className="mt-1 text-label text-danger">{error}</p>}
     </div>
