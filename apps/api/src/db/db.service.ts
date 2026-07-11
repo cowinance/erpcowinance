@@ -54,6 +54,23 @@ export class DbService implements OnModuleInit {
       revoked_at timestamptz,
       created_at timestamptz DEFAULT now() NOT NULL
     );
+    -- Tokens de acción por email (P1.2, ADR-0011): verificación de email y reset
+    -- de contraseña. SIN RLS a propósito (plano de identidad, como users y
+    -- auth_refresh_tokens): se consumen en flujos @Public sin contexto de tenant,
+    -- resueltos por user_id embebido en la fila. Se guarda el HASH del token, no
+    -- el token en claro (que viaja solo en el email). Un solo token vivo por
+    -- (user, purpose): issue() supersede los previos. Single-use vía consumed_at.
+    CREATE TABLE IF NOT EXISTS email_action_tokens (
+      id uuid PRIMARY KEY,
+      user_id uuid NOT NULL,
+      purpose varchar(32) NOT NULL,
+      token_hash varchar(64) NOT NULL,
+      expires_at timestamptz NOT NULL,
+      consumed_at timestamptz,
+      created_at timestamptz DEFAULT now() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ix_email_action_tokens_hash ON email_action_tokens (token_hash);
+    CREATE INDEX IF NOT EXISTS ix_email_action_tokens_user ON email_action_tokens (user_id, purpose);
     -- Outbox de eventos de dominio (F5, ADR-0005). Sin RLS a propósito (como
     -- auth_refresh_tokens): el relay es un proceso interno de confianza que
     -- drena cross-tenant post-commit. tenant_id se guarda para trazabilidad.
