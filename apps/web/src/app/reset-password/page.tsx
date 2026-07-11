@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AuthShell, PrimaryLink, inputCls } from '@/components/AuthShell';
+import { AuthShell, PrimaryLink } from '@/components/AuthShell';
 import { postPublic, clearSession } from '@/lib/auth';
 import { Button } from '@/components/Button';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
 
 type State = 'form' | 'sending' | 'success' | 'missing' | 'invalid' | 'unavailable';
 
@@ -87,9 +89,9 @@ export default function ResetPasswordPage() {
   return (
     <AuthShell title="Nueva contraseña" subtitle="Elegí una contraseña para tu cuenta">
       <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
-        <label className="block">
-          <span className="mb-1 block text-label font-medium text-ink-2">Nueva contraseña</span>
-          <input
+        <Field label="Nueva contraseña" htmlFor="password">
+          <Input
+            id="password"
             name="password"
             type="password"
             required
@@ -97,21 +99,23 @@ export default function ResetPasswordPage() {
             autoFocus
             autoComplete="new-password"
             placeholder="Al menos 8 caracteres"
-            className={inputCls}
+            controlSize="lg"
+            className="placeholder:text-ink-3"
           />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-label font-medium text-ink-2">Repetir contraseña</span>
-          <input
+        </Field>
+        <Field label="Repetir contraseña" htmlFor="confirm">
+          <Input
+            id="confirm"
             name="confirm"
             type="password"
             required
             minLength={8}
             autoComplete="new-password"
             placeholder="Repetí la contraseña"
-            className={inputCls}
+            controlSize="lg"
+            className="placeholder:text-ink-3"
           />
-        </label>
+        </Field>
         {error && (
           <p role="alert" className="text-label text-danger">
             {error}
