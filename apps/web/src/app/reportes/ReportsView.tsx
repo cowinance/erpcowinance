@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Download, Loader2 } from 'lucide-react';
+import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
@@ -137,13 +138,9 @@ export function ReportsView() {
             </button>
           ))}
         </div>
-        <button
-          onClick={exportCsv}
-          disabled={!data}
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken disabled:opacity-50"
-        >
-          <Download size={15} /> Exportar CSV
-        </button>
+        <Button variant="secondary" size="md" onClick={exportCsv} disabled={!data} className="gap-1.5">
+          <Download size={15} aria-hidden="true" /> Exportar CSV
+        </Button>
       </div>
 
       {/* Filtros de fecha */}
