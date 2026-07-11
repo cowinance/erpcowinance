@@ -36,6 +36,18 @@ export interface Changeset {
   ops: Op[];
 }
 
+/**
+ * Changeset RECIBIDO por pull (contrato remoto). Derivado de `Changeset` para
+ * evitar deriva: la ÚNICA diferencia es que la identidad de origen puede ser nula
+ * (un changeset de origen servidor — ADR-0016 — viaja con `deviceId`/`seq` en
+ * null). El merge del cliente opera sobre `id`/`hlc`/`ops` + `cursor`, no sobre
+ * `deviceId`/`seq`. El `Changeset` de autoría/push permanece estricto (no-null).
+ */
+export type RemoteChangeset = Omit<Changeset, 'deviceId' | 'seq'> & {
+  deviceId: string | null;
+  seq: number | null;
+};
+
 /** Estado versionado de una fila: valor + HLC del último escritor por campo. */
 export interface RowState {
   fields: Record<string, unknown>;
@@ -58,6 +70,6 @@ export interface PushResult {
 }
 
 export interface PullResult {
-  changesets: { serverSeq: number; changeset: Changeset }[];
+  changesets: { serverSeq: number; changeset: RemoteChangeset }[];
   cursor: number;
 }
