@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { IdentityService } from './identity.service';
 import { Public } from '../auth/public.decorator';
+import { supportedCountries, type CountryOption } from './country-defaults';
 
 @Controller()
 export class IdentityController {
@@ -46,6 +47,18 @@ export class IdentityController {
   @Post('reset-password')
   resetPassword(@Body() body: any) {
     return this.identity.resetPassword(body);
+  }
+
+  /**
+   * Países soportados para el registro (P1.3.2, ADR-0012). Público (el form de
+   * registro es anónimo): funciona sin cookie ni token. Vista de lectura de la
+   * fuente canónica `country-defaults`; DTO explícito `{code, name}`, sin
+   * exponer la config interna de provisioning (currency/locale/timezone).
+   */
+  @Public()
+  @Get('catalogs/countries')
+  countries(): CountryOption[] {
+    return supportedCountries();
   }
 
   @Get('organizations/current')

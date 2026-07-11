@@ -43,6 +43,25 @@ const emailB = `beto+${RUN}@ranchosol.test`;
 async function main() {
   console.log('── E2E provisioning self-service (P1.1) ──');
 
+  // 0. Catálogo público de países (P1.3.2) — anónimo, DTO {code,name}
+  const anon = await api('GET', '/catalogs/countries'); // sin token
+  check('GET /catalogs/countries anónimo → 200', anon.status === 200, `status=${anon.status}`);
+  const countries = anon.json;
+  check('devuelve una lista no vacía', Array.isArray(countries) && countries.length > 0, `${countries?.length} items`);
+  const codes = (countries ?? []).map((c) => c.code).sort();
+  check('incluye exactamente los 6 países soportados', codes.join(',') === 'AR,BR,CO,MX,US,UY', codes.join(','));
+  check(
+    'cada item es DTO exacto {code,name}',
+    (countries ?? []).every((c) => {
+      const keys = Object.keys(c).sort();
+      return keys.length === 2 && keys[0] === 'code' && keys[1] === 'name' && typeof c.code === 'string' && typeof c.name === 'string';
+    }),
+  );
+  check(
+    'no expone campos internos (currency/locale/timezone)',
+    (countries ?? []).every((c) => c.currency === undefined && c.locale === undefined && c.timezone === undefined),
+  );
+
   // 1. Validación de entrada
   const missing = await api('POST', '/register', { email: emailA });
   check('campos faltantes → 400', missing.status === 400, missing.json?.code);
