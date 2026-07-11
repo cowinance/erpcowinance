@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-na
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
+import { EmptyHerd } from '@/components/EmptyHerd';
 import { T } from '@/theme';
 
 function Row({ a }: { a: AnimalRow }) {
@@ -22,6 +23,16 @@ function Row({ a }: { a: AnimalRow }) {
       <Text style={styles.weight}>{a.last_weight_kg ? `${Math.round(a.last_weight_kg)} kg` : '—'}</Text>
     </Pressable>
   );
+}
+
+/** Empty-state que distingue carga/error de vacío real (no afirma "sin animales"
+ *  mientras el primer bootstrap no terminó). */
+function HerdEmpty({ status, query }: { status: string; query: string }) {
+  if (status === 'boot') return <Text style={styles.emptyNote}>Preparando tu hato…</Text>;
+  if (status === 'error')
+    return <Text style={styles.emptyNote}>No se pudo sincronizar. Revisá tu conexión y volvé a intentar.</Text>;
+  if (query) return <Text style={styles.emptyNote}>Sin resultados para «{query}».</Text>;
+  return <EmptyHerd />;
 }
 
 export default function Animales() {
@@ -48,8 +59,13 @@ export default function Animales() {
         data={animals}
         keyExtractor={(a) => a.id}
         renderItem={({ item }) => <Row a={item} />}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+        contentContainerStyle={
+          animals.length === 0
+            ? { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 16 }
+            : { paddingHorizontal: 16, paddingBottom: 24 }
+        }
         ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: T.borderSubtle }} />}
+        ListEmptyComponent={<HerdEmpty status={sync.status} query={q} />}
       />
     </SafeAreaView>
   );
@@ -67,6 +83,7 @@ const styles = StyleSheet.create({
     color: T.ink,
     backgroundColor: T.surface,
   },
+  emptyNote: { fontSize: 13, color: T.ink3, textAlign: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   tag: { fontFamily: 'monospace', fontSize: 15, fontWeight: '700', color: T.brand700, width: 56 },
   weight: { fontSize: 14, fontWeight: '600', color: T.ink, fontVariant: ['tabular-nums'] },

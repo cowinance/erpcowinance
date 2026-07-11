@@ -6,6 +6,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSync } from '@/sync/SyncContext';
+import { EmptyHerd } from '@/components/EmptyHerd';
 import { T } from '@/theme';
 
 const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
@@ -19,6 +21,13 @@ const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphM
 ];
 
 export default function CapturaMenu() {
+  const sync = useSync();
+  // Todas las capturas requieren un animal ya existente. Con el store vacío no se
+  // ofrece ninguna (pesaje/vacunación/tratamiento/celo/servicio/diagnóstico/parto):
+  // no hay animal que seleccionar. Las pantallas de captura siguen siendo la
+  // autoridad sobre la elegibilidad fina (categoría/sexo/estado).
+  const hasAnimals = sync.animals().length > 0;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <View style={{ padding: 16, flex: 1 }}>
@@ -28,23 +37,30 @@ export default function CapturaMenu() {
             <Ionicons name="close" size={24} color={T.ink2} />
           </Pressable>
         </View>
-        <Text style={{ fontSize: 13, color: T.ink3, marginBottom: 16 }}>
-          Todo se guarda en el dispositivo y se sube solo al sincronizar.
-        </Text>
-        <View style={styles.grid}>
-          {ACTIONS.map((a) => (
-            <Pressable
-              key={a.tipo}
-              onPress={() => router.replace(a.href as any)}
-              style={({ pressed }) => [styles.action, pressed && { backgroundColor: T.brand100 }]}
-            >
-              <View style={styles.iconWrap}>
-                <Ionicons name={a.icon} size={24} color={T.brand700} />
-              </View>
-              <Text style={styles.actionLabel}>{a.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+
+        {hasAnimals ? (
+          <>
+            <Text style={{ fontSize: 13, color: T.ink3, marginBottom: 16 }}>
+              Todo se guarda en el dispositivo y se sube solo al sincronizar.
+            </Text>
+            <View style={styles.grid}>
+              {ACTIONS.map((a) => (
+                <Pressable
+                  key={a.tipo}
+                  onPress={() => router.replace(a.href as any)}
+                  style={({ pressed }) => [styles.action, pressed && { backgroundColor: T.brand100 }]}
+                >
+                  <View style={styles.iconWrap}>
+                    <Ionicons name={a.icon} size={24} color={T.brand700} />
+                  </View>
+                  <Text style={styles.actionLabel}>{a.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : (
+          <EmptyHerd />
+        )}
       </View>
     </SafeAreaView>
   );

@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useSync } from '@/sync/SyncContext';
 import { useAccount } from '@/account/AccountContext';
 import { Button, Card, Kpi, SyncDot } from '@/components/ui';
+import { EmptyHerd } from '@/components/EmptyHerd';
 import { T } from '@/theme';
 
 export default function Home() {
@@ -91,13 +92,21 @@ export default function Home() {
           ) : null}
         </Card>
 
-        <Card>
-          <Text style={styles.cardTitle}>Captura de campo</Text>
-          <Text style={{ fontSize: 12, color: T.ink3, marginBottom: 12 }}>
-            Pesajes con caravana, offline, en menos de 3 toques.
-          </Text>
-          <Button label="Abrir modo manga" onPress={() => router.push('/manga')} />
-        </Card>
+        {animals.length === 0 ? (
+          // Sin animales en el dispositivo: no ofrecer capturas que requieren un
+          // animal (manga = pesaje). Guía para cargar el primero desde la web.
+          <Card>
+            <EmptyHerd />
+          </Card>
+        ) : (
+          <Card>
+            <Text style={styles.cardTitle}>Captura de campo</Text>
+            <Text style={{ fontSize: 12, color: T.ink3, marginBottom: 12 }}>
+              Pesajes con caravana, offline, en menos de 3 toques.
+            </Text>
+            <Button label="Abrir modo manga" onPress={() => router.push('/manga')} />
+          </Card>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
