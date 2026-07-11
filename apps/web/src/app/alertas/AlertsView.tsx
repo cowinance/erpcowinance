@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { API_URL, authHeaders } from '@/lib/api';
 import { relativeTime } from '@/lib/format';
 import { AlertTriangle, Info, ShieldAlert, RefreshCw, Check, X, Eye } from 'lucide-react';
+import { Button } from '@/components/Button';
 
 interface Alert {
   id: string;
@@ -80,12 +81,9 @@ export function AlertsView() {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => load(true)}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Reevaluar
-        </button>
+        <Button variant="secondary" size="sm" onClick={() => load(true)} className="gap-1.5">
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} aria-hidden="true" /> Reevaluar
+        </Button>
       </div>
 
       {kpis && filter === 'active' && (
