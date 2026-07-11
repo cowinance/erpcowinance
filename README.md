@@ -131,9 +131,11 @@ de ella se derivan están en [ADR-0014](docs/adr/0014-design-system-specificatio
 la escala tipográfica y de spacing, web + móvil) está cerrado** — behavior-preserving, ver la nota de
 implementación del ADR y el handoff. **P1.4.4 (primitivos + densidad) en curso:** el mecanismo de densidad
 runtime y el eje de tamaño están en [ADR-0015](docs/adr/0015-density-runtime-primitive-size-axis.md); el
-patrón aprobado de los primitivos web (**Button**, **Input/Select/Field**) y sus divergencias pendientes viven
-en [`docs/design-system/primitives.md`](docs/design-system/primitives.md). **Pendiente:** resto de superficies
-(auth, filtros, formularios ganaderos), primitivos móviles, dark mode auditado, iconografía y navegación responsive.
+patrón aprobado de los primitivos web (**Button**, **Input/Select/Field**, tamaños `lg`/`md`/`sm`) y su
+estado real viven en [`docs/design-system/primitives.md`](docs/design-system/primitives.md). Ya aplicados a
+**auth, alta de animal, Sanidad, Reproducción, Reportes y HealthPlans** (behavior-preserving); `inputCls`/`labelCls`
+compartidos eliminados y 4 aliases `typeCompat` sin uso podados. **Pendiente:** botones con icono/estado y `sm`,
+icon-only, danger, toggles, spinner; primitivos móviles, dark mode auditado, iconografía y navegación responsive.
 
 ## E2E web — recorrido de onboarding (Playwright)
 

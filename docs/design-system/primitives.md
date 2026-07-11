@@ -5,8 +5,13 @@
 > en [ADR-0015](../adr/0015-density-runtime-primitive-size-axis.md); la spec del
 > sistema en [P1.4.2-design-system-spec.md](P1.4.2-design-system-spec.md).
 >
-> Estado: **Button** (P1.4.4.1c) y **Input/Select/Field** (P1.4.4.2) aprobados y
-> aplicados a superficies piloto. El resto de superficies sigue sin migrar.
+> Estado: **Button** (primary/secondary en `lg` y `md`) e **Input/Select/Field**
+> (`lg`/`md`/`sm` validados) aprobados y **aplicados** a auth, alta de animal,
+> Sanidad, Reproducción, AddProductForm, AnimalPicker, Reportes y HealthPlans. Los
+> `inputCls`/`labelCls` compartidos de captura y el `inputCls` de AuthShell fueron
+> eliminados; se podaron 4 aliases `typeCompat` sin consumidores (18/32/48/64).
+> **Pendiente (P1.4.4.7+):** botones con icono/estado, `sm` de Button, icon-only,
+> danger, toggles, spinner de carga; y los inputs residuales (WeighingForm, búsquedas).
 
 ## Principio
 
@@ -25,7 +30,7 @@ Dos ejes **independientes** (ADR-0015):
 Las alturas de control salen de la capa de densidad, **por tamaño**, con valores
 explícitos (sin fórmula): en `standard`, `--density-control-h-sm|md|lg` = **32/36/40**.
 En **web**, Button e Input/Select comparten esos tres valores porque el inventario
-real lo confirma; **móvil tendrá su propia tabla** (touch ≥ 44px) en P1.4.4.5.
+real lo confirma; **móvil tendrá su propia tabla** (touch ≥ 44px) en un capítulo futuro.
 
 ## Button — `components/Button.tsx`
 
@@ -38,7 +43,8 @@ fullWidth?: boolean;                 // default false
 ```
 - `loading` no cambia el copy: el consumidor sigue controlando el texto (“Guardando…”).
 - Foco visible por teclado (`focus-visible`). `disabled = disabled || loading`.
-- Variantes diferidas (sin consumidores): `ghost`, `danger`, `icon`, `link`, `toggle`.
+- Variantes diferidas (sin consumidores aún): `ghost`, `danger`, `icon`, `link`,
+  `toggle` — se evaluarán en P1.4.4.7 (botones con icono/estado).
 
 ## Input / Select — `components/Input.tsx`, `components/Select.tsx`
 
@@ -89,27 +95,39 @@ de **API y revisión**, no una garantía del orden de clases de Tailwind.
 `ref` se acepta como **prop** (idioma React 19; no hay `forwardRef` en el repo) y
 apunta al elemento nativo (`<input>`/`<select>`/`<button>`).
 
-## Divergencias pendientes (no migradas)
+## Divergencias (resueltas)
 
-Se preservan tal cual hasta su capítulo; **no** se unifican en silencio:
-
-| Superficie | Divergencia | Tratamiento |
+| Superficie | Divergencia | Estado |
 |---|---|---|
-| **auth** (login/register/AuthShell/forgot/reset/verify) | inputs `lg` (h-10/40, text-input) | migrar en P1.4.4.3; hoy conservan su `inputCls`/`primaryBtnCls` |
-| **Reportes** | filtro `md` con **13px** (text-body), no 14 | requiere decisión de tamaño explícita en su migración |
-| **Alertas** | inputs **sin focus ring** | corregible (mejora a11y aprobada) → declarar como diferencia observable al migrar |
-| **HealthPlans** | padding **px-2** (no px-3) | variante/decisión explícita al migrar |
-| **buscadores / caravanas** | `font-mono` vía className | patrón de composición ya soportado (no es variante) |
-| **placeholder** | color inconsistente (`text-ink-3` en auth/capture; ausente en alta de animal) | estandarizar al migrar auth/captura |
+| **auth** (login/register/forgot/reset/verify) | inputs `lg` (h-10/40, text-input) | **resuelto** (migrado a Input/Field, P1.4.4.3; `placeholder:text-ink-3` vía className) |
+| **Reportes** | filtro `md` con 13px | **resuelto** — estandarizado a **14px** (P1.4.4.6, cambio visual aprobado) |
+| **Alertas** | "input sin focus-ring" | **resuelto** — era una const **muerta**; eliminada (P1.4.4.6) |
+| **HealthPlans** | padding `px-2` | **resuelto** — estandarizado a **px-3** (P1.4.4.6, cambio visual aprobado) |
+| **buscadores / caravanas** | `font-mono` vía className | soportado por composición (no es variante) |
+| **placeholder** | color inconsistente | auth/capture usan `text-ink-3` vía className; alta de animal sin él (preservado por consumidor) |
 
 ## Consumidores migrados
 
-- **Button:** los 5 submits de autenticación (P1.4.4.1c).
-- **Input/Select/Field:** `NewAnimalForm` (alta de animal, P1.4.4.2b).
+- **Button:** submits de auth (5, `lg`); ganadero `md` (NewAnimalForm, SanidadCapture,
+  ReproCapture); `secondary` (botón "Buscar" del AnimalPicker).
+- **Input/Select/Field:** auth (login/register/forgot/reset/verify, `lg`); alta de
+  animal (`md`); Sanidad y Reproducción (`md`, tab-condicionales); AddProductForm
+  (`md`, `useId` por doble render); búsqueda del AnimalPicker (`md`, mono); filtros
+  de Reportes (`md`) y HealthPlans (`sm`).
 
-## Próximos candidatos (a autorizar por capítulo)
+## Pendientes deliberados (P1.4.4.7+)
 
-1. **Auth** (inputs `lg` + Field) — P1.4.4.3.
-2. **Formularios ganaderos** restantes (Sanidad, Reproducción, WeighingForm, AddProductForm).
-3. **Filtros compactos** (Reportes `md`/13px, Alertas focus-ring, HealthPlans px-2) con sus decisiones explícitas.
-4. **Button ganadero** (submit de NewAnimalForm y CTAs `md`) en la fase de botones generales.
+Registrados, **no migrados** (sin ampliar alcance):
+
+- **Botones con icono + `gap`:** WeighingForm submit (`Check` + tri-estado), Reportes
+  "Exportar CSV" (`Download`), FarmMap "Mover", HealthPlans "Aplicar plan" (`Loader2`
+  como spinner). Abren la **API de iconos** (composición vs. slots) y el **spinner** de
+  carga (hoy `loading` solo `aria-busy` + texto).
+- **Botones `sm` (h-8):** AddProductForm Guardar/Cancelar, MedicationsPanel "Agregar",
+  Alertas "Reevaluar", VerificationBanner, "Nuevo medicamento".
+- **Icon-only:** PhotoGallery, "marcar hecha", quitar animal (`X`) → posible variante `icon` (aria-label obligatorio).
+- **`danger`** y **toggles/segmented** (selector de reporte, Tabs, Método): sin decidir.
+- **Inputs residuales `md`:** WeighingForm (kg, cc, `tnum`); búsquedas con icono
+  (`animales/page.tsx` `pl-8/w-64`, `FarmMap` `flex-1`) — migran con su superficie.
+- **CTA-`Link`** (EmptyState, EmptyFarmState, register fallback) y `PrimaryLink`:
+  navegación, **fuera** de Button por diseño.
