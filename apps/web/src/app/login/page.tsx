@@ -1,36 +1,36 @@
 'use client';
 
-import { useState } from 'react';
-import { ACCESS_COOKIE, API_URL, REFRESH_COOKIE } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { login } from '@/lib/auth';
 
 const inputCls =
   'h-10 w-full rounded-md border border-strong bg-surface px-3 text-[14px] outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
 
 export default function LoginPage() {
+  const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Prellenar el email si venimos del fallback de registro (/login?email=…)
+  useEffect(() => {
+    const prefill = new URLSearchParams(window.location.search).get('email');
+    if (prefill) setEmail(prefill);
+  }, []);
+
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError('');
     const fd = new FormData(e.currentTarget);
-    try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: fd.get('email'), password: fd.get('password') }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.message?.title ?? 'Credenciales inválidas');
-      const secure = location.protocol === 'https:' ? '; Secure' : '';
-      document.cookie = `${ACCESS_COOKIE}=${encodeURIComponent(body.access_token)}; path=/; max-age=${body.expires_in}; SameSite=Lax${secure}`;
-      document.cookie = `${REFRESH_COOKIE}=${encodeURIComponent(body.refresh_token)}; path=/; max-age=${7 * 24 * 3600}; SameSite=Lax${secure}`;
+    const res = await login(String(fd.get('email')), String(fd.get('password')));
+    if (res.ok) {
       window.location.href = '/';
-    } catch (err: any) {
-      setError(err.message);
-      setBusy(false);
+      return;
     }
+    setError(res.error);
+    setBusy(false);
   }
 
   return (
@@ -46,13 +46,34 @@ export default function LoginPage() {
         <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-ink-2">Email</span>
-            <input name="email" type="email" required autoFocus placeholder="tu@email.com" className={inputCls} />
+            <input
+              name="email"
+              type="email"
+              required
+              autoFocus
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="tu@email.com"
+              className={inputCls}
+            />
           </label>
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-ink-2">Contraseña</span>
-            <input name="password" type="password" required placeholder="••••••••" className={inputCls} />
+            <input
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              placeholder="••••••••"
+              className={inputCls}
+            />
           </label>
-          {error && <p className="text-[12px] text-danger">{error}</p>}
+          {error && (
+            <p role="alert" className="text-[12px] text-danger">
+              {error}
+            </p>
+          )}
           <button
             type="submit"
             disabled={busy}
@@ -60,9 +81,14 @@ export default function LoginPage() {
           >
             {busy ? 'Ingresando…' : 'Ingresar'}
           </button>
-          <p className="text-center text-[11px] text-ink-3">
-            Demo: cowinance@gmail.com / cowinance · maria@elombu.com / ombu1234
-          </p>
+          <div className="flex items-center justify-between text-[12px]">
+            <Link href="/register" className="font-medium text-brand hover:underline">
+              Crear cuenta
+            </Link>
+            <Link href="/forgot-password" className="text-ink-3 hover:underline">
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </div>
         </form>
       </div>
     </div>
