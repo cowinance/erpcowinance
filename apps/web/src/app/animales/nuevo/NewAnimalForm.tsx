@@ -3,10 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
-
-const inputCls =
-  'h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand';
-const labelCls = 'mb-1 block text-label font-medium text-ink-2';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 export function NewAnimalForm({ categories, lots }: { categories: any[]; lots: any[] }) {
   const router = useRouter();
@@ -43,46 +42,40 @@ export function NewAnimalForm({ categories, lots }: { categories: any[]; lots: a
   return (
     <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
       <div className="grid grid-cols-2 gap-4">
-        <label className="block">
-          <span className={labelCls}>Caravana *</span>
-          <input name="tag" required placeholder="472" className={`${inputCls} font-mono`} autoFocus />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Nombre</span>
-          <input name="name" placeholder="Opcional" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Sexo *</span>
-          <select name="sex" required className={inputCls} defaultValue="F">
+        <Field label="Caravana" htmlFor="tag" required>
+          <Input id="tag" name="tag" required placeholder="472" className="font-mono" autoFocus />
+        </Field>
+        <Field label="Nombre" htmlFor="name">
+          <Input id="name" name="name" placeholder="Opcional" />
+        </Field>
+        <Field label="Sexo" htmlFor="sex" required>
+          <Select id="sex" name="sex" required defaultValue="F">
             <option value="F">Hembra</option>
             <option value="M">Macho</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className={labelCls}>Categoría *</span>
-          <select name="category_code" required className={inputCls}>
+          </Select>
+        </Field>
+        <Field label="Categoría" htmlFor="category_code" required>
+          <Select id="category_code" name="category_code" required>
             {categories.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className={labelCls}>Fecha de nacimiento</span>
-          <input name="birth_date" type="date" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Lote</span>
-          <select name="lot_id" className={inputCls} defaultValue="">
+          </Select>
+        </Field>
+        <Field label="Fecha de nacimiento" htmlFor="birth_date">
+          <Input id="birth_date" name="birth_date" type="date" />
+        </Field>
+        <Field label="Lote" htmlFor="lot_id">
+          <Select id="lot_id" name="lot_id" defaultValue="">
             <option value="">Sin lote</option>
             {lots.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
       </div>
       {error && <p className="text-label text-danger">{error}</p>}
       <button
