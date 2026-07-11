@@ -11,9 +11,10 @@ import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { CalendarClock, Check, ChevronRight, Loader2, ClipboardList } from 'lucide-react';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
-const inputCls = 'h-8 rounded-md border border-strong bg-surface px-2 text-body outline-none focus:ring-2 focus:ring-brand';
 
 export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories: any[] }) {
   const router = useRouter();
@@ -110,7 +111,7 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
                     <div className="flex flex-wrap items-end gap-2">
                       <label className="flex flex-col gap-1">
                         <span className="text-compat-10 font-medium text-ink-2">Aplicar a</span>
-                        <select value={target} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
+                        <Select value={target} onChange={(e) => setTarget(e.target.value)} controlSize="sm" fullWidth={false}>
                           <option value="all">Todo el hato</option>
                           {categories.filter((c) => c.animal_count > 0).map((c) => (
                             <option key={c.code} value={`cat:${c.code}`}>
@@ -122,11 +123,11 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
                               Lote: {l.name}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label className="flex flex-col gap-1">
                         <span className="text-compat-10 font-medium text-ink-2">Fecha ancla</span>
-                        <input type="date" value={anchor} onChange={(e) => setAnchor(e.target.value)} className={inputCls} />
+                        <Input type="date" value={anchor} onChange={(e) => setAnchor(e.target.value)} controlSize="sm" fullWidth={false} />
                       </label>
                       <button
                         onClick={() => apply(p.id)}
