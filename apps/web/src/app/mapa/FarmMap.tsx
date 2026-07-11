@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { MoveRight, MapPin } from 'lucide-react';
+import { Button } from '@/components/Button';
 
 interface Paddock {
   id: string;
@@ -211,13 +212,9 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={moveLot}
-                  disabled={!moveLotId || moving}
-                  className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md bg-brand px-3 text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
-                >
-                  <MoveRight size={14} /> {moving ? '…' : 'Mover'}
-                </button>
+                <Button size="md" onClick={moveLot} disabled={!moveLotId} loading={moving} className="gap-1 shrink-0">
+                  <MoveRight size={14} aria-hidden="true" /> {moving ? '…' : 'Mover'}
+                </Button>
               </div>
               {moveMsg && (
                 <p className={`mt-2 text-label ${moveMsg.startsWith('✓') ? 'text-success' : 'text-danger'}`}>{moveMsg}</p>
