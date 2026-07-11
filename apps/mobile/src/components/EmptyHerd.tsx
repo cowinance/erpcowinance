@@ -11,7 +11,7 @@ import { T } from '@/theme';
  */
 export function EmptyHerd() {
   return (
-    <View style={{ alignItems: 'center', paddingVertical: 24, paddingHorizontal: 8, gap: 8 }}>
+    <View style={{ alignItems: 'center', paddingVertical: T.space['6'], paddingHorizontal: T.space['2'], gap: T.space['2'] }}>
       <Text style={{ fontSize: T.type.subheading, fontWeight: '700', color: T.ink, textAlign: 'center' }}>
         Tu finca aún no tiene animales
       </Text>
@@ -20,7 +20,7 @@ export function EmptyHerd() {
         capturar en el campo, incluso sin señal.
       </Text>
       {WEB_URL ? (
-        <View style={{ marginTop: 8, minWidth: 200 }}>
+        <View style={{ marginTop: T.space['2'], minWidth: 200 }}>
           <Button label="Abrir Cowinance web" variant="secondary" onPress={() => openWeb('/animales/nuevo')} />
         </View>
       ) : null}

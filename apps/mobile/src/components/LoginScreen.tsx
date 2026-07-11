@@ -61,7 +61,7 @@ export function LoginScreen() {
         <Text style={styles.subtitle}>El sistema operativo de tu finca</Text>
 
         {mode === 'login' && (
-          <View style={{ width: '100%', gap: 12, marginTop: 24 }}>
+          <View style={{ width: '100%', gap: T.space['3'], marginTop: T.space['6'] }}>
             <TextInput
               value={email}
               onChangeText={setEmail}
@@ -90,7 +90,7 @@ export function LoginScreen() {
         )}
 
         {mode === 'forgot' && (
-          <View style={{ width: '100%', gap: 12, marginTop: 24 }}>
+          <View style={{ width: '100%', gap: T.space['3'], marginTop: T.space['6'] }}>
             <Text style={styles.hint}>Ingresá tu email y te enviaremos un enlace para restablecer tu contraseña.</Text>
             <TextInput
               value={email}
@@ -111,7 +111,7 @@ export function LoginScreen() {
         )}
 
         {mode === 'forgot-sent' && (
-          <View style={{ width: '100%', gap: 12, marginTop: 24 }}>
+          <View style={{ width: '100%', gap: T.space['3'], marginTop: T.space['6'] }}>
             <Text accessibilityRole="text" style={[styles.hint, { fontSize: T.type.body, color: T.ink2 }]}>
               Si existe una cuenta con ese email, te enviamos un enlace para restablecer tu contraseña. El enlace se abre
               en la web.
@@ -126,7 +126,7 @@ export function LoginScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.canvas, alignItems: 'center', justifyContent: 'center' },
-  box: { width: '100%', maxWidth: 360, alignItems: 'center', paddingHorizontal: 24 },
+  box: { width: '100%', maxWidth: 360, alignItems: 'center', paddingHorizontal: T.space['6'] },
   logo: {
     width: 56,
     height: 56,
@@ -134,10 +134,10 @@ const styles = StyleSheet.create({
     backgroundColor: T.brand700,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: T.space['3'],
   },
   title: { fontSize: T.compat['22'], fontWeight: '700', color: T.ink },
-  subtitle: { fontSize: T.type.body, color: T.ink3, marginTop: 2 },
+  subtitle: { fontSize: T.type.body, color: T.ink3, marginTop: T.space['0.5'] },
   input: {
     height: 46,
     borderWidth: 1,
@@ -149,6 +149,6 @@ const styles = StyleSheet.create({
     backgroundColor: T.surface,
   },
   error: { fontSize: T.type.label, color: T.danger },
-  link: { fontSize: T.type.body, color: T.brand700, fontWeight: '600', textAlign: 'center', paddingVertical: 4 },
+  link: { fontSize: T.type.body, color: T.brand700, fontWeight: '600', textAlign: 'center', paddingVertical: T.space['1'] },
   hint: { fontSize: T.type.caption, color: T.ink3, textAlign: 'center' },
 });
