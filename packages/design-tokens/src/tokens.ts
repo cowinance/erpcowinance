@@ -127,19 +127,16 @@ export const typeRole = {
  *  un rol aprobado (behavior-preserving). Se consumen como `text-compat-<n>` en
  *  web / `T.compat['<n>']` en móvil. Se ELIMINAN cuando se autorice la
  *  convergencia visual (normalización). Prohibido usarlos en código nuevo.
- *  Consumidores conocidos anotados por valor. */
+ *  Consumidores anotados por valor. Los 4 aliases sin consumidores (18/32/48/64)
+ *  se PODARON en el capítulo de consolidación de P1.4.4 (cero usos web + móvil). */
 export const typeCompat = {
   '9': 9, // web: FarmMap (etiqueta mínima de nodo)
   '10': 10, // web: badge de nav, chart axis (SVG WeightChart queda fuera de alcance)
   '16': 16, // web: 1 uso; móvil: varios títulos/labels
-  '18': 18, // móvil
   '22': 22, // web/móvil: títulos intermedios
-  '24': 24, // web/móvil
+  '24': 24, // móvil: KPI de la ficha del animal
   '26': 26, // móvil: KPI (diverge de display=30 web; la divergencia se PRESERVA)
   '28': 28, // web
-  '32': 32, // móvil
-  '48': 48, // móvil
-  '64': 64, // web: hero grande (auth)
 } as const;
 
 /**
