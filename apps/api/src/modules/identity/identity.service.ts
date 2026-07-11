@@ -4,6 +4,7 @@ import { hashPassword } from '../../common/passwords';
 import { countryDefaults, isSupportedCountry } from './country-defaults';
 import { EmailActionTokenService } from './email-action-token.service';
 import { EMAIL_SENDER, type EmailSender } from '../../application/ports/email-sender.port';
+import { AuthService } from '../auth/auth.service';
 
 /** Base URL del front para armar los links de email (dev: localhost del web). */
 function appBaseUrl(): string {
@@ -30,6 +31,7 @@ export class IdentityService {
     private readonly db: DbService,
     private readonly tokens: EmailActionTokenService,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
+    private readonly auth: AuthService,
   ) {}
 
   async register(body: {
@@ -180,6 +182,65 @@ export class IdentityService {
       to: email,
       subject: 'Verificá tu email — Cowinance',
       text: `Confirmá tu cuenta de Cowinance abriendo este enlace:\n${link}\n\nSi no creaste una cuenta, ignorá este mensaje.`,
+    });
+  }
+
+  /**
+   * Solicitud de reset de contraseña (P1.2, @Public). Respuesta CONSTANTE
+   * (anti-enumeración): no revela si el email existe. Solo emite un token de
+   * reset si el usuario existe y está activo.
+   */
+  async forgotPassword(body: { email?: string }) {
+    const email = (body?.email ?? '').trim().toLowerCase();
+    if (email) {
+      const user = await this.db.one<{ id: string; status: string }>(
+        `SELECT id, status FROM users WHERE email = $1 AND deleted_at IS NULL`,
+        [email],
+      );
+      if (user && user.status === 'active') {
+        try {
+          await this.sendPasswordResetEmail(user.id, email);
+        } catch (err) {
+          this.logger.warn(`No se pudo enviar el reset a ${email}: ${String(err)}`);
+        }
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Establece una contraseña nueva a partir de un token de reset (P1.2, @Public):
+   * consume el token (single-use), actualiza `password_hash` y REVOCA todas las
+   * sesiones vivas del usuario (decisión F: un cambio de credencial invalida las
+   * sesiones existentes). La validación de la contraseña ocurre ANTES de consumir
+   * el token — una contraseña débil no quema el token.
+   */
+  async resetPassword(body: { token?: string; new_password?: string }) {
+    const token = (body?.token ?? '').trim();
+    const newPassword = body?.new_password ?? '';
+    if (!token)
+      throw new BadRequestException({ code: 'identity.missing_token', title: 'token es obligatorio' });
+    if (newPassword.length < 8)
+      throw new BadRequestException({ code: 'identity.weak_password', title: 'La contraseña debe tener al menos 8 caracteres' });
+
+    const userId = await this.tokens.consume(token, 'password_reset');
+    if (!userId)
+      throw new BadRequestException({ code: 'identity.invalid_token', title: 'Token de reset inválido o expirado' });
+
+    await this.db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, hashPassword(newPassword)]);
+    await this.auth.revokeAllSessions(userId);
+    this.logger.log(`Reset de contraseña completado para user=${userId}`);
+    return { ok: true };
+  }
+
+  /** Emite un token de reset y envía el email con el link. */
+  private async sendPasswordResetEmail(userId: string, email: string): Promise<void> {
+    const token = await this.tokens.issue(userId, 'password_reset');
+    const link = `${appBaseUrl()}/reset-password?token=${token}`;
+    await this.email.send({
+      to: email,
+      subject: 'Restablecé tu contraseña — Cowinance',
+      text: `Recibimos una solicitud para restablecer tu contraseña. Abrí este enlace:\n${link}\n\nSi no lo solicitaste, ignorá este mensaje: tu contraseña no cambió.`,
     });
   }
 }

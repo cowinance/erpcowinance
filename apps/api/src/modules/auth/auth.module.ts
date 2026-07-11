@@ -7,5 +7,6 @@ import { AuthInterceptor } from './auth.interceptor';
 @Module({
   controllers: [AuthController],
   providers: [AuthService, { provide: APP_INTERCEPTOR, useClass: AuthInterceptor }],
+  exports: [AuthService],
 })
 export class AuthModule {}

@@ -34,6 +34,20 @@ export class IdentityController {
     return this.identity.resendVerification(body);
   }
 
+  /** Solicitud de reset de contraseña (P1.2). Público, respuesta constante (anti-enumeración). */
+  @Public()
+  @Post('forgot-password')
+  forgotPassword(@Body() body: any) {
+    return this.identity.forgotPassword(body);
+  }
+
+  /** Establecer contraseña nueva con el token de reset (P1.2). Público. */
+  @Public()
+  @Post('reset-password')
+  resetPassword(@Body() body: any) {
+    return this.identity.resetPassword(body);
+  }
+
   @Get('organizations/current')
   async currentOrganization() {
     return this.db.one(

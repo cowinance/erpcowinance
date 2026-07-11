@@ -87,6 +87,19 @@ export class AuthService {
     return this.issueTokens(user, row.tenant_id, payload.role ?? 'owner');
   }
 
+  /**
+   * Revoca TODAS las sesiones (refresh tokens) vivas de un usuario. Lo invoca
+   * `identity` al resetear la contraseña (ADR-0011, decisión F): un cambio de
+   * credencial debe invalidar las sesiones existentes. `auth` es dueño de las
+   * sesiones; expone esta operación para no filtrar su almacenamiento a identity.
+   */
+  async revokeAllSessions(userId: string): Promise<void> {
+    await this.db.query(
+      `UPDATE auth_refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+  }
+
   async logout(body: { refresh_token?: string }) {
     if (body?.refresh_token) {
       try {
