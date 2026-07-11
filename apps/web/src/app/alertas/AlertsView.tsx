@@ -25,8 +25,6 @@ const SEVERITY = {
   info: { label: 'Informativas', icon: Info, color: 'var(--info)', border: 'border-info' },
 } as const;
 
-const inputCls = 'h-8 rounded-md border border-strong bg-surface px-3 text-body outline-none';
-
 export function AlertsView() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [kpis, setKpis] = useState<any>(null);
