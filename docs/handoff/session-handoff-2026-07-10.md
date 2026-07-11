@@ -9,7 +9,7 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto está en la **Fase Producto**: ADR-0010 (P1.1), ADR-0011 (P1.2), ADR-0012 (P1.3). **P1.1 (registro self-service), P1.2 (email/verificación/reset) y P1.3 (onboarding y experiencia inicial web+móvil) están COMPLETOS y validados.** P1.3 llevó el onboarding SaaS a la UI **sobre el diseño existente** (no fue un rediseño): shell de auth web, verificación/recuperación, banner suave, empty-states, capa de cuenta móvil separada del sync, **corrección de una fuga local multi-tenant** (P1.3.6a), y una suite **Playwright 5/5**. **Siguiente acción concreta recomendada: P1.4 — Fundamentos de experiencia y sistema de diseño (empezar por auditoría + propuesta, no implementación).** Ver §0ter / §9.
+Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 4 packages (`db`, `sync-core`, `domain`, `design-tokens`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto está en la **Fase Producto**: ADR-0010 (P1.1), ADR-0011 (P1.2), ADR-0012 (P1.3), ADR-0013 (P1.4.1). **P1.1 (registro self-service), P1.2 (email/verificación/reset), P1.3 (onboarding y experiencia inicial web+móvil) y P1.4.1 (fuente única de tokens) están COMPLETOS, validados y pusheados.** P1.3 llevó el onboarding SaaS a la UI **sobre el diseño existente** (no fue un rediseño); P1.4 abrió los **fundamentos de sistema de diseño**: se hizo la **auditoría** (aprobada, conceptual) y **P1.4.1** cableó el **pipeline de tokens** (fuente única neutral + CSS generado para web + adaptador móvil + Gate 0 `tokens:check`), estrictamente behavior-preserving. **Siguiente acción concreta: P1.4.2 — Especificación del Design System (escala tipográfica, spacing, densidad ERP, decisión de dark mode, contrato de iconografía, inventario/límites de primitivos → ADR-0014). Fase EXCLUSIVAMENTE conceptual: no se tocan pantallas ni componentes.** Ver §0quater / §9.
 
 > **Ver también:** `docs/sprints/foundation-hardening-executive-summary.md` (resumen del sprint), `docs/product/*` (visión, roadmap 2026, personas, monetización, design partners), `docs/adr/0001-0011`.
 
@@ -101,16 +101,39 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 
 ---
 
+## 0quater. Fase Producto — P1.4 en curso · P1.4.1 COMPLETADO ✅ (fuente única de tokens)
+
+**P1.4 (Fundamentos de experiencia y sistema de diseño)** arrancó con una **auditoría** integral de producto/UX/UI/sistema visual (aprobada, conceptual, no implementada). Conclusión rectora: **no se reinventa el look de Cowinance — se sistematiza y fortalece** la dirección existente (verde bosque + neutros cálidos + Inter + tabular-nums, que ya apunta a Linear/Stripe). El mayor problema estructural detectado: tokens duplicados a mano web↔móvil, sin escala tipográfica ni primitivos. **P1.4.1 atacó el cimiento #1: la fuente única de tokens.**
+
+**Objetivo P1.4.1 (cumplido):** una **única fuente editable** de tokens; los artefactos por plataforma se **derivan**, nunca se mantienen en paralelo a mano. **ADR-0013** documenta la decisión. Estrictamente **behavior-preserving** (mismos valores visuales, solo relocalizados). **Ya no está pendiente; pusheado.**
+
+**Commits (4, en `origin/main`):**
+- **`e55e233`** — paquete canónico `@cowinance/design-tokens` (neutral: sin React/Next/Expo/Node/DOM; primitivos vs semánticos; `accent` como referencia) + generador `gen-web-css.mjs` (determinista) + scripts `tokens:build`/`tokens:check`.
+- **`0dbb852`** — web: `globals.css` importa `apps/web/src/app/tokens.generated.css` (deja de definir tokens a mano); salida CSS byte-idéntica.
+- **`fc7addf`** — móvil: `apps/mobile/src/theme.ts` es un **adaptador** que deriva `T` de la fuente **sin re-tipear** valores; los ~15 consumidores intactos.
+- **`d770448`** — `tokens:check` como **Gate 0** de `audit:arch` (construye el paquete + compara el CSS sin autocorregir; falla ante deriva) + ADR-0013 + índice + README.
+
+**Pipeline de tokens (implementado):**
+- **Fuente única editable:** `packages/design-tokens/src/tokens.ts`.
+- **Web:** `apps/web/src/app/tokens.generated.css` **generado** (cabecera "no editar"), importado por `globals.css`.
+- **Móvil:** `theme.ts` adaptador (import directo desde el paquete compilado, resolución Metro como `domain`/`sync-core`).
+- **Regeneración explícita:** `npm run tokens:build` (edita `tokens.ts` → reescribe el CSS). **Validación:** `npm run tokens:check` (Gate 0; falla ante deriva, no modifica archivos).
+- **Riesgo decisivo resuelto:** un prototipo confirmó que `@theme inline` de Tailwind v4 funciona desde un CSS **importado** → no hizo falta inyección entre marcadores.
+
+**Gates finales P1.4.1 — todos verdes:** `tokens:check` ✓ · typecheck web/móvil/**design-tokens** ✓ · `next build` + `nest build` ✓ · **arranque Expo/Metro** ✓ · **Playwright 5/5** ✓ · `audit:arch` verde (114 tests, **0 ciclos**) · sim **2000/2000** ✓ · **revisión visual dirigida** web (claro **y** oscuro) + móvil ✓. **Diferencias visuales: ninguna** (el dark mode observado es preexistente, reproducido igual).
+
+---
+
 ### Estado general del repositorio
 - **Working tree:** limpio (solo `.claude/settings.local.json`, config local del agente, no se sube).
 - **Remoto:** ✅ configurado y **pusheado** — `origin` → https://github.com/cowinance/erpcowinance.git; `main` trackea `origin/main`; local = remoto. `gh` CLI **no** instalado (auth por credential helper del sistema).
-- **Monorepo:** npm workspaces — `apps/api`, `apps/web`, `apps/mobile`, `packages/db`, `packages/sync-core`, `packages/domain`.
+- **Monorepo:** npm workspaces — `apps/api`, `apps/web`, `apps/mobile`, `packages/db`, `packages/sync-core`, `packages/domain`, `packages/design-tokens` (fuente única de tokens, P1.4.1).
 
 ### Rama actual
 `main` (los commits son pequeños y directos; `git push` directo, ya trackea origin).
 
 ### Último commit
-Al cerrar P1.3.7: `test(web): P1.3.7 — escenario de primer animal + doc de ejecución` (`4f2997d`), más los commits de cierre documental de P1.3.8 (ADR-0012 + índice, docs/config, handoff). Los 14 commits de P1.3.1-P1.3.7 están listados en §0ter. **Pendientes de push** (ver "Rama actual").
+**Último commit remoto (`origin/main`): `d770448`** — `chore/docs: P1.4.1 — gate tokens:check en audit:arch + ADR-0013 + docs`. Cadena P1.4.1: `e55e233` → `0dbb852` → `fc7addf` → `d770448` (ver §0quater). Antes: P1.3 (14 commits, §0ter) + cierre documental P1.3.8. **Local = remoto (0/0); sin commits pendientes de push** salvo el commit documental de este cierre.
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
@@ -125,7 +148,7 @@ Al cerrar P1.3.7: `test(web): P1.3.7 — escenario de primer animal + doc de eje
 - **E2E web (Playwright, P1.3.7):** **5/5** (registro+auto-login, fallback, verificación, recuperación+reset, primer animal), serial; instancias aisladas en puertos 3210/3211 y temporales fuera del repo. `npm run e2e:web` (ver `apps/web/e2e/README.md`).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint COMPLETO (F0-F9)**. **Fase Producto en curso** — **P1.1 (ADR-0010), P1.2 (ADR-0011) y P1.3 (onboarding + experiencia inicial, ADR-0012) COMPLETOS y validados** (ver §0 / §0bis / §0ter). `npm run audit:arch` verde (114 tests, 0 ciclos, cobertura 72.54% domain+sync-core); Playwright 5/5. **Siguiente recomendado: P1.4 — Fundamentos de experiencia y sistema de diseño (auditoría + propuesta primero)** (§9).
+**Foundation Hardening Sprint COMPLETO (F0-F9)**. **Fase Producto en curso** — **P1.1 (ADR-0010), P1.2 (ADR-0011), P1.3 (ADR-0012) y P1.4.1 (fuente única de tokens, ADR-0013) COMPLETOS y validados** (ver §0 / §0bis / §0ter / §0quater). `npm run audit:arch` verde (114 tests, 0 ciclos, cobertura 72.54% domain+sync-core; **Gate 0 `tokens:check`**); Playwright 5/5. **Siguiente: P1.4.2 — Especificación del Design System (conceptual, sin tocar pantallas → ADR-0014)** (§9).
 
 ---
 
@@ -259,7 +282,7 @@ Ver §8 (Reglas permanentes). En síntesis: dominio puro, una regla en un solo l
 ## 4. Trabajo pendiente (por prioridad)
 
 ### Fase Producto — lo inmediato
-1. **P1.4 — Fundamentos de experiencia y sistema de diseño** ← **siguiente paso recomendado** (ver §9): dirección visual, tokens/tipografía/espaciado/color/componentes, navegación e IA, componentes reutilizables web+móvil, consistencia/accesibilidad/responsive. **Empieza por auditoría + propuesta, no implementación masiva.**
+1. **P1.4.2 — Especificación del Design System** ← **siguiente paso** (ver §9): escala tipográfica, spacing, densidad ERP (cómodo/estándar/compacto), **decisión de dark mode**, contrato de iconografía, **inventario y límites de primitivos** → **ADR-0014**. **Fase EXCLUSIVAMENTE conceptual: no se tocan pantallas ni componentes hasta que la especificación esté revisada y aprobada.** (P1.4.1 — fuente única de tokens — ya está cerrado; ver §0quater.)
 2. **Candidatos posteriores** (ver §9): invitaciones y roles multiusuario; CRUD de lotes y potreros; endurecimiento de seguridad + rate limiting; cookies seguras web (`httpOnly`); deep-linking móvil; stores móviles namespaced (multicuenta offline).
 3. **Documentos formales con vencimiento** (completa A6; reusa el motor de alertas).
 4. **Facturación SaaS** (planes + medición de uso; el cobro real requiere pasarela).
@@ -348,17 +371,18 @@ Acordadas y **obligatorias**:
 
 ## 9. Próximos pasos
 
-> **Único siguiente paso recomendado: P1.4 — Fundamentos de experiencia y sistema de diseño.**
+> **Único siguiente paso recomendado: P1.4.2 — Especificación del Design System (conceptual).**
 
-El **onboarding SaaS está completo end-to-end** (P1.1 provisioning + P1.2 email/verificación/reset + P1.3 UI web/móvil). P1.3 construyó las pantallas **sobre el diseño existente**, sin un sistema de diseño formal. Antes de seguir ampliando módulos funcionales conviene una **fase de diseño de producto y sistema visual**:
+**P1.4 (Fundamentos de experiencia y sistema de diseño) está en curso.** Ya se hizo la **auditoría** (aprobada) y **P1.4.1 — fuente única de tokens** (cerrado y pusheado, ver §0quater / ADR-0013). El siguiente tramo es la **especificación**, ANTES de tocar cualquier pantalla o componente:
 
-**P1.4 — Fundamentos de experiencia y sistema de diseño.** Objetivo: definir la dirección visual limpia y profesional de Cowinance; establecer **tokens de diseño** (tipografía, espaciado, color, componentes); revisar **navegación y arquitectura de información**; crear **componentes reutilizables** web y móvil; mejorar **consistencia, accesibilidad y responsive**; evitar rediseñar pantallas de forma aislada. **Debe empezar solo con auditoría + propuesta, no con implementación masiva.**
+**P1.4.2 — Especificación del Design System (fase EXCLUSIVAMENTE conceptual).** Definir: **escala tipográfica** (reemplaza los números mágicos `text-[Npx]`); **escala de spacing**; **densidad ERP** (modos cómodo/estándar/compacto — la escala de tipo/spacing no debe impedirlos); **decisión de dark mode** (evaluación abierta: uso en campo bajo sol, accesibilidad, costo de mantenimiento; lean preliminar = web sí / móvil claro-primero); **contrato de iconografía** (Lucide web + Ionicons móvil pueden coexistir si cumplen el mismo lenguaje: significado, tamaños, grosor, alineación óptica, estados, uso con texto, a11y); **inventario y límites de primitivos** en 3 familias (controles+formularios / feedback+loading+overlays / datos densos — **sin tabla universal sin consumidores reales**). Cierra con **ADR-0014**. **No se modifican pantallas ni componentes hasta que la spec esté revisada y aprobada.** Después: aplicar escala (P1.4.3), primitivos por familia (P1.4.4a/b/c), navegación responsive + honestidad de módulos (P1.4.5), primitivos móvil (P1.4.6), dark mode/pulido (P1.4.7) — todo behavior-preserving, Playwright como gate.
 
 **Candidatos posteriores (registrados, no ahora):** invitaciones y roles multiusuario; CRUD de lotes y potreros; endurecimiento de seguridad + **rate limiting** (superficies públicas `register`/`forgot`/`resend`); **cookies seguras web** (`httpOnly`); **deep-linking móvil**; **stores móviles namespaced** para varias cuentas/fincas offline (Alternativa C-2 de ADR-0012). Producto: documentos formales con vencimiento (A6); facturación SaaS.
 
 **Deuda visible (registrada, no bloqueante):**
 - **P1.2/ADR-0011:** proveedor de email real (solo el adaptador `log` de dev; SMTP/SES/Resend = adaptador nuevo); gating de acciones sensibles por `email_verified` (el estado existe, su enforcement es futuro).
 - **P1.3/ADR-0012:** dependencia de conectividad para registro/login/primer bootstrap; **sin alta móvil del primer animal** (se carga desde la web); **sin multicuenta offline simultáneo** (un store por dispositivo); cambio de cuenta con pendientes requiere intervención del usuario; puertos E2E fijos (3210/3211, verificados) no dinámicos; pantallas nuevas sobre el diseño actual (deuda que P1.4 aborda).
+- **P1.4/ADR-0013:** P1.4.1 dejó la **fuente única de tokens** (color/radio/sombra/fuente); **falta el resto del sistema** (escala tipográfica, spacing, densidad, primitivos, navegación responsive, honestidad de módulos, dark mode) — lo especifica P1.4.2 y lo aplica P1.4.3+. DX: cambiar tokens exige `tokens:build` + commitear el CSS generado (sin watcher de dev por ahora, a propósito).
 - **CI:** el repo **no tiene workflow de CI** todavía; los gates (incl. Playwright) se corren a mano. Comando listo: `npx playwright install --with-deps chromium && npm run e2e:web`. Cablear CI (audit:arch + E2E, jobs separados, sin compartir DB/log) es **deuda inmediata** — no se hizo en P1.3.8 para no reestructurar CI de cero solo por esto.
 
 **Nota histórica (Foundation Hardening, ya cerrado):** F6 partió `sync.service` en `SyncHandler` por bounded context preservando la lógica de Server Authority de T4.4; F5 instaló Event Bus + Outbox. No hay pasos pendientes del sprint de hardening.
@@ -376,6 +400,7 @@ El **onboarding SaaS está completo end-to-end** (P1.1 provisioning + P1.2 email
 7. **`docs/adr/`** — `README.md` + `0004-domain-package.md` + `0006-value-object-strategy.md` (checklist de 5 preguntas para admitir un VO/`DomainError` nuevo) + `0007-server-authority-derived-values.md` (Server Authority sobre valores derivados — **leer antes de tocar `sync.service.ts`**).
 8. **`packages/domain/src/`** — `shared/brand.ts`, `shared/domain-error.ts`, `value-objects/*`, `health/withdrawal.ts`, `reproduction/gestation.ts`, `reproduction/newborn-category.ts` (el patrón companion + servicios de dominio a seguir en F5+).
 9. **`packages/sync-core/src/`** — motor de sync (HLC, changesets, merge, sim, `HlcClock`). Setup de package puro a replicar.
+8bis. **Design System / tokens (P1.4.1, ADR-0013)** — `packages/design-tokens/src/tokens.ts` (fuente única editable), `packages/design-tokens/scripts/gen-web-css.mjs` (generador), `apps/web/src/app/tokens.generated.css` (artefacto web, no editar), `apps/web/src/app/globals.css` + `apps/mobile/src/theme.ts` (consumidores). Punto de partida de **P1.4.2**.
 10. **`apps/api/src/modules/sync/sync.service.ts`** — God object a partir en **F6**; contiene ahora la lógica de Server Authority (T4.4) que hay que preservar al partirlo en handlers. `apps/api/src/db/db.service.ts`, `db/query.ts`, `common/request-context.ts` (RLS + tx), `modules/dashboard/dashboard.controller.ts` (SQL a extraer en F7).
 11. **Especificación del producto** (`.docx` en `docs/`): `Cowinance_Arquitectura`, `Cowinance_Roadmap`, `Cowinance_Catalogo_Modulos`, `Cowinance_Modelo_Datos`, `Cowinance_Design_System`, `Cowinance_APIs`, y los módulos.
 12. **`packages/db/cowinance_schema.sql`** — DDL canónico de 140 tablas (fuente de verdad del modelo).
@@ -400,7 +425,7 @@ Comandos: `npm test` (Vitest) · `npm run build -w @cowinance/domain` · `cd app
 
 ## 12. Resumen final — "¿Qué necesita saber un arquitecto para no cometer errores?"
 
-Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. El **Foundation Hardening Sprint (F0-F9) está cerrado** y el proyecto está en la **Fase Producto**: P1.1 (registro self-service), P1.2 (email/verificación/reset) y **P1.3 (onboarding + experiencia inicial web/móvil, ADR-0012)** **completos y validados**; siguiente recomendado **P1.4 (fundamentos de experiencia y sistema de diseño — auditoría + propuesta primero)**. Al agregar features de producto sigue rigiendo la regla número uno: **behavior-preserving en lo existente** — la API, la convergencia de sync y la UI ya construidas deben seguir idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `account-e2e` 23/23, `identity-email-e2e` 22/22, `auth-e2e` 16/16, `sync-e2e` verde, Playwright 5/5, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
+Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. El **Foundation Hardening Sprint (F0-F9) está cerrado** y el proyecto está en la **Fase Producto**: P1.1 (registro self-service), P1.2 (email/verificación/reset), **P1.3 (onboarding + experiencia inicial web/móvil, ADR-0012)** y **P1.4.1 (fuente única de tokens, ADR-0013)** **completos y validados**; siguiente **P1.4.2 (especificación del Design System — conceptual, sin tocar pantallas → ADR-0014)**. Al agregar features de producto sigue rigiendo la regla número uno: **behavior-preserving en lo existente** — la API, la convergencia de sync y la UI ya construidas deben seguir idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `tokens:check`, `account-e2e` 23/23, `identity-email-e2e` 22/22, `auth-e2e` 16/16, `sync-e2e` verde, Playwright 5/5, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
 
 El corazón de la deuda **ya se eliminó en F4**: retiro sanitario, gestación (dos modos) y categoría de cría al nacer vivían triplicados en `health.service`/`repro.service`/`SyncContext` móvil — ahora son funciones puras en `packages/domain` (`health/withdrawal.ts`, `reproduction/gestation.ts`, `reproduction/newborn-category.ts`), consumidas por los tres lugares. Y desde **T4.4/ADR-0007**, el servidor de sync **ya no confía ciegamente** en lo que calcula el cliente: recomputa y corrige (sin tolerancia) para los campos derivados de reglas — con un mecanismo distinto según si el dato es un evento inmutable o un campo LWW (para este último, la corrección del servidor participa del mismo `HlcClock` que los dispositivos, no es un `UPDATE` por fuera del mecanismo de sync). `classifyCategory` completo (edad+sexo+especie, catálogo configurable) **no se construyó**: no existía como comportamiento real, hubiera sido una feature nueva disfrazada de refactor — quedó en backlog de producto.
 
@@ -408,4 +433,4 @@ El corazón de la deuda **ya se eliminó en F4**: retiro sanitario, gestación (
 
 Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q` **y preservar la lógica de Server Authority que T4.4 agregó a `applyEvent`/`applyPregnancyPut`** al partirlos en handlers; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`, ya usado también para `domain` desde F4.1). No hay CI — corré los gates a mano (el remoto Git ya existe: `origin/main`, ver §0). Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
 
-**Siguiente acción concreta:** **P1.4 — Fundamentos de experiencia y sistema de diseño**, empezando por **auditoría + propuesta** (no implementación masiva). Ver §9.
+**Siguiente acción concreta:** **P1.4.2 — Especificación del Design System** (escala tipográfica, spacing, densidad ERP, decisión de dark mode, contrato de iconografía, inventario/límites de primitivos → ADR-0014). **Fase conceptual: no se tocan pantallas ni componentes hasta aprobar la spec.** (P1.4.1 — fuente única de tokens — ya cerrado, ADR-0013.) Ver §9.
