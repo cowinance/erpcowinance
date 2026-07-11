@@ -185,6 +185,12 @@ export interface DensityMode {
   cardPad: number; // padding de card (web hoy 20; móvil hoy 16 → se reconcilia en P1.4.4)
 }
 
+// P1.4.4.1a: `standard` es el ÚNICO modo con valores reales y operativo. Los
+// modos `compact`/`comfortable` son NOMINALES (contrato futuro): NO se inventan
+// aquí sus valores ni se habilitan hasta que existan pruebas de densidad reales
+// (ADR-0015). La web deriva estos números a `--density-*` (gen-web-css); el móvil
+// los expondrá con su propia tabla por plataforma (touch ≥ 44px), no estos mismos
+// absolutos. La densidad NUNCA cambia tipografía, color, radius, sombra ni iconos.
 export const density: { standard: DensityMode } = {
   standard: { controlH: 36, rowH: 40, padY: 8, gap: 12, cardPad: 20 },
 };

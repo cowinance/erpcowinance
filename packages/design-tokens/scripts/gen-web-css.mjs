@@ -16,12 +16,21 @@ const TARGET = resolve(REPO_ROOT, 'apps/web/src/app/tokens.generated.css');
 const DIST = resolve(__dirname, '../dist/tokens.js');
 
 const require = createRequire(import.meta.url);
-const { primitive, semantic, radius, font, typeRole, typeCompat, isRef } = require(DIST);
+const { primitive, semantic, radius, font, typeRole, typeCompat, density, isRef } = require(DIST);
 
 const cssValue = (v) => (isRef(v) ? `var(--${v.$ref})` : v);
 
 /** `--nombre: valor;` con 2 espacios de sangría. */
 const decl = (name, value) => `  --${name}: ${cssValue(value)};`;
+
+/** camelCase → kebab-case, determinista (controlH → control-h, padY → pad-y). */
+const kebab = (s) => s.replace(/([A-Z])/g, '-$1').toLowerCase();
+
+/** Declaraciones de un modo de densidad como custom properties `--density-*`
+ *  (px). NO entran en @theme: son variables planas que los primitivos leen con
+ *  `var(--density-…)`; no se generan utilidades especulativas sin consumidor. */
+const densityDecls = (mode) =>
+  Object.entries(mode).map(([k, v]) => `  --density-${kebab(k)}: ${v}px;`);
 
 /** Declaraciones semánticas de un tema, en orden estable. */
 function themeDecls(t) {
@@ -71,6 +80,21 @@ function buildCss() {
   lines.push('  :root {');
   lines.push(...themeDecls(semantic.dark).map((l) => '  ' + l));
   lines.push('  }');
+  lines.push('}');
+  lines.push('');
+  // Densidad (ADR-0014 dec. C) — PROTOTIPO P1.4.4.1a; el mecanismo se formaliza
+  // en ADR-0015. UN solo modo operativo: `standard`, con valores AUDITADOS (no un
+  // multiplicador). El fallback en :root ES `standard` → sin atributo `data-density`
+  // los valores ya son correctos: no hay flash ni hydration mismatch. Los modos
+  // `compact`/`comfortable` son NOMINALES: no se emiten valores hasta que existan
+  // pruebas de densidad reales (P1.4.4.x). Nada consume estas vars todavía.
+  lines.push('/* Densidad — prototipo P1.4.4.1a (ADR-0015 pendiente). Único modo: standard. */');
+  lines.push(':root {');
+  lines.push(...densityDecls(density.standard));
+  lines.push('}');
+  lines.push('');
+  lines.push(":root[data-density='standard'] {");
+  lines.push(...densityDecls(density.standard));
   lines.push('}');
   lines.push('');
   // @theme inline — mapeo semántico → utilidades Tailwind (nombres fijos)

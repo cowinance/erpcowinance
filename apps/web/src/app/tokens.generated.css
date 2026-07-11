@@ -53,6 +53,23 @@
   }
 }
 
+/* Densidad — prototipo P1.4.4.1a (ADR-0015 pendiente). Único modo: standard. */
+:root {
+  --density-control-h: 36px;
+  --density-row-h: 40px;
+  --density-pad-y: 8px;
+  --density-gap: 12px;
+  --density-card-pad: 20px;
+}
+
+:root[data-density='standard'] {
+  --density-control-h: 36px;
+  --density-row-h: 40px;
+  --density-pad-y: 8px;
+  --density-gap: 12px;
+  --density-card-pad: 20px;
+}
+
 @theme inline {
   --color-canvas: var(--bg-canvas);
   --color-surface: var(--bg-surface);

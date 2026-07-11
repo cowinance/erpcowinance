@@ -39,7 +39,7 @@ async function sessionContext() {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await sessionContext();
   return (
-    <html lang="es" className={inter.variable}>
+    <html lang="es" data-density="standard" className={inter.variable}>
       <body className="font-sans text-[14px] leading-5">
         <div className="flex min-h-screen">
           <Sidebar
