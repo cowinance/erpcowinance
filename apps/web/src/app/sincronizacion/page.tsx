@@ -21,7 +21,7 @@ export default async function SyncPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Sincronización</h1>
-      <p className="mt-0.5 mb-5 text-[13px] text-ink-3">
+      <p className="mt-0.5 mb-5 text-body text-ink-3">
         Panel de flota — estado de los dispositivos de campo y conflictos en revisión · cursor global{' '}
         <span className="tnum">{state.server_cursor}</span>
       </p>
@@ -34,9 +34,9 @@ export default async function SyncPage() {
             body="Cuando la app móvil se registre (POST /v1/sync/devices), su estado de sincronización aparecerá acá."
           />
         ) : (
-          <table className="w-full text-[13px]">
+          <table className="w-full text-body">
             <thead>
-              <tr className="h-8 border-b border-subtle text-left text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+              <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
                 <th>Dispositivo</th>
                 <th>Plataforma</th>
                 <th>Versión</th>
@@ -66,7 +66,7 @@ export default async function SyncPage() {
                     <td className="pr-1 text-right">
                       <span className="inline-flex items-center gap-1.5">
                         <span className={`size-2 rounded-full ${fresh ? 'bg-success' : 'bg-warning'}`} />
-                        <span className="text-[12px] text-ink-2">{fresh ? 'Al día' : 'Atrasado'}</span>
+                        <span className="text-label text-ink-2">{fresh ? 'Al día' : 'Atrasado'}</span>
                       </span>
                     </td>
                   </tr>
@@ -79,12 +79,12 @@ export default async function SyncPage() {
 
       <Card className="mt-4">
         <CardTitle
-          action={<span className="text-[12px] text-ink-3">{open.length} abiertos · {resolved.length} resueltos</span>}
+          action={<span className="text-label text-ink-3">{open.length} abiertos · {resolved.length} resueltos</span>}
         >
           Conflictos en revisión
         </CardTitle>
         {open.length === 0 ? (
-          <p className="py-6 text-center text-[13px] text-ink-3">
+          <p className="py-6 text-center text-body text-ink-3">
             Sin conflictos pendientes — la convergencia automática resolvió todo.
           </p>
         ) : (
@@ -96,7 +96,7 @@ export default async function SyncPage() {
                 <div key={c.id} className="flex items-center gap-3 rounded-md border-l-[3px] border-warning bg-sunken px-3 py-2.5">
                   <Icon size={16} className="shrink-0 text-warning" strokeWidth={1.75} />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium">
+                    <div className="text-body font-medium">
                       {meta.label} · {c.entity_type}
                       {c.tag && (
                         <span className="text-ink-2">
@@ -105,8 +105,8 @@ export default async function SyncPage() {
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 text-[12px] text-ink-2">{c.detail}</div>
-                    <div className="mt-0.5 text-[11px] text-ink-3">{relativeTime(c.created_at)}</div>
+                    <div className="mt-0.5 text-label text-ink-2">{c.detail}</div>
+                    <div className="mt-0.5 text-caption text-ink-3">{relativeTime(c.created_at)}</div>
                   </div>
                   <ResolveButton conflictId={c.id} />
                 </div>
@@ -117,7 +117,7 @@ export default async function SyncPage() {
         {resolved.length > 0 && (
           <div className="mt-4 border-t border-subtle pt-3">
             {resolved.slice(0, 5).map((c: any) => (
-              <div key={c.id} className="flex items-center gap-2 px-1 py-1 text-[12px] text-ink-3">
+              <div key={c.id} className="flex items-center gap-2 px-1 py-1 text-label text-ink-3">
                 <span className="line-through">{c.detail}</span>
                 <span className="ml-auto shrink-0">resuelto ({c.resolution})</span>
               </div>

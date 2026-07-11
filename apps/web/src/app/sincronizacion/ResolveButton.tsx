@@ -28,7 +28,7 @@ export function ResolveButton({ conflictId }: { conflictId: string }) {
     <button
       onClick={resolve}
       disabled={saving}
-      className={`h-7 shrink-0 rounded-md border px-3 text-[12px] font-medium transition-colors ${
+      className={`h-7 shrink-0 rounded-md border px-3 text-label font-medium transition-colors ${
         confirming
           ? 'border-warning bg-warning/10 text-warning'
           : 'border-strong bg-surface text-ink-2 hover:bg-sunken'

@@ -10,7 +10,7 @@ export function WeightChart({
   height?: number;
   unit?: string;
 }) {
-  if (!points.length) return <div className="py-10 text-center text-[13px] text-ink-3">Sin datos todavía</div>;
+  if (!points.length) return <div className="py-10 text-center text-body text-ink-3">Sin datos todavía</div>;
 
   const pad = { top: 12, right: 12, bottom: 24, left: 44 };
   const w = width - pad.left - pad.right;

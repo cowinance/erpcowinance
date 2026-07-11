@@ -32,7 +32,7 @@ function download(name: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-const inputCls = 'h-9 rounded-md border border-strong bg-surface px-3 text-[13px] outline-none focus:ring-2 focus:ring-brand';
+const inputCls = 'h-9 rounded-md border border-strong bg-surface px-3 text-body outline-none focus:ring-2 focus:ring-brand';
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 
 export function ReportsView() {
@@ -128,7 +128,7 @@ export function ReportsView() {
             <button
               key={r.key}
               onClick={() => setTab(r.key)}
-              className={`h-8 rounded px-3 text-[13px] font-medium ${
+              className={`h-8 rounded px-3 text-body font-medium ${
                 tab === r.key ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2 hover:text-ink'
               }`}
             >
@@ -139,7 +139,7 @@ export function ReportsView() {
         <button
           onClick={exportCsv}
           disabled={!data}
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-strong px-3 text-[13px] font-medium text-ink-2 hover:bg-sunken disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken disabled:opacity-50"
         >
           <Download size={15} /> Exportar CSV
         </button>
@@ -150,11 +150,11 @@ export function ReportsView() {
         {tab === 'inventory' ? (
           <>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-ink-2">A la fecha</span>
+              <span className="text-caption font-medium text-ink-2">A la fecha</span>
               <input type="date" value={at} max={today()} onChange={(e) => setAt(e.target.value)} className={inputCls} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-ink-2">Agrupar por</span>
+              <span className="text-caption font-medium text-ink-2">Agrupar por</span>
               <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as any)} className={inputCls}>
                 <option value="category">Categoría</option>
                 <option value="lot">Lote</option>
@@ -165,11 +165,11 @@ export function ReportsView() {
         ) : (
           <>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-ink-2">Desde</span>
+              <span className="text-caption font-medium text-ink-2">Desde</span>
               <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-ink-2">Hasta</span>
+              <span className="text-caption font-medium text-ink-2">Hasta</span>
               <input type="date" value={to} max={today()} onChange={(e) => setTo(e.target.value)} className={inputCls} />
             </label>
           </>
@@ -181,7 +181,7 @@ export function ReportsView() {
           <Loader2 size={18} className="animate-spin" />
         </div>
       ) : error ? (
-        <div className={`${cardCls} py-10 text-center text-[13px] text-danger`}>{error}</div>
+        <div className={`${cardCls} py-10 text-center text-body text-danger`}>{error}</div>
       ) : (
         result && (
           <>
@@ -202,25 +202,25 @@ function InventoryReport({ data }: { data: any }) {
     <div className={cardCls}>
       <div className="mb-4 flex items-baseline justify-between">
         <div>
-          <div className="text-[13px] text-ink-2">Existencias al {new Date(data.at).toLocaleDateString('es-AR')}</div>
-          <div className="text-[11px] text-ink-3">reconstruido por el ciclo de vida de cada animal</div>
+          <div className="text-body text-ink-2">Existencias al {new Date(data.at).toLocaleDateString('es-AR')}</div>
+          <div className="text-caption text-ink-3">reconstruido por el ciclo de vida de cada animal</div>
         </div>
-        <div className="tnum text-[30px] font-semibold">
+        <div className="tnum text-display font-semibold">
           {data.total}
-          <span className="ml-1.5 text-[13px] font-normal text-ink-2">cabezas</span>
+          <span className="ml-1.5 text-body font-normal text-ink-2">cabezas</span>
         </div>
       </div>
       <div className="space-y-2">
         {data.rows.map((r: any) => (
           <div key={r.grupo} className="flex items-center gap-3">
-            <div className="w-32 shrink-0 text-[13px] text-ink-2">{r.grupo}</div>
+            <div className="w-32 shrink-0 text-body text-ink-2">{r.grupo}</div>
             <div className="h-5 flex-1 overflow-hidden rounded-sm bg-sunken">
               <div className="h-full rounded-sm bg-brand-300" style={{ width: `${(r.n / max) * 100}%` }} />
             </div>
-            <div className="tnum w-10 text-right text-[13px] font-medium">{r.n}</div>
+            <div className="tnum w-10 text-right text-body font-medium">{r.n}</div>
           </div>
         ))}
-        {data.rows.length === 0 && <p className="py-6 text-center text-[13px] text-ink-3">Sin animales a esa fecha.</p>}
+        {data.rows.length === 0 && <p className="py-6 text-center text-body text-ink-3">Sin animales a esa fecha.</p>}
       </div>
     </div>
   );
@@ -229,9 +229,9 @@ function InventoryReport({ data }: { data: any }) {
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: 'success' | 'danger' }) {
   return (
     <div className="rounded-md bg-sunken p-3">
-      <div className="text-[11px] text-ink-3">{label}</div>
+      <div className="text-caption text-ink-3">{label}</div>
       <div
-        className={`tnum text-[22px] font-semibold ${tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-danger' : ''}`}
+        className={`tnum text-compat-22 font-semibold ${tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-danger' : ''}`}
       >
         {value}
       </div>
@@ -273,15 +273,15 @@ function MovementsReport({ data }: { data: any }) {
 function ProductionReport({ data }: { data: any }) {
   return (
     <div className={cardCls}>
-      <div className="mb-3 text-[13px] text-ink-2">
+      <div className="mb-3 text-body text-ink-2">
         {data.total_pesajes} pesajes registrados en el período
       </div>
       {data.rows.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-ink-3">Sin pesajes en el período.</p>
+        <p className="py-6 text-center text-body text-ink-3">Sin pesajes en el período.</p>
       ) : (
-        <table className="w-full text-[13px]">
+        <table className="w-full text-body">
           <thead>
-            <tr className="h-8 border-b border-subtle text-left text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+            <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
               <th>Lote</th>
               <th className="text-right">Pesajes</th>
               <th className="text-right">Animales</th>
@@ -312,26 +312,26 @@ function ReproductionReport({ data }: { data: any }) {
   return (
     <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
       <div className={cardCls}>
-        <div className="mb-2 text-[13px] font-semibold">Servicios</div>
-        <div className="tnum text-[26px] font-semibold">{data.servicios.total}</div>
-        <div className="mt-1 text-[12px] text-ink-3">
+        <div className="mb-2 text-body font-semibold">Servicios</div>
+        <div className="tnum text-compat-26 font-semibold">{data.servicios.total}</div>
+        <div className="mt-1 text-label text-ink-3">
           {data.servicios.ia} IA · {data.servicios.monta} monta
         </div>
       </div>
       <div className={cardCls}>
-        <div className="mb-2 text-[13px] font-semibold">Diagnósticos</div>
-        <div className="tnum text-[26px] font-semibold">{data.diagnosticos}</div>
-        <div className="mt-1 text-[12px] text-ink-3">de gestación</div>
+        <div className="mb-2 text-body font-semibold">Diagnósticos</div>
+        <div className="tnum text-compat-26 font-semibold">{data.diagnosticos}</div>
+        <div className="mt-1 text-label text-ink-3">de gestación</div>
       </div>
       <div className={cardCls}>
-        <div className="mb-2 text-[13px] font-semibold">Partos</div>
-        <div className="tnum text-[26px] font-semibold">{data.partos}</div>
-        <div className="mt-1 text-[12px] text-ink-3">{data.crias_nacidas} crías nacidas</div>
+        <div className="mb-2 text-body font-semibold">Partos</div>
+        <div className="tnum text-compat-26 font-semibold">{data.partos}</div>
+        <div className="mt-1 text-label text-ink-3">{data.crias_nacidas} crías nacidas</div>
       </div>
       <div className={cardCls}>
-        <div className="mb-2 text-[13px] font-semibold">Destetes</div>
-        <div className="tnum text-[26px] font-semibold">{data.destetes.n}</div>
-        <div className="mt-1 text-[12px] text-ink-3">
+        <div className="mb-2 text-body font-semibold">Destetes</div>
+        <div className="tnum text-compat-26 font-semibold">{data.destetes.n}</div>
+        <div className="mt-1 text-label text-ink-3">
           {data.destetes.peso_promedio ? `${data.destetes.peso_promedio} kg prom.` : 'sin peso'}
         </div>
       </div>

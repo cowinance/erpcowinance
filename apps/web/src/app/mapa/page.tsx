@@ -16,7 +16,7 @@ export default async function MapaPage() {
     <div>
       <div className="mb-5">
         <h1 className="text-xl font-semibold">Potreros y Mapa</h1>
-        <p className="mt-0.5 text-[13px] text-ink-3">
+        <p className="mt-0.5 text-body text-ink-3">
           {farms?.[0]?.name ?? 'Finca'} · {paddocks.length} potreros ·{' '}
           {paddocks.reduce((s, p) => s + (p.area_ha ?? 0), 0).toLocaleString('es-AR')} ha · mapa esquemático (el
           dibujo sobre cartografía real llega en Fase 2)

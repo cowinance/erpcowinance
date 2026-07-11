@@ -68,18 +68,18 @@ export function VerificationBanner({ initialVerified, email }: { initialVerified
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border-l-[3px] border-warning bg-sunken px-4 py-3">
       <Mail size={16} className="shrink-0 text-warning" strokeWidth={1.75} />
-      <div className="min-w-0 flex-1 text-[13px]">
+      <div className="min-w-0 flex-1 text-body">
         <span className="font-medium">Verificá tu email.</span>{' '}
         <span className="text-ink-3">
           Te enviamos un enlace{email ? ` a ${email}` : ''}. Podés seguir usando Cowinance mientras tanto.
         </span>
         {phase === 'resent' && (
-          <span role="status" className="mt-1 block text-[12px] text-ink-2">
+          <span role="status" className="mt-1 block text-label text-ink-2">
             Te enviamos un nuevo enlace de verificación. Revisá tu correo.
           </span>
         )}
         {phase === 'error' && (
-          <span role="alert" className="mt-1 block text-[12px] text-danger">
+          <span role="alert" className="mt-1 block text-label text-danger">
             No se pudo conectar. Probá de nuevo.
           </span>
         )}
@@ -88,14 +88,14 @@ export function VerificationBanner({ initialVerified, email }: { initialVerified
         <button
           onClick={resend}
           disabled={phase === 'resending'}
-          className="h-8 rounded-md border border-strong bg-surface px-3 text-[12px] font-medium hover:bg-brand-soft disabled:opacity-50"
+          className="h-8 rounded-md border border-strong bg-surface px-3 text-label font-medium hover:bg-brand-soft disabled:opacity-50"
         >
           {phase === 'resending' ? 'Enviando…' : 'Reenviar email'}
         </button>
         <button
           onClick={revalidate}
           disabled={phase === 'checking'}
-          className="h-8 rounded-md bg-brand px-3 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="h-8 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {phase === 'checking' ? 'Verificando…' : 'Ya verifiqué'}
         </button>

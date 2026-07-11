@@ -91,7 +91,7 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
               <button
                 key={m}
                 onClick={() => setMetric(m)}
-                className={`h-7 rounded px-3 text-[12px] font-medium ${
+                className={`h-7 rounded px-3 text-label font-medium ${
                   metric === m ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2'
                 }`}
               >
@@ -99,7 +99,7 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-ink-3">
+          <div className="flex items-center gap-3 text-caption text-ink-3">
             <span className="inline-flex items-center gap-1">
               <span className="size-3 rounded-sm border border-subtle bg-sunken" /> vacío
             </span>
@@ -155,39 +155,39 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
         {!selected ? (
           <div className="py-10 text-center">
             <MapPin size={22} className="mx-auto mb-3 text-ink-3" strokeWidth={1.5} />
-            <p className="text-[13px] text-ink-2">Tocá un potrero para ver su ocupación y mover lotes.</p>
+            <p className="text-body text-ink-2">Tocá un potrero para ver su ocupación y mover lotes.</p>
           </div>
         ) : (
           <div>
-            <h2 className="text-[16px] font-semibold">{selected.name}</h2>
-            <p className="mt-0.5 text-[12px] text-ink-3 capitalize">
+            <h2 className="text-compat-16 font-semibold">{selected.name}</h2>
+            <p className="mt-0.5 text-label text-ink-3 capitalize">
               {selected.pasture_type ?? 'sin tipo'} · {selected.area_ha ?? '—'} ha
             </p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-md bg-sunken p-3">
-                <div className="text-[11px] text-ink-3">Cabezas</div>
-                <div className="tnum text-[22px] font-semibold">{selected.animal_count}</div>
+                <div className="text-caption text-ink-3">Cabezas</div>
+                <div className="tnum text-compat-22 font-semibold">{selected.animal_count}</div>
               </div>
               <div className="rounded-md bg-sunken p-3">
-                <div className="text-[11px] text-ink-3">Carga</div>
-                <div className="tnum text-[22px] font-semibold">
+                <div className="text-caption text-ink-3">Carga</div>
+                <div className="tnum text-compat-22 font-semibold">
                   {selected.stocking_rate ?? '—'}
-                  <span className="ml-1 text-[11px] font-normal text-ink-3">cab/ha</span>
+                  <span className="ml-1 text-caption font-normal text-ink-3">cab/ha</span>
                 </div>
               </div>
             </div>
 
             <div className="mt-4">
-              <div className="mb-1.5 text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">Lotes en el potrero</div>
+              <div className="mb-1.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Lotes en el potrero</div>
               {selected.lots.length === 0 ? (
-                <p className="text-[13px] text-ink-3">Sin lotes — potrero en descanso.</p>
+                <p className="text-body text-ink-3">Sin lotes — potrero en descanso.</p>
               ) : (
                 <div className="space-y-1">
                   {selected.lots.map((l) => (
-                    <div key={l.id} className="flex items-center justify-between rounded-md border border-subtle px-3 py-2 text-[13px]">
+                    <div key={l.id} className="flex items-center justify-between rounded-md border border-subtle px-3 py-2 text-body">
                       <span className="font-medium">{l.name}</span>
-                      <span className="text-[12px] text-ink-3">
+                      <span className="text-label text-ink-3">
                         {PURPOSE[l.purpose ?? ''] ?? l.purpose ?? ''} · {l.animal_count} cab.
                       </span>
                     </div>
@@ -197,12 +197,12 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
             </div>
 
             <div className="mt-5 border-t border-subtle pt-4">
-              <div className="mb-1.5 text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">Mover lote acá</div>
+              <div className="mb-1.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Mover lote acá</div>
               <div className="flex gap-2">
                 <select
                   value={moveLotId}
                   onChange={(e) => setMoveLotId(e.target.value)}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-strong bg-surface px-2 text-[13px] outline-none focus:ring-2 focus:ring-brand"
+                  className="h-9 min-w-0 flex-1 rounded-md border border-strong bg-surface px-2 text-body outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="">Elegir lote…</option>
                   {movableLots.map((l) => (
@@ -214,15 +214,15 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
                 <button
                   onClick={moveLot}
                   disabled={!moveLotId || moving}
-                  className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md bg-brand px-3 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md bg-brand px-3 text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
                   <MoveRight size={14} /> {moving ? '…' : 'Mover'}
                 </button>
               </div>
               {moveMsg && (
-                <p className={`mt-2 text-[12px] ${moveMsg.startsWith('✓') ? 'text-success' : 'text-danger'}`}>{moveMsg}</p>
+                <p className={`mt-2 text-label ${moveMsg.startsWith('✓') ? 'text-success' : 'text-danger'}`}>{moveMsg}</p>
               )}
-              <p className="mt-2 text-[11px] text-ink-3">
+              <p className="mt-2 text-caption text-ink-3">
                 El movimiento queda registrado en la línea de tiempo de cada animal.
               </p>
             </div>

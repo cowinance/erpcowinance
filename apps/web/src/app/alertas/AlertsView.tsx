@@ -25,7 +25,7 @@ const SEVERITY = {
   info: { label: 'Informativas', icon: Info, color: 'var(--info)', border: 'border-info' },
 } as const;
 
-const inputCls = 'h-8 rounded-md border border-strong bg-surface px-3 text-[13px] outline-none';
+const inputCls = 'h-8 rounded-md border border-strong bg-surface px-3 text-body outline-none';
 
 export function AlertsView() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -74,7 +74,7 @@ export function AlertsView() {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`h-8 rounded px-3 text-[13px] font-medium ${
+              className={`h-8 rounded px-3 text-body font-medium ${
                 filter === f ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2 hover:text-ink'
               }`}
             >
@@ -84,7 +84,7 @@ export function AlertsView() {
         </div>
         <button
           onClick={() => load(true)}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-strong px-3 text-[13px] font-medium text-ink-2 hover:bg-sunken"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Reevaluar
         </button>
@@ -103,7 +103,7 @@ export function AlertsView() {
         <div className="rounded-[10px] border border-subtle bg-surface py-14 text-center shadow-[var(--shadow-1)]">
           <Check size={22} className="mx-auto mb-2 text-success" />
           <p className="text-[14px] font-medium">{filter === 'active' ? 'Todo en orden' : 'Sin alertas resueltas'}</p>
-          <p className="mt-1 text-[13px] text-ink-3">
+          <p className="mt-1 text-body text-ink-3">
             {filter === 'active' ? 'No hay alertas activas en este momento.' : 'Las alertas que resuelvas aparecerán acá.'}
           </p>
         </div>
@@ -113,7 +113,7 @@ export function AlertsView() {
             ({ sev, items }) =>
               items.length > 0 && (
                 <div key={sev}>
-                  <div className="mb-2 flex items-center gap-2 text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+                  <div className="mb-2 flex items-center gap-2 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
                     {SEVERITY[sev].label} · {items.length}
                   </div>
                   <div className="space-y-2">
@@ -126,7 +126,7 @@ export function AlertsView() {
                         >
                           <Icon size={18} style={{ color: SEVERITY[a.severity].color }} className="shrink-0" strokeWidth={1.75} />
                           <div className="min-w-0 flex-1">
-                            <div className="text-[13px] font-medium">
+                            <div className="text-body font-medium">
                               {a.related_type === 'animal' && a.related_id ? (
                                 <Link href={`/animales/${a.related_id}`} className="hover:underline">
                                   {a.title}
@@ -135,13 +135,13 @@ export function AlertsView() {
                                 a.title
                               )}
                               {a.status === 'acknowledged' && (
-                                <span className="ml-2 rounded-full bg-sunken px-1.5 py-0.5 text-[10px] font-normal text-ink-3">
+                                <span className="ml-2 rounded-full bg-sunken px-1.5 py-0.5 text-compat-10 font-normal text-ink-3">
                                   reconocida
                                 </span>
                               )}
                             </div>
-                            <div className="mt-0.5 text-[12px] text-ink-2">{a.message}</div>
-                            <div className="mt-0.5 text-[11px] text-ink-3">{relativeTime(a.triggered_at)}</div>
+                            <div className="mt-0.5 text-label text-ink-2">{a.message}</div>
+                            <div className="mt-0.5 text-caption text-ink-3">{relativeTime(a.triggered_at)}</div>
                           </div>
                           {filter === 'active' && (
                             <div className="flex shrink-0 items-center gap-1">
@@ -174,8 +174,8 @@ export function AlertsView() {
 function Kpi({ label, value, color }: { label: string; value: number; color?: string }) {
   return (
     <div className="rounded-[10px] border border-subtle bg-surface p-4 shadow-[var(--shadow-1)]">
-      <div className="text-[12px] text-ink-2">{label}</div>
-      <div className="tnum mt-1 text-[26px] font-semibold" style={color ? { color } : undefined}>
+      <div className="text-label text-ink-2">{label}</div>
+      <div className="tnum mt-1 text-compat-26 font-semibold" style={color ? { color } : undefined}>
         {value}
       </div>
     </div>

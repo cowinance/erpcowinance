@@ -57,14 +57,14 @@ export default async function Dashboard() {
           <h1 className="text-xl font-semibold">
             {greeting}, {me?.name?.split(' ')[0] ?? ''}
           </h1>
-          <p className="mt-0.5 text-[13px] text-ink-3">
+          <p className="mt-0.5 text-body text-ink-3">
             {today}
             {farms?.[0]?.name ? ` · ${farms[0].name}` : ''}
           </p>
         </div>
         <Link
           href="/animales/nuevo"
-          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-[13px] font-medium text-white hover:opacity-90"
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-body font-medium text-white hover:opacity-90"
         >
           <Plus size={15} /> Capturar
         </Link>
@@ -109,7 +109,7 @@ export default async function Dashboard() {
                 className="flex items-center gap-3 rounded-md border-l-[3px] border-warning bg-sunken px-3 py-2 hover:bg-brand-soft"
               >
                 <AlertTriangle size={16} className="shrink-0 text-warning" strokeWidth={1.75} />
-                <div className="min-w-0 flex-1 text-[13px]">
+                <div className="min-w-0 flex-1 text-body">
                   <span className="font-medium">
                     Retiro de carne — caravana <TagMono>{w.tag ?? '—'}</TagMono>
                   </span>
@@ -120,14 +120,14 @@ export default async function Dashboard() {
             {kpis.alerts.vaccinations_due_30d > 0 && (
               <div className="flex items-center gap-3 rounded-md border-l-[3px] border-info bg-sunken px-3 py-2">
                 <Syringe size={16} className="shrink-0 text-info" strokeWidth={1.75} />
-                <div className="text-[13px]">
+                <div className="text-body">
                   <span className="font-medium">{kpis.alerts.vaccinations_due_30d} vacunaciones</span>
                   <span className="text-ink-3"> vencen en los próximos 30 días</span>
                 </div>
               </div>
             )}
             {!withdrawals.length && !kpis.alerts.vaccinations_due_30d && (
-              <p className="py-6 text-center text-[13px] text-ink-3">Todo en orden — sin alertas pendientes.</p>
+              <p className="py-6 text-center text-body text-ink-3">Todo en orden — sin alertas pendientes.</p>
             )}
           </div>
         </Card>
@@ -135,7 +135,7 @@ export default async function Dashboard() {
         {/* Evolución de peso */}
         <Card>
           <CardTitle
-            action={<span className="text-[12px] text-ink-3">promedio del hato · 12 meses</span>}
+            action={<span className="text-label text-ink-3">promedio del hato · 12 meses</span>}
           >
             Evolución de peso
           </CardTitle>
@@ -155,11 +155,11 @@ export default async function Dashboard() {
               const pct = kpis.active_animals ? (c.n / kpis.active_animals) * 100 : 0;
               return (
                 <div key={c.category} className="flex items-center gap-3">
-                  <div className="w-24 shrink-0 text-[13px] text-ink-2">{c.category}s</div>
+                  <div className="w-24 shrink-0 text-body text-ink-2">{c.category}s</div>
                   <div className="h-4 flex-1 overflow-hidden rounded-sm bg-sunken">
                     <div className="h-full rounded-sm bg-brand-300" style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="tnum w-8 text-right text-[13px] font-medium">{c.n}</div>
+                  <div className="tnum w-8 text-right text-body font-medium">{c.n}</div>
                 </div>
               );
             })}
@@ -174,7 +174,7 @@ export default async function Dashboard() {
               <Link
                 key={i}
                 href={`/animales/${e.animal_id}`}
-                className="flex items-center gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-sunken"
+                className="flex items-center gap-3 rounded-md px-2 py-1.5 text-body hover:bg-sunken"
               >
                 <span className="w-32 shrink-0 font-medium">{EVENT_LABELS[e.event_type] ?? e.event_type}</span>
                 <span className="text-ink-2">
@@ -183,7 +183,7 @@ export default async function Dashboard() {
                     <span className="tnum"> · {e.payload.weight_kg} kg</span>
                   )}
                 </span>
-                <span className="ml-auto shrink-0 text-[12px] text-ink-3">{relativeTime(e.occurred_at)}</span>
+                <span className="ml-auto shrink-0 text-label text-ink-3">{relativeTime(e.occurred_at)}</span>
               </Link>
             ))}
           </div>
