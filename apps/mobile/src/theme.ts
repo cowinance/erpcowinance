@@ -6,7 +6,7 @@
  * los mismos valores que hoy (tema claro) → los ~15 consumidores no se tocan.
  * El móvil no usa `raised`/`accent`/`accentSoft`/`shadow`; se omiten como antes.
  */
-import { primitive, semantic, radius, typeRole, typeCompat } from '@cowinance/design-tokens';
+import { primitive, semantic, radius, typeRole, typeCompat, space } from '@cowinance/design-tokens';
 
 const L = semantic.light;
 
@@ -42,4 +42,10 @@ export const T = {
   // `type.*` = roles estables; `compat.*` = aliases temporales CONGELADOS (deuda).
   type: typeRole,
   compat: typeCompat,
+
+  // Escala de SPACING (P1.4.3.6, ADR-0014-B): grid 4px + sub-unidad 2px.
+  // Números (RN), derivados de la fuente canónica SIN re-tipear (igual que
+  // color/radio/tipografía). Claves estilo Tailwind: `space['2']`=8, `['6']`=24…
+  // Solo layout (padding/margin/gap); NO dimensiones/alturas/touch targets.
+  space,
 };
