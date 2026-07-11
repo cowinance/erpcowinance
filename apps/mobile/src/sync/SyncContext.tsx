@@ -72,6 +72,13 @@ interface SyncCtx {
   status: 'boot' | 'login' | 'ready' | 'error';
   errorMsg?: string;
   userName?: string;
+  userEmail?: string;
+  /**
+   * Fetch autenticado (Bearer + rotación de refresh + 401→login). Expuesto para
+   * que la capa de cuenta (AccountContext) reutilice el MISMO mecanismo de auth
+   * al leer /auth/me — sin un segundo flujo de refresh ni tocar el store de sync.
+   */
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
   farmName?: string;
@@ -361,6 +368,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       status,
       errorMsg,
       userName: metaRef.current?.userName,
+      userEmail: metaRef.current?.userEmail,
+      authFetch,
       login,
       logout,
       farmName: metaRef.current?.farmName,

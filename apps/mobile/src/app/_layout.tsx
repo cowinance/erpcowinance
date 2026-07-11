@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SyncProvider, useSync } from '@/sync/SyncContext';
+import { AccountProvider } from '@/account/AccountContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import { T } from '@/theme';
 
@@ -22,8 +23,10 @@ function Gate() {
 export default function RootLayout() {
   return (
     <SyncProvider>
-      <StatusBar style="dark" />
-      <Gate />
+      <AccountProvider>
+        <StatusBar style="dark" />
+        <Gate />
+      </AccountProvider>
     </SyncProvider>
   );
 }
