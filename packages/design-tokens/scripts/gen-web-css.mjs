@@ -23,14 +23,21 @@ const cssValue = (v) => (isRef(v) ? `var(--${v.$ref})` : v);
 /** `--nombre: valor;` con 2 espacios de sangría. */
 const decl = (name, value) => `  --${name}: ${cssValue(value)};`;
 
-/** camelCase → kebab-case, determinista (controlH → control-h, padY → pad-y). */
-const kebab = (s) => s.replace(/([A-Z])/g, '-$1').toLowerCase();
-
 /** Declaraciones de un modo de densidad como custom properties `--density-*`
- *  (px). NO entran en @theme: son variables planas que los primitivos leen con
- *  `var(--density-…)`; no se generan utilidades especulativas sin consumidor. */
-const densityDecls = (mode) =>
-  Object.entries(mode).map(([k, v]) => `  --density-${kebab(k)}: ${v}px;`);
+ *  (px), en orden ESTABLE y explícito. NO entran en @theme: son variables planas
+ *  que los primitivos leen con `var(--density-…)`; no se generan utilidades
+ *  especulativas sin consumidor. Alturas de control POR TAMAÑO (sm/md/lg) +
+ *  alias `--density-control-h` (= md, compatibilidad) + métricas de contenedor. */
+const densityDecls = (mode) => [
+  `  --density-control-h-sm: ${mode.control.sm}px;`,
+  `  --density-control-h-md: ${mode.control.md}px;`,
+  `  --density-control-h-lg: ${mode.control.lg}px;`,
+  `  --density-control-h: ${mode.control.md}px;`,
+  `  --density-row-h: ${mode.rowH}px;`,
+  `  --density-pad-y: ${mode.padY}px;`,
+  `  --density-gap: ${mode.gap}px;`,
+  `  --density-card-pad: ${mode.cardPad}px;`,
+];
 
 /** Declaraciones semánticas de un tema, en orden estable. */
 function themeDecls(t) {
@@ -82,13 +89,14 @@ function buildCss() {
   lines.push('  }');
   lines.push('}');
   lines.push('');
-  // Densidad (ADR-0014 dec. C) — PROTOTIPO P1.4.4.1a; el mecanismo se formaliza
-  // en ADR-0015. UN solo modo operativo: `standard`, con valores AUDITADOS (no un
-  // multiplicador). El fallback en :root ES `standard` → sin atributo `data-density`
-  // los valores ya son correctos: no hay flash ni hydration mismatch. Los modos
-  // `compact`/`comfortable` son NOMINALES: no se emiten valores hasta que existan
-  // pruebas de densidad reales (P1.4.4.x). Nada consume estas vars todavía.
-  lines.push('/* Densidad — prototipo P1.4.4.1a (ADR-0015 pendiente). Único modo: standard. */');
+  // Densidad (ADR-0015, especifica ADR-0014 dec. C) — UN solo modo operativo:
+  // `standard`, con tabla EXPLÍCITA y auditada (sin multiplicador ni derivar un
+  // tamaño de otro). El eje `size` del primitivo mapea a `--density-control-h-{sm,
+  // md,lg}` (32/36/40 = h-8/h-9/h-10); `--density-control-h` es alias de `md`. El
+  // fallback en :root ES `standard` → sin atributo `data-density` los valores ya
+  // son correctos: no hay flash ni hydration mismatch. `compact`/`comfortable` son
+  // NOMINALES: no se emiten valores hasta que existan pruebas de densidad reales.
+  lines.push('/* Densidad (ADR-0015) — modo único operativo: standard; alturas de control por tamaño. */');
   lines.push(':root {');
   lines.push(...densityDecls(density.standard));
   lines.push('}');

@@ -178,19 +178,25 @@ export const space = {
  * sombra, iconografía y los mínimos de accesibilidad (44px táctil en touch).
  */
 export interface DensityMode {
-  controlH: number; // alto de control (input/botón/nav-item) — hoy ≈ h-9 (36)
+  // Alturas de control por TAMAÑO (px). El eje `size` del primitivo (sm/md/lg)
+  // selecciona una de estas; la `density` selecciona la tabla del modo (ADR-0015).
+  // Valores EXPLÍCITOS e históricos (32/36/40 = h-8/h-9/h-10) — NO derivados por
+  // fórmula ni por multiplicador. `md` es el baseline del control estándar.
+  control: { sm: number; md: number; lg: number };
   rowH: number; // alto de fila de tabla/lista
   padY: number; // padding vertical de contenedores
   gap: number; // separación entre elementos de grupo
   cardPad: number; // padding de card (web hoy 20; móvil hoy 16 → se reconcilia en P1.4.4)
 }
 
-// P1.4.4.1a: `standard` es el ÚNICO modo con valores reales y operativo. Los
+// P1.4.4.1a/1c: `standard` es el ÚNICO modo con valores reales y operativo. Los
 // modos `compact`/`comfortable` son NOMINALES (contrato futuro): NO se inventan
 // aquí sus valores ni se habilitan hasta que existan pruebas de densidad reales
-// (ADR-0015). La web deriva estos números a `--density-*` (gen-web-css); el móvil
-// los expondrá con su propia tabla por plataforma (touch ≥ 44px), no estos mismos
-// absolutos. La densidad NUNCA cambia tipografía, color, radius, sombra ni iconos.
+// (ADR-0015). La web deriva estos números a `--density-*` (gen-web-css): tres
+// alturas por tamaño `--density-control-h-{sm,md,lg}` + alias `--density-control-h`
+// (= md). El móvil los expondrá con su propia tabla por plataforma (touch ≥ 44px),
+// no estos mismos absolutos. La densidad NUNCA cambia tipografía, color, radius,
+// sombra ni iconos, ni deriva un tamaño a partir de otro.
 export const density: { standard: DensityMode } = {
-  standard: { controlH: 36, rowH: 40, padY: 8, gap: 12, cardPad: 20 },
+  standard: { control: { sm: 32, md: 36, lg: 40 }, rowH: 40, padY: 8, gap: 12, cardPad: 20 },
 };

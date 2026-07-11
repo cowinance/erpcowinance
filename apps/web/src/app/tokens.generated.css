@@ -53,8 +53,11 @@
   }
 }
 
-/* Densidad — prototipo P1.4.4.1a (ADR-0015 pendiente). Único modo: standard. */
+/* Densidad (ADR-0015) — modo único operativo: standard; alturas de control por tamaño. */
 :root {
+  --density-control-h-sm: 32px;
+  --density-control-h-md: 36px;
+  --density-control-h-lg: 40px;
   --density-control-h: 36px;
   --density-row-h: 40px;
   --density-pad-y: 8px;
@@ -63,6 +66,9 @@
 }
 
 :root[data-density='standard'] {
+  --density-control-h-sm: 32px;
+  --density-control-h-md: 36px;
+  --density-control-h-lg: 40px;
   --density-control-h: 36px;
   --density-row-h: 40px;
   --density-pad-y: 8px;
