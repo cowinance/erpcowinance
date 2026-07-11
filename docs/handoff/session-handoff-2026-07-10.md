@@ -9,18 +9,58 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP para ganadería, agricultura y administración de fincas**, offline-first y multi-tenant, especificada en 14 documentos (`docs/*.docx`). El **alcance funcional ganadero de la Fase 1 del producto está completo y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa de potreros, Reportes, Alertas, Fotos, Planes sanitarios, Vademécum), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 2 packages (`sync-core`, `domain`). En este momento el proyecto está **pausado en features** y en curso de un **Foundation Hardening Sprint** (mejora de arquitectura sin cambiar comportamiento). Vamos por **F4 completada** — el núcleo del sprint: `computeWithdrawal`, `computeExpectedDueDate{FromService,FromDiagnosis}`, `newbornCategoryCode` extraídos a `packages/domain` y migrados en api+mobile, y **Server Authority** (T4.4, ADR-0007) para que el servidor de sync deje de confiar ciegamente en los valores calculados por el cliente. El siguiente paso es **F6 (Sync → SyncHandler registry)**.
+Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto entró en la **Fase Producto**: convertir la base en un SaaS que una finca real pueda adoptar. **Siguiente acción concreta: implementar P1.1 (registro self-service de tenant)** — diseño y ADR-0010 aprobados, **código sin empezar**. Ver §0 abajo.
+
+> **Ver también:** `docs/sprints/foundation-hardening-executive-summary.md` (resumen del sprint), `docs/product/*` (visión, roadmap 2026, personas, monetización, design partners), `docs/adr/0001-0010`.
+
+## 0. Fase Producto — P1.1 (SIGUIENTE ACCIÓN, aprobado, código sin empezar)
+
+**Objetivo P1.1:** eliminar la dependencia de `seed.ts` — que una finca nueva se **registre**, se le cree organización + finca, reciba rol `owner`, pueda **login** y **crear su primer animal**, con **aislamiento multi-tenant**, sin datos demo.
+
+**Decisiones aprobadas (esta sesión):**
+- **ADR-0010** creado y commiteado (`25d3d83`): provisioning self-service de tenant.
+- **Ubicación:** se **expande el módulo `identity`** (NO se crea módulo `account`). `auth` sigue solo con autenticación/sesiones.
+- **Flujo desacoplado:** `POST /register` → **201** → el cliente llama `/auth/login`. **Sin auto-login** (no invertir la dependencia identity↔auth).
+- **Creación atómica** en una tx: `user` → `organization` → `company` → `farm` → `user_role_assignment` (rol `owner`).
+- **RLS en flujo público:** el registro corre `@Public` (sin contexto de tenant); usa `db.tx(q => …)`, inserta users/organizations sin GUC, y tras crear la org hace `SET LOCAL app.tenant_id = orgId` (is_local=true) para los inserts RLS (companies, farms).
+- **Separación `bootstrapCatalogs()` / `seedDemo()`** en `seed.ts` (extracción mínima, lógica conservada). `bootstrapCatalogs` corre siempre (idempotente); `seedDemo` solo con flag.
+- **`SEED_DEMO`:** default **ON en dev, OFF en producción** (`NODE_ENV=production`); override `SEED_DEMO=true|false`.
+- **`email_verified_at`:** se agrega la columna a `users` (default NULL) en P1.1 — **sin tocar `auth`** (no va al token ni a `/auth/me`). El envío/verificación y su exposición son **P1.2**.
+- **Campos del registro (mínimos):** `email, password, full_name, organization_name, farm_name, country_code`. Nada más (teléfono/hectáreas/producción → onboarding posterior).
+
+**Archivos previstos (P1.1):**
+- `apps/api/src/db/seed.ts` (mod: extraer `bootstrapCatalogs`/`seedDemo`).
+- `apps/api/src/db/db.service.ts` (mod: `ALTER users ADD email_verified_at`; `onModuleInit` corre bootstrap siempre + demo por flag).
+- `apps/api/src/modules/identity/identity.service.ts` (**nuevo**: `register()`).
+- `apps/api/src/modules/identity/identity.controller.ts` (mod: `@Public @Post('register')`).
+- `apps/api/src/modules/identity/identity.module.ts` (mod: provider `IdentityService`).
+- `apps/api/src/modules/identity/country-defaults.ts` (**nuevo**: mapa país→currency/locale/tz, inline).
+- `apps/api/scripts/account-e2e.mjs` (**nuevo**: e2e registro→login→animal→aislamiento).
+
+**Orden de implementación (commit por paso):**
+1. Split `bootstrapCatalogs`/`seedDemo` + columna `email_verified_at`. (Verif: `SEED_DEMO=off` arranca con catálogos y sin demo; con demo, e2e existentes verdes.)
+2. `IdentityService.register` + endpoint `@Public`. (Verif: `curl` registro → 201.)
+3. `account-e2e.mjs`. 4. Gates finales.
+
+**Gates de aceptación P1.1:**
+- **Funcional:** `SEED_DEMO=off` → registro → tenant creado → login → primer animal, sin `seedDemo`.
+- **Seguridad:** Tenant A y Tenant B completamente aislados (test bidireccional).
+- **Regresión:** sin cambios en login/refresh/sync/tenants actuales; `audit:arch`/`auth-e2e`/`sync-e2e`/sim verdes.
+
+**Al abrir la próxima sesión:** empezar la implementación de P1.1 **desde el paso 1** (split de seed + columna), con el proceso de siempre (commit chico por paso, gates tras cada uno). No hay nada de código de P1.1 escrito aún.
+
+---
 
 ### Estado general del repositorio
-- **Working tree:** limpio (solo `.claude/settings.local.json` sin trackear/ignorar; irrelevante).
-- **Remoto:** **no hay** remoto configurado. `gh` CLI **no está instalado**. Todo está en git local.
+- **Working tree:** limpio (solo `.claude/settings.local.json`, config local del agente, no se sube).
+- **Remoto:** ✅ configurado y **pusheado** — `origin` → https://github.com/cowinance/erpcowinance.git; `main` trackea `origin/main`; local = remoto. `gh` CLI **no** instalado (auth por credential helper del sistema).
 - **Monorepo:** npm workspaces — `apps/api`, `apps/web`, `apps/mobile`, `packages/db`, `packages/sync-core`, `packages/domain`.
 
 ### Rama actual
-`main` (siempre se trabaja acá; los commits son pequeños y directos).
+`main` (los commits son pequeños y directos; `git push` directo, ya trackea origin).
 
 ### Último commit
-`feat(sync): Server Authority sobre valores derivados (T4.4, ADR-0007)` (`ceeb83d`) — ver git log para la secuencia completa de F4: `434cc59` F4.1, `e4ef4e2` F4.2, `cb6b6c2` F4.3-A, `f3def38` ADR-0007, `ceeb83d` T4.4.
+`docs: ADR-0010 — provisioning self-service de tenant (P1, Fase Producto)` (`25d3d83`). Antes: cierre del Foundation Hardening (F9 `9c3279e`, resumen ejecutivo `c4b6d28`), y la doc de producto (`508eb80`).
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
@@ -34,7 +74,7 @@ Cowinance es una **plataforma ERP para ganadería, agricultura y administración
 - **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras cada commit de F4**, incluyendo T4.4 con la nueva lógica de Server Authority activa. Además, verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos (cliente desactualizado simulado): el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date` en los tres casos probados, y un push con valores ya correctos no generó ningún conflicto espurio (ver §3, F4).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint COMPLETO (F0-F9).** Última fase F9: `npm run audit:arch` (gates bloqueantes + indicators informativos), `quality-baseline.md` refrescado. Todos los gates verdes. **Siguiente etapa (fuera del sprint): reanudar features de Fase 1** (onboarding, documentos formales, facturación SaaS). Ver §5.
+**Foundation Hardening Sprint COMPLETO (F0-F9)** y **pusheado a GitHub**. **Fase Producto iniciada** — ver §0: P1.1 (registro self-service) aprobado con ADR-0010, código sin empezar. `npm run audit:arch` verde (106 tests, 0 ciclos, cobertura 72.54% domain+sync-core).
 
 ---
 
