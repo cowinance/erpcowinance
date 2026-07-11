@@ -1,0 +1,14 @@
+{
+  "name": "@cowinance/design-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fuente única de tokens de diseño de Cowinance — neutral (sin React/Next/Expo/Node/DOM), consumible por scripts y apps",
+  "main": "dist/tokens.js",
+  "types": "dist/tokens.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

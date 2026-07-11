@@ -17,7 +17,9 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "audit:arch": "node scripts/audit-arch.mjs",
-    "e2e:web": "npm run build -w @cowinance/api && npm run e2e --workspace @cowinance/web"
+    "e2e:web": "npm run build -w @cowinance/api && npm run e2e --workspace @cowinance/web",
+    "tokens:build": "npm run build -w @cowinance/design-tokens && node packages/design-tokens/scripts/gen-web-css.mjs",
+    "tokens:check": "npm run build -w @cowinance/design-tokens && node packages/design-tokens/scripts/gen-web-css.mjs --check"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^3.2.4",
