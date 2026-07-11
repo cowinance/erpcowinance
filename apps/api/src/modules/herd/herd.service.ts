@@ -253,12 +253,16 @@ export class HerdService {
         });
       if (!check.ok) throw new BadRequestException({ code: 'animal.invalid_category', title: 'Categoría inexistente' });
 
-      const { animalId } = await this.writer.persistNewAnimal(
+      const { animalId, syncOp } = await this.writer.persistNewAnimal(
         q,
         nv.input,
-        { origin: 'rest', actorUserId: this.db.user, timeline: { eventType: 'birth', source: 'manual' }, sync: 'none' },
+        { origin: 'rest', actorUserId: this.db.user, timeline: { eventType: 'birth', source: 'manual' }, sync: 'server_origin' },
         check.resolved,
       );
+      // Propagación incremental a dispositivos (ADR-0016): el alta web se emite como
+      // changeset de origen servidor. Cierra la brecha de que las altas web no
+      // llegaban por pull a devices ya bootstrapeados.
+      if (syncOp) await this.writer.emitServerOrigin(q, [syncOp], `rest:animal:${animalId}`);
       return this.getAnimal(animalId);
     });
   }

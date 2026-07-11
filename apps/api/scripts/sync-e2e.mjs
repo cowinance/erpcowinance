@@ -80,7 +80,11 @@ async function main() {
         ops: [
           { kind: 'put', table: 'animals', rowId: shared.id, hlc: hlc(now - 3000, devA.id, 0),
             fields: { name: 'Nombre de A' } },
-          { kind: 'put', table: 'animals', rowId: shared.id, hlc: hlc(now - 3000, devA.id, 1),
+          // status: forward-of-creation. El alta web (POST /animals) ahora siembra
+          // status='active' con HLC de servidor (~now) en sync_row_state (server-origin,
+          // ADR-0016). Una transición terminal de un device ocurre DESPUÉS de que el
+          // animal existe → su HLC debe ser > el de la creación para ganar por LWW.
+          { kind: 'put', table: 'animals', rowId: shared.id, hlc: hlc(now + 3000, devA.id, 1),
             fields: { status: 'dead' } },
         ],
       },
@@ -98,7 +102,9 @@ async function main() {
             fields: { visual_tag: '900', name: 'Nueva de B', status: 'active', sex: 'F' } },
           { kind: 'put', table: 'animals', rowId: shared.id, hlc: hlc(now - 1000, devB.id, 1),
             fields: { name: 'Nombre de B' } },
-          { kind: 'put', table: 'animals', rowId: shared.id, hlc: hlc(now - 1000, devB.id, 2),
+          // status='sold' con HLC mayor que el 'dead' de A (y que la creación) → gana B
+          // por LWW y dispara el conflicto semántico (dos estados terminales de nodos distintos).
+          { kind: 'put', table: 'animals', rowId: shared.id, hlc: hlc(now + 5000, devB.id, 2),
             fields: { status: 'sold' } },
         ],
       },

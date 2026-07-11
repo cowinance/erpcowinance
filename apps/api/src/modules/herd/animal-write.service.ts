@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Sex, TagNumber } from '@cowinance/domain';
+import { HlcClock } from '@cowinance/sync-core';
+import type { Op, PutOp } from '@cowinance/sync-core';
 import { DbService, Q } from '../../db/db.service';
+import { SyncVersionStore } from '../sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { ANIMAL_SYNCABLE_FIELDS } from './animal-syncable-fields';
 
 /**
  * Persistencia estructural neutral de un animal — regla y escritura ÚNICAS,
@@ -13,9 +18,10 @@ import { DbService, Q } from '../../db/db.service';
  *   (b) checkAgainstDb        — validaciones que leen la base (categoría, duplicado).
  *   (c) persistNewAnimal      — inserción estructural (animal + identificador + timeline).
  *
- * Oleada 1: `sync='server_origin'` NO está implementado todavía (la proyección
- * de sync con HLC de servidor llega en la oleada 3). El único consumidor hoy es
- * REST, con `sync='none'`.
+ * `sync='server_origin'` (P-b, ADR-0016): además del insert estructural, proyecta
+ * el animal al canal de sync (versiones HLC del actor `server` en sync_row_state)
+ * y devuelve el `syncOp` para que el caller lo emita como changeset de origen
+ * servidor (propagación incremental por pull). `sync='none'` omite la proyección.
  */
 
 export interface RowError {
@@ -68,7 +74,14 @@ export interface RawAnimalRow {
 
 @Injectable()
 export class AnimalWriteService {
-  constructor(private readonly db: DbService) {}
+  /** Nodo HLC del servidor (ADR-0007): actor legítimo del sistema distribuido. */
+  private readonly serverClock = new HlcClock('server');
+
+  constructor(
+    private readonly db: DbService,
+    private readonly versions: SyncVersionStore,
+    private readonly serverOrigin: ServerOriginChangesetWriter,
+  ) {}
 
   /**
    * (a) Validación y normalización PURA — sin acceso a base de datos.
@@ -160,13 +173,7 @@ export class AnimalWriteService {
     input: NormalizedAnimalInput,
     ctx: PersistAnimalContext,
     resolved: { categoryId: string; speciesId: string },
-  ): Promise<{ animalId: string }> {
-    if (ctx.sync === 'server_origin') {
-      // Proyección de sync con HLC de servidor: oleada 3 (ADR-0016). No debe
-      // invocarse aún; fallar fuerte evita un server-origin a medias.
-      throw new Error('persistNewAnimal: sync="server_origin" no implementado (oleada 3)');
-    }
-
+  ): Promise<{ animalId: string; syncOp?: PutOp }> {
     const t = this.db.tenant;
     const animal = await q.one<{ id: string }>(
       `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, name, birth_date, origin, current_lot_id, status)
@@ -202,7 +209,34 @@ export class AnimalWriteService {
       ],
     );
 
-    return { animalId: animal!.id };
+    if (ctx.sync !== 'server_origin') return { animalId: animal!.id };
+
+    // Proyección server-origin (ADR-0016): versiona los campos del animal con un
+    // tick GENUINO del actor `server` en sync_row_state y devuelve el `syncOp` (put)
+    // que el caller emitirá como changeset de origen servidor. Es una creación → sin
+    // conflicto. visual_tag/category_code son campos lógicos (identificador/category);
+    // el resto son campos syncables reales (ANIMAL_SYNCABLE_FIELDS) con valor.
+    const fields: Record<string, unknown> = {
+      visual_tag: input.tag,
+      category_code: input.categoryCode,
+      status: 'active',
+      sex: input.sex,
+    };
+    if (input.name !== null) fields.name = input.name;
+    if (input.birthDate !== null) fields.birth_date = input.birthDate;
+    if (input.lotId !== null) fields.current_lot_id = input.lotId;
+
+    const hlc = this.serverClock.tick();
+    const versionsMap = Object.fromEntries(Object.keys(fields).map((f) => [f, hlc]));
+    await this.versions.write(q, 'animals', animal!.id, versionsMap);
+
+    const syncOp: PutOp = { kind: 'put', table: 'animals', rowId: animal!.id, fields, hlc };
+    return { animalId: animal!.id, syncOp };
+  }
+
+  /** Emite un changeset de origen servidor con `ops` (dedup por `originRef`). Delega en la infra de sync. */
+  async emitServerOrigin(q: Q, ops: Op[], originRef: string): Promise<void> {
+    return this.serverOrigin.emit(q, ops, originRef);
   }
 
   /**
