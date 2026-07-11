@@ -1,7 +1,32 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Changeset } from '@cowinance/sync-core';
+import type { Changeset, Op } from '@cowinance/sync-core';
 import { DbService } from '../../db/db.service';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
+
+/**
+ * Resultado remoto de una fila de pull (contrato con el cliente). Un changeset de
+ * origen servidor (ADR-0016) viaja con `device_id` y `seq` nulos; el resto de los
+ * campos no cambian. El merge del cliente opera sobre `ops`/`hlc`/`id` + `cursor`,
+ * no sobre `device_id`/`seq`.
+ */
+export interface PulledChangesetDto {
+  server_seq: number;
+  device_id: string | null;
+  seq: number | null;
+  hlc: string;
+  id: string;
+  schema_version: number;
+  ops: Op[];
+}
+
+/** Fila cruda de sync_changesets tal como la lee el pull. */
+interface SyncChangesetRow {
+  server_seq: number | string;
+  sync_device_id: string | null;
+  seq: number | string | null;
+  hlc: string;
+  operations: { client_id: string; schema_version?: number; ops?: Op[] };
+}
 
 /**
  * Servidor de sincronización v0 sobre Postgres — orquestación del protocolo
@@ -80,12 +105,16 @@ export class SyncService {
     return { accepted, deduped, conflicts, server_cursor: cursor };
   }
 
-  async pull(deviceId: string, cursor: number, limit = 500) {
+  async pull(deviceId: string, cursor: number, limit = 500): Promise<{ changesets: PulledChangesetDto[]; cursor: number }> {
     const device = await this.assertDevice(deviceId);
-    const rows = await this.db.query<any>(
+    // IS DISTINCT FROM (no !=): un changeset de origen servidor tiene
+    // sync_device_id NULL y debe entregarse a TODOS los dispositivos; `!=` lo
+    // excluiría (NULL != x → NULL, no true). Para filas de dispositivo el
+    // comportamiento es idéntico a `!=` (ADR-0016).
+    const rows = await this.db.query<SyncChangesetRow>(
       `SELECT server_seq, sync_device_id, seq, hlc, operations
        FROM sync_changesets
-       WHERE tenant_id = $1 AND server_seq > $2 AND sync_device_id != $3 AND deleted_at IS NULL
+       WHERE tenant_id = $1 AND server_seq > $2 AND sync_device_id IS DISTINCT FROM $3 AND deleted_at IS NULL
        ORDER BY server_seq LIMIT $4`,
       [this.db.tenant, cursor, device.id, limit],
     );
@@ -98,7 +127,7 @@ export class SyncService {
       changesets: rows.map((r) => ({
         server_seq: Number(r.server_seq),
         device_id: r.sync_device_id,
-        seq: Number(r.seq),
+        seq: r.seq == null ? null : Number(r.seq),
         hlc: r.hlc,
         id: r.operations?.client_id,
         schema_version: r.operations?.schema_version ?? 1,

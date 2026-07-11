@@ -8,7 +8,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import { SyncDevice, Changeset, PushResult, PullResult } from '@cowinance/sync-core';
+import { SyncDevice, Changeset, Op, PushResult, PullResult } from '@cowinance/sync-core';
 import {
   computeWithdrawal,
   computeExpectedDueDateFromService,
@@ -21,6 +21,46 @@ import type { DeviceStorage, PersistedMeta } from './storage.types';
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
 const AUTO_SYNC_INTERVAL_MS = 60_000;
 const POST_CAPTURE_DEBOUNCE_MS = 2_500;
+
+/** Forma cruda de un changeset en la respuesta de pull (wire, snake_case). */
+interface PulledChangesetWire {
+  server_seq: number;
+  device_id: string | null;
+  seq: number | null;
+  hlc: string;
+  id: string;
+  schema_version: number;
+  ops: Op[];
+}
+
+/**
+ * Changeset RECIBIDO por pull. Tipo SEPARADO de `Changeset` (autoría de
+ * dispositivo, no-null) para no debilitar el contrato de lo que un dispositivo
+ * crea/empuja: uno de origen servidor (ADR-0016) llega con `deviceId`/`seq` nulos.
+ */
+interface RemoteChangeset {
+  id: string;
+  deviceId: string | null;
+  seq: number | null;
+  hlc: string;
+  schemaVersion: number;
+  ops: Op[];
+}
+
+/**
+ * Adapta un changeset remoto al `Changeset` que consume sync-core (`d.sync`). El
+ * merge solo lee `hlc`/`ops` (+ `cursor`); `deviceId`/`seq` no se usan. Hoy no se
+ * entregan changesets de origen servidor (no existen filas source='server'), así
+ * que aquí `deviceId`/`seq` son no-null. NO se fabrica identidad de dispositivo:
+ * si llegara un server-origin antes de su ruta de aplicación de cliente, se
+ * rechaza explícitamente (esa ruta llega en una ola posterior).
+ */
+function toAppliableChangeset(c: RemoteChangeset): Changeset {
+  if (c.deviceId === null || c.seq === null) {
+    throw new Error('sync: changeset de origen servidor recibido sin soporte de cliente (ADR-0016, ola futura)');
+  }
+  return { id: c.id, deviceId: c.deviceId, seq: c.seq, hlc: c.hlc, schemaVersion: c.schemaVersion, ops: c.ops };
+}
 
 export interface AnimalRow {
   id: string;
@@ -200,13 +240,20 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       pull: async (after: number): Promise<PullResult> => {
         const res = await authFetch(`/sync/pull?device_id=${metaRef.current!.serverDeviceId}&cursor=${after}`);
         if (!res.ok) throw new Error(`pull → ${res.status}`);
-        const j = await res.json();
+        const j = (await res.json()) as { cursor: number; changesets: PulledChangesetWire[] };
         return {
           cursor: j.cursor,
-          changesets: j.changesets.map((c: any) => ({
-            serverSeq: c.server_seq,
-            changeset: { id: c.id, deviceId: c.device_id, seq: c.seq, hlc: c.hlc, schemaVersion: c.schema_version, ops: c.ops },
-          })),
+          changesets: j.changesets.map((c) => {
+            const remote: RemoteChangeset = {
+              id: c.id,
+              deviceId: c.device_id,
+              seq: c.seq,
+              hlc: c.hlc,
+              schemaVersion: c.schema_version,
+              ops: c.ops,
+            };
+            return { serverSeq: c.server_seq, changeset: toAppliableChangeset(remote) };
+          }),
         };
       },
     }),
