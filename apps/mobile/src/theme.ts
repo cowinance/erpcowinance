@@ -6,7 +6,7 @@
  * los mismos valores que hoy (tema claro) → los ~15 consumidores no se tocan.
  * El móvil no usa `raised`/`accent`/`accentSoft`/`shadow`; se omiten como antes.
  */
-import { primitive, semantic, radius } from '@cowinance/design-tokens';
+import { primitive, semantic, radius, typeRole, typeCompat } from '@cowinance/design-tokens';
 
 const L = semantic.light;
 
@@ -35,4 +35,11 @@ export const T = {
   radiusSm: radius.sm,
   radiusMd: radius.md,
   radiusLg: radius.lg,
+
+  // Escala tipográfica (P1.4.3.5a, ADR-0014): roles y aliases NUMÉRICOS derivados
+  // de la fuente canónica. RN usa números (los strings con `px` son solo del
+  // generador web); NO se re-tipean valores acá (igual criterio que color/radio).
+  // `type.*` = roles estables; `compat.*` = aliases temporales CONGELADOS (deuda).
+  type: typeRole,
+  compat: typeCompat,
 };
