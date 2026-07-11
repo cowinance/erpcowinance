@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { API_URL, authHeaders } from '@/lib/api';
-import { inputCls, labelCls } from '@/components/capture';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 export const PRODUCT_TYPES: [string, string][] = [
   ['vaccine', 'Vacuna'],
@@ -25,6 +27,9 @@ export function AddProductForm({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // ids únicos: AddProductForm puede renderizarse dos veces en /sanidad
+  // (ProductPicker de captura + MedicationsPanel) → sin colisión de id.
+  const fid = useId();
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -56,36 +61,30 @@ export function AddProductForm({
   return (
     <form onSubmit={submit} className="space-y-3 rounded-md border border-subtle bg-sunken p-3">
       <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className={labelCls}>Nombre *</span>
-          <input name="name" required autoFocus placeholder="Ej: Complejo B2 / B12" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Tipo *</span>
-          <select name="type" required className={inputCls} defaultValue={defaultType ?? 'vitamin'}>
+        <Field label="Nombre" htmlFor={`${fid}-name`} required>
+          <Input id={`${fid}-name`} name="name" required autoFocus placeholder="Ej: Complejo B2 / B12" controlSize="md" />
+        </Field>
+        <Field label="Tipo" htmlFor={`${fid}-type`} required>
+          <Select id={`${fid}-type`} name="type" required defaultValue={defaultType ?? 'vitamin'} controlSize="md">
             {PRODUCT_TYPES.map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className={labelCls}>Principio activo</span>
-          <input name="active_ingredient" placeholder="Ej: Cianocobalamina" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Dosis por defecto</span>
-          <input name="default_dose" placeholder="Ej: 5 ml IM" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Retiro carne (días)</span>
-          <input name="withdrawal_meat_days" type="number" min="0" placeholder="0" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Retiro leche (horas)</span>
-          <input name="withdrawal_milk_hours" type="number" min="0" placeholder="0" className={inputCls} />
-        </label>
+          </Select>
+        </Field>
+        <Field label="Principio activo" htmlFor={`${fid}-active_ingredient`}>
+          <Input id={`${fid}-active_ingredient`} name="active_ingredient" placeholder="Ej: Cianocobalamina" controlSize="md" />
+        </Field>
+        <Field label="Dosis por defecto" htmlFor={`${fid}-default_dose`}>
+          <Input id={`${fid}-default_dose`} name="default_dose" placeholder="Ej: 5 ml IM" controlSize="md" />
+        </Field>
+        <Field label="Retiro carne (días)" htmlFor={`${fid}-withdrawal_meat_days`}>
+          <Input id={`${fid}-withdrawal_meat_days`} name="withdrawal_meat_days" type="number" min="0" placeholder="0" controlSize="md" />
+        </Field>
+        <Field label="Retiro leche (horas)" htmlFor={`${fid}-withdrawal_milk_hours`}>
+          <Input id={`${fid}-withdrawal_milk_hours`} name="withdrawal_milk_hours" type="number" min="0" placeholder="0" controlSize="md" />
+        </Field>
       </div>
       {error && <p className="text-label text-danger">{error}</p>}
       <div className="flex gap-2">
