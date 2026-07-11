@@ -46,3 +46,40 @@ export async function login(email: string, password: string): Promise<LoginResul
   persistSession(body as SessionTokens);
   return { ok: true };
 }
+
+/** ¿Hay sesión web local? (cookie de acceso presente). */
+export function hasSession(): boolean {
+  return typeof document !== 'undefined' && new RegExp(`(?:^|; )${ACCESS_COOKIE}=`).test(document.cookie);
+}
+
+/** Borra la sesión web local (cookies). Tras un reset, el backend revoca todo. */
+export function clearSession(): void {
+  document.cookie = `${ACCESS_COOKIE}=; path=/; max-age=0`;
+  document.cookie = `${REFRESH_COOKIE}=; path=/; max-age=0`;
+}
+
+/**
+ * Resultado normalizado de un POST a un endpoint público (verify/forgot/reset/
+ * resend). Distingue fallo de red de error HTTP y expone el `code` estructurado
+ * del backend (P1.3.4) — las páginas ramifican por `code`, no por texto exacto.
+ */
+export type PublicPostResult =
+  | { ok: true }
+  | { ok: false; kind: 'network' }
+  | { ok: false; kind: 'http'; status: number; code?: string; title?: string };
+
+export async function postPublic(path: string, body: unknown): Promise<PublicPostResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { ok: false, kind: 'network' };
+  }
+  if (res.ok) return { ok: true };
+  const data = (await res.json().catch(() => null)) as { code?: string; title?: string } | null;
+  return { ok: false, kind: 'http', status: res.status, code: data?.code, title: data?.title };
+}
