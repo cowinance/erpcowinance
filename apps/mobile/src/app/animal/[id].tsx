@@ -38,32 +38,32 @@ export default function AnimalDetail() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-        <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
+        <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
           <Ionicons name="chevron-back" size={16} color={T.ink2} />
           <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
         </Pressable>
 
         <View>
           <Text style={styles.tag}>{animal.tag ?? '—'}</Text>
-          <Text style={{ fontSize: T.type.body, color: T.ink2, marginTop: 2 }}>
+          <Text style={{ fontSize: T.type.body, color: T.ink2, marginTop: T.space['0.5'] }}>
             {animal.category ?? '—'}
             {animal.name ? ` · ${animal.name}` : ''} · {animal.lot_name ?? 'sin lote'}
           </Text>
         </View>
 
-        <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ flexDirection: 'row', gap: T.space['3'] }}>
           <Card style={{ flex: 1 }}>
             <Text style={styles.kpiLabel}>Último peso</Text>
             <Text style={styles.kpiValue}>{animal.last_weight_kg ? `${Math.round(animal.last_weight_kg)} kg` : '—'}</Text>
-            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginTop: 2 }}>
+            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginTop: T.space['0.5'] }}>
               {animal.last_weighed_at ? new Date(animal.last_weighed_at).toLocaleDateString('es-AR') : 'sin pesajes'}
             </Text>
           </Card>
           <Card style={{ flex: 1 }}>
             <Text style={styles.kpiLabel}>Estado reproductivo</Text>
             <Text style={styles.kpiValue}>{pregnancy ? 'Preñada' : animal.sex === 'F' ? 'Vacía' : '—'}</Text>
-            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginTop: 2 }}>
+            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginTop: T.space['0.5'] }}>
               {pregnancy?.expected_due_date
                 ? `parto probable ${new Date(pregnancy.expected_due_date).toLocaleDateString('es-AR')}`
                 : animal.sex === 'F'
@@ -74,7 +74,7 @@ export default function AnimalDetail() {
         </View>
 
         <Card>
-          <Text style={{ fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: 10 }}>
+          <Text style={{ fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: T.space['2.5'] }}>
             Actividad de este dispositivo
           </Text>
           {events.length === 0 ? (
@@ -105,11 +105,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
   tag: { fontFamily: 'monospace', fontSize: 32, fontWeight: '700', color: T.ink },
   kpiLabel: { fontSize: T.type.label, color: T.ink2 },
-  kpiValue: { fontSize: T.compat['24'], fontWeight: '700', color: T.ink, marginTop: 4, fontVariant: ['tabular-nums'] },
+  kpiValue: { fontSize: T.compat['24'], fontWeight: '700', color: T.ink, marginTop: T.space['1'], fontVariant: ['tabular-nums'] },
   eventRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: T.space['2'],
     borderTopWidth: 1,
     borderTopColor: T.borderSubtle,
   },

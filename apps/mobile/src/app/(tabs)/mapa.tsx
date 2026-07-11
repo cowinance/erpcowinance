@@ -18,7 +18,7 @@ export default function Mapa() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas, padding: 32 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas, padding: T.space['8'] },
   iconWrap: {
     width: 52,
     height: 52,
@@ -26,7 +26,7 @@ const styles = StyleSheet.create({
     backgroundColor: T.brand100,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: T.space['3'],
   },
-  body: { fontSize: T.type.body, color: T.ink2, textAlign: 'center', marginTop: 6, lineHeight: 19 },
+  body: { fontSize: T.type.body, color: T.ink2, textAlign: 'center', marginTop: T.space['1.5'], lineHeight: 19 },
 });

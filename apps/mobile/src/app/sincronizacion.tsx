@@ -38,13 +38,13 @@ function ConflictRow({ c, onResolved }: { c: ServerConflict; onResolved: () => v
 
   return (
     <View style={styles.conflictRow}>
-      <Ionicons name="alert-circle-outline" size={18} color={T.warning} style={{ marginTop: 2 }} />
+      <Ionicons name="alert-circle-outline" size={18} color={T.warning} style={{ marginTop: T.space['0.5'] }} />
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: T.type.body, fontWeight: '600', color: T.ink }}>
           {CONFLICT_LABEL[c.conflict_type] ?? c.conflict_type}
           {c.tag ? ` · caravana ${c.tag}` : ''}
         </Text>
-        <Text style={{ fontSize: T.type.label, color: T.ink2, marginTop: 2 }}>{c.detail}</Text>
+        <Text style={{ fontSize: T.type.label, color: T.ink2, marginTop: T.space['0.5'] }}>{c.detail}</Text>
       </View>
       <Pressable onPress={resolve} disabled={busy} style={[styles.resolveBtn, confirming && { borderColor: T.warning }]}>
         <Text style={{ fontSize: T.type.caption, fontWeight: '600', color: confirming ? T.warning : T.ink2 }}>
@@ -77,8 +77,8 @@ export default function SyncScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-        <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
+        <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
           <Ionicons name="chevron-back" size={16} color={T.ink2} />
           <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
         </Pressable>
@@ -87,7 +87,7 @@ export default function SyncScreen() {
         <Card>
           <Text style={styles.cardTitle}>Pendiente de subir ({pending.length})</Text>
           {pending.length === 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1.5'], paddingVertical: T.space['1.5'] }}>
               <Ionicons name="checkmark-circle" size={16} color={T.success} />
               <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Todo al día — nada en cola.</Text>
             </View>
@@ -101,7 +101,7 @@ export default function SyncScreen() {
             ))
           )}
           {pending.length > 0 && (
-            <View style={{ marginTop: 10 }}>
+            <View style={{ marginTop: T.space['2.5'] }}>
               <Button label={sync.syncing ? 'Sincronizando…' : 'Subir ahora'} onPress={() => sync.syncNow()} disabled={sync.syncing || sync.offlineSim} />
             </View>
           )}
@@ -109,18 +109,18 @@ export default function SyncScreen() {
 
         <Card>
           <Text style={styles.cardTitle}>Conflictos en revisión {conflicts ? `(${conflicts.length})` : ''}</Text>
-          <Text style={{ fontSize: T.type.caption, color: T.ink3, marginBottom: 8 }}>
+          <Text style={{ fontSize: T.type.caption, color: T.ink3, marginBottom: T.space['2'] }}>
             El sistema converge solo; lo irresoluble queda acá — nunca se descartan datos en silencio.
           </Text>
           {conflictsError ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1.5'], paddingVertical: T.space['1.5'] }}>
               <Ionicons name="cloud-offline-outline" size={16} color={T.ink3} />
               <Text style={{ fontSize: T.type.body, color: T.ink3, flex: 1 }}>{conflictsError}</Text>
             </View>
           ) : conflicts === null ? (
-            <Text style={{ fontSize: T.type.body, color: T.ink3, paddingVertical: 6 }}>Cargando…</Text>
+            <Text style={{ fontSize: T.type.body, color: T.ink3, paddingVertical: T.space['1.5'] }}>Cargando…</Text>
           ) : conflicts.length === 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1.5'], paddingVertical: T.space['1.5'] }}>
               <Ionicons name="checkmark-circle" size={16} color={T.success} />
               <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Sin conflictos abiertos.</Text>
             </View>
@@ -138,19 +138,19 @@ export default function SyncScreen() {
 }
 
 const styles = StyleSheet.create({
-  cardTitle: { fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: 8 },
+  cardTitle: { fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: T.space['2'] },
   pendingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: T.space['2'],
     paddingVertical: 7,
     borderTopWidth: 1,
     borderTopColor: T.borderSubtle,
   },
   conflictRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 8,
+    gap: T.space['2'],
+    paddingVertical: T.space['2'],
     borderTopWidth: 1,
     borderTopColor: T.borderSubtle,
   },
@@ -158,8 +158,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: T.space['2.5'],
+    paddingVertical: T.space['1.5'],
     alignSelf: 'center',
   },
 });
