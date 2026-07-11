@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { MoveRight, MapPin } from 'lucide-react';
 import { Button } from '@/components/Button';
+import { Select } from '@/components/Select';
 
 interface Paddock {
   id: string;
@@ -200,10 +201,13 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
             <div className="mt-5 border-t border-subtle pt-4">
               <div className="mb-1.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Mover lote acá</div>
               <div className="flex gap-2">
-                <select
+                <Select
+                  aria-label="Seleccionar lote para mover"
                   value={moveLotId}
                   onChange={(e) => setMoveLotId(e.target.value)}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-strong bg-surface px-2 text-body outline-none focus:ring-2 focus:ring-brand"
+                  controlSize="md"
+                  fullWidth={false}
+                  className="min-w-0 flex-1"
                 >
                   <option value="">Elegir lote…</option>
                   {movableLots.map((l) => (
@@ -211,7 +215,7 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
                       {l.name} ({l.animal_count} cab.)
                     </option>
                   ))}
-                </select>
+                </Select>
                 <Button size="md" onClick={moveLot} disabled={!moveLotId} loading={moving} className="gap-1 shrink-0">
                   <MoveRight size={14} aria-hidden="true" /> {moving ? '…' : 'Mover'}
                 </Button>
