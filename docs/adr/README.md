@@ -19,8 +19,9 @@ numerado `NNNN-titulo.md`. Estados: `propuesto` · `aceptado` · `reemplazado po
 | [0007](0007-server-authority-derived-values.md) | Server Authority sobre valores derivados de reglas de dominio | aceptado |
 | [0008](0008-sync-handler-ownership.md) | Ownership de SyncHandlers: el dominio los posee, sync coordina | aceptado |
 | [0009](0009-animal-history-bounded-context.md) | `AnimalHistoryModule`: bounded context permanente para la línea de tiempo del animal | aceptado |
+| [0010](0010-tenant-self-service-provisioning.md) | Provisioning self-service de tenant (registro SaaS) | aceptado |
 
-Todas las decisiones de arquitectura del Foundation Hardening Sprint están documentadas.
+ADR 0001-0009: Foundation Hardening Sprint. ADR 0010+: Fase Producto.
 
 > Nota de numeración: los ADR se numeran en el orden en que la decisión realmente se
 > toma, no en el orden planeado originalmente — `0004` se escribió primero porque F1
