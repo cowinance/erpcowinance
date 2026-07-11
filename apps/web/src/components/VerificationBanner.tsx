@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mail } from 'lucide-react';
 import { API_URL, authHeaders } from '@/lib/api';
 import { postPublic } from '@/lib/auth';
+import { Button } from '@/components/Button';
 
 type Phase = 'idle' | 'checking' | 'resending' | 'resent' | 'error';
 
@@ -92,13 +93,9 @@ export function VerificationBanner({ initialVerified, email }: { initialVerified
         >
           {phase === 'resending' ? 'Enviando…' : 'Reenviar email'}
         </button>
-        <button
-          onClick={revalidate}
-          disabled={phase === 'checking'}
-          className="h-8 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
+        <Button size="sm" onClick={revalidate} loading={phase === 'checking'}>
           {phase === 'checking' ? 'Verificando…' : 'Ya verifiqué'}
-        </button>
+        </Button>
       </div>
     </div>
   );

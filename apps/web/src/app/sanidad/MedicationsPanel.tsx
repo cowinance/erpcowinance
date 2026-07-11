@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardTitle } from '@/components/ui';
+import { Button } from '@/components/Button';
 import { AddProductForm, PRODUCT_TYPES } from './AddProductForm';
 import { Plus, Pill } from 'lucide-react';
 
@@ -22,12 +23,9 @@ export function MedicationsPanel({ products }: { products: any[] }) {
       <CardTitle
         action={
           !adding && (
-            <button
-              onClick={() => setAdding(true)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90"
-            >
-              <Plus size={14} /> Agregar medicamento
-            </button>
+            <Button size="sm" onClick={() => setAdding(true)} className="gap-1.5">
+              <Plus size={14} aria-hidden="true" /> Agregar medicamento
+            </Button>
           )
         }
       >

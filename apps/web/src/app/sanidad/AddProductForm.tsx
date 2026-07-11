@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react';
 import { API_URL, authHeaders } from '@/lib/api';
+import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
@@ -88,13 +89,9 @@ export function AddProductForm({
       </div>
       {error && <p className="text-label text-danger">{error}</p>}
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={saving}
-          className="h-8 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
+        <Button type="submit" size="sm" loading={saving}>
           {saving ? 'Guardando…' : 'Guardar medicamento'}
-        </button>
+        </Button>
         {onCancel && (
           <button type="button" onClick={onCancel} className="h-8 rounded-md border border-strong px-3 text-label font-medium text-ink-2 hover:bg-surface">
             Cancelar

@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { CalendarClock, Check, ChevronRight, Loader2, ClipboardList } from 'lucide-react';
+import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
@@ -129,13 +130,9 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
                         <span className="text-compat-10 font-medium text-ink-2">Fecha ancla</span>
                         <Input type="date" value={anchor} onChange={(e) => setAnchor(e.target.value)} controlSize="sm" fullWidth={false} />
                       </label>
-                      <button
-                        onClick={() => apply(p.id)}
-                        disabled={applying}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90 disabled:opacity-50"
-                      >
-                        {applying ? <Loader2 size={13} className="animate-spin" /> : 'Aplicar plan'}
-                      </button>
+                      <Button size="sm" onClick={() => apply(p.id)} loading={applying} className="gap-1.5">
+                        {applying ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : 'Aplicar plan'}
+                      </Button>
                     </div>
                   </div>
                 )}
