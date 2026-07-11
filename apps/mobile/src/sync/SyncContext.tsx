@@ -287,7 +287,13 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       storage.attach(d); // antes de hidratar: las filas del snapshot se persisten como mutaciones
       d.hydrate(snapshot.rows ?? snapshot.animals, snapshot.cursor);
       deviceRef.current = d;
-      metaRef.current = { ...metaRef.current, serverDeviceId: device.id, farmName: snapshot.farm?.name, lastSyncAt: new Date().toISOString() };
+      metaRef.current = {
+        ...metaRef.current,
+        serverDeviceId: device.id,
+        farmName: snapshot.farm?.name,
+        farmId: snapshot.farm?.id,
+        lastSyncAt: new Date().toISOString(),
+      };
       await storage.saveMeta(metaRef.current);
       setStatus('ready');
       bump();
@@ -301,6 +307,18 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     init();
   }, [init]);
 
+  /** Operaciones locales sin subir del store actual (dueño previo), sin hidratarlo. */
+  const savedPendingCount = useCallback(async (): Promise<number> => {
+    if (deviceRef.current) return deviceRef.current.pendingCount;
+    const saved = await storageRef.current.loadDevice();
+    if (!saved) return 0;
+    try {
+      return SyncDevice.restore(saved).pendingCount;
+    } catch {
+      return 0;
+    }
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string): Promise<string | null> => {
       try {
@@ -311,12 +329,40 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         });
         const j = await res.json().catch(() => null);
         if (!res.ok) return j?.message?.title ?? 'Credenciales inválidas';
+
+        // Aislamiento local por usuario/tenant (P1.3.6a). El store operativo es
+        // propiedad de (userId, tenantId); el backend además rechaza un device_id
+        // de otro tenant (404), así que un store ajeno sería inservible y expondría
+        // datos de otra cuenta. Si la identidad autenticada no coincide con la dueña
+        // del store, se descarta ANTES de hidratar/renderizar y se arranca limpio.
+        const newUserId: string | undefined = j.user?.id;
+        const newTenantId: string | undefined = j.user?.tenant_id;
+        const prev = metaRef.current;
+        const storeExists = !!prev?.serverDeviceId;
+        const sameOwner = !!newUserId && prev?.userId === newUserId && prev?.tenantId === newTenantId;
+
+        if (storeExists && !sameOwner) {
+          // No perder cambios locales sin subir del dueño anterior: no se pueden
+          // enviar bajo la cuenta nueva (device de otro tenant → 404) ni descartar
+          // en silencio. Se bloquea el cambio hasta sincronizarlos con su cuenta.
+          const pending = await savedPendingCount();
+          if (pending > 0) {
+            return `Este dispositivo tiene ${pending} ${pending === 1 ? 'cambio' : 'cambios'} sin sincronizar de otra cuenta. Ingresá con esa cuenta y sincronizá (o reiniciá la base local desde el Menú) antes de cambiar de usuario.`;
+          }
+          // Sin pendientes: descartar el store del dueño previo y re-namespace limpio.
+          await storageRef.current.reset();
+          deviceRef.current = null;
+          metaRef.current = null;
+        }
+
         metaRef.current = {
           ...metaRef.current,
           accessToken: j.access_token,
           refreshToken: j.refresh_token,
           userName: j.user?.name,
           userEmail: j.user?.email,
+          userId: newUserId,
+          tenantId: newTenantId,
         };
         await storageRef.current.saveMeta(metaRef.current!);
         setStatus('boot');
@@ -326,7 +372,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         return `Sin conexión con la API (${e.message})`;
       }
     },
-    [init],
+    [init, savedPendingCount],
   );
 
   const logout = useCallback(async () => {
