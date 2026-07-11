@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
+import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
@@ -78,13 +79,9 @@ export function NewAnimalForm({ categories, lots }: { categories: any[]; lots: a
         </Field>
       </div>
       {error && <p className="text-label text-danger">{error}</p>}
-      <button
-        type="submit"
-        disabled={saving}
-        className="inline-flex h-9 w-full items-center justify-center rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
-      >
+      <Button type="submit" size="md" fullWidth loading={saving}>
         {saving ? 'Guardando…' : 'Registrar animal'}
-      </button>
+      </Button>
     </form>
   );
 }
