@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
+import { AnimalWriteService } from './animal-write.service';
 
 /** Referencia de foto (id + token firmado) para renderizar desde el navegador. */
 function photoRef(db: DbService, fileId?: string | null, mime?: string | null) {
@@ -19,7 +20,10 @@ export interface ListAnimalsParams {
 
 @Injectable()
 export class HerdService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly writer: AnimalWriteService,
+  ) {}
 
   async listAnimals(params: ListAnimalsParams) {
     const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
@@ -216,6 +220,13 @@ export class HerdService {
     );
   }
 
+  /**
+   * Alta manual REST — adaptador delgado sobre la persistencia neutral
+   * (`AnimalWriteService`, D1). La regla y la escritura son únicas y compartidas
+   * con el futuro canal de importación; este adaptador solo aporta la semántica
+   * del canal REST (evento `birth`, fuente `manual`, `sync='none'`) y traduce el
+   * resultado a las respuestas HTTP de siempre.
+   */
   async createAnimal(body: {
     tag: string;
     sex: 'F' | 'M';
@@ -224,34 +235,32 @@ export class HerdService {
     birth_date?: string;
     lot_id?: string;
   }) {
-    if (!body?.tag || !body?.sex || !body?.category_code)
-      throw new BadRequestException({ code: 'animal.missing_fields', title: 'tag, sex y category_code son obligatorios' });
+    const nv = this.writer.normalizeAndValidate(body);
+    if (!nv.ok) {
+      // Contrato REST preservado: cualquier campo obligatorio ausente → animal.missing_fields.
+      if (nv.errors.some((e) => e.code === 'required'))
+        throw new BadRequestException({ code: 'animal.missing_fields', title: 'tag, sex y category_code son obligatorios' });
+      const first = nv.errors[0];
+      throw new BadRequestException({ code: `animal.invalid_${first.field}`, title: first.message });
+    }
 
-    const cat = await this.db.one<any>(
-      `SELECT c.id, c.species_id FROM animal_categories c WHERE c.code = $1`,
-      [body.category_code],
-    );
-    if (!cat) throw new BadRequestException({ code: 'animal.invalid_category', title: 'Categoría inexistente' });
+    return this.db.tx(async (q) => {
+      const check = await this.writer.checkAgainstDb(q, nv.input);
+      if ('skip' in check)
+        throw new BadRequestException({
+          code: 'animal.duplicate_tag',
+          title: `Ya existe un animal activo con caravana ${nv.input.tag}`,
+        });
+      if (!check.ok) throw new BadRequestException({ code: 'animal.invalid_category', title: 'Categoría inexistente' });
 
-    const dup = await this.db.one(
-      `SELECT ai.id FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
-       WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = $2 AND ai.deleted_at IS NULL AND a.status = 'active'`,
-      [this.db.tenant, body.tag],
-    );
-    if (dup)
-      throw new BadRequestException({ code: 'animal.duplicate_tag', title: `Ya existe un animal activo con caravana ${body.tag}` });
-
-    const animal = await this.db.one<any>(
-      `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, name, birth_date, origin, current_lot_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'born',$8,'active') RETURNING id`,
-      [this.db.tenant, await this.db.defaultFarm(), cat.species_id, cat.id, body.sex, body.name ?? null, body.birth_date ?? null, body.lot_id ?? null],
-    );
-    await this.db.query(
-      `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`,
-      [this.db.tenant, animal.id, body.tag],
-    );
-    await this.insertEvent(animal.id, 'birth', { origin: 'manual', tag: body.tag }, body.birth_date ?? new Date().toISOString());
-    return this.getAnimal(animal.id);
+      const { animalId } = await this.writer.persistNewAnimal(
+        q,
+        nv.input,
+        { origin: 'rest', actorUserId: this.db.user, timeline: { eventType: 'birth', source: 'manual' }, sync: 'none' },
+        check.resolved,
+      );
+      return this.getAnimal(animalId);
+    });
   }
 
   /** Evento polimórfico (POST /animals/:id/events) — como en el doc de APIs. */
