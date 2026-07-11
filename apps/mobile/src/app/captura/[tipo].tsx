@@ -38,7 +38,7 @@ function Segmented<V extends string>({
   onChange: (v: V) => void;
 }) {
   return (
-    <View style={{ flexDirection: 'row', gap: 8 }}>
+    <View style={{ flexDirection: 'row', gap: T.space['2'] }}>
       {options.map(([v, label]) => (
         <Pressable
           key={v}
@@ -115,9 +115,9 @@ export default function CaptureForm() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }}>
+      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />
             <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
           </Pressable>
@@ -129,16 +129,16 @@ export default function CaptureForm() {
           <Text style={styles.label}>{tipo === 'parto' ? 'Madre' : 'Animal'} *</Text>
           <AnimalPickerLocal animal={animal} onSelect={setAnimal} onlyFemales={onlyFemales} />
           {animal && pregnancy && tipo !== 'parto' && (
-            <Text style={{ fontSize: T.type.label, color: T.info, marginTop: 4 }}>
+            <Text style={{ fontSize: T.type.label, color: T.info, marginTop: T.space['1'] }}>
               Preñada — parto probable{' '}
               {pregnancy.expected_due_date ? new Date(pregnancy.expected_due_date).toLocaleDateString('es-AR') : '—'}
             </Text>
           )}
           {animal && tipo === 'diagnostico' && pregnancy && result === 'pregnant' && (
-            <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: 4 }}>Ya tiene una preñez abierta.</Text>
+            <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: T.space['1'] }}>Ya tiene una preñez abierta.</Text>
           )}
           {animal && tipo === 'parto' && !pregnancy && (
-            <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: 4 }}>
+            <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: T.space['1'] }}>
               Sin preñez abierta registrada — el parto se guarda igual.
             </Text>
           )}
@@ -147,7 +147,7 @@ export default function CaptureForm() {
         {(tipo === 'vacunar' || tipo === 'tratar') && (
           <View>
             <Text style={styles.label}>{tipo === 'vacunar' ? 'Vacuna' : 'Producto'} *</Text>
-            <View style={{ gap: 8 }}>
+            <View style={{ gap: T.space['2'] }}>
               {products.map((p) => (
                 <Pressable
                   key={p.id}
@@ -166,7 +166,7 @@ export default function CaptureForm() {
         )}
 
         {(tipo === 'vacunar' || tipo === 'tratar') && (
-          <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ flexDirection: 'row', gap: T.space['3'] }}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Dosis (ml)</Text>
               <TextInput value={dose} onChangeText={setDose} keyboardType="decimal-pad" placeholder="2" placeholderTextColor={T.ink3} style={styles.input} />
@@ -201,7 +201,7 @@ export default function CaptureForm() {
             {method === 'natural' && (
               <View>
                 <Text style={styles.label}>Toro</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
                   {bulls.map((b) => (
                     <Pressable
                       key={b.id}
@@ -232,7 +232,7 @@ export default function CaptureForm() {
         )}
 
         {tipo === 'parto' && (
-          <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ flexDirection: 'row', gap: T.space['3'] }}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Sexo de la cría</Text>
               <Segmented
@@ -268,13 +268,13 @@ export default function CaptureForm() {
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: 6 },
+  label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: T.space['1.5'] },
   input: {
     height: 44,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 12,
+    paddingHorizontal: T.space['3'],
     fontSize: 15,
     color: T.ink,
     backgroundColor: T.surface,
@@ -287,24 +287,24 @@ const styles = StyleSheet.create({
     borderRadius: T.radiusSm,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: T.space['3'],
   },
   segText: { fontSize: T.type.body, fontWeight: '600', color: T.ink2 },
   productRow: {
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 2,
+    paddingHorizontal: T.space['3'],
+    paddingVertical: T.space['2.5'],
+    gap: T.space['0.5'],
   },
   successBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: T.space['2'],
     backgroundColor: T.brand100,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: T.space['3'],
+    paddingVertical: T.space['2.5'],
   },
 });

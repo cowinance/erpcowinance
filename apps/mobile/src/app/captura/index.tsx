@@ -30,8 +30,8 @@ export default function CapturaMenu() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <View style={{ padding: 16, flex: 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+      <View style={{ padding: T.space['4'], flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: T.space['4'] }}>
           <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Capturar</Text>
           <Pressable onPress={() => router.back()} hitSlop={8}>
             <Ionicons name="close" size={24} color={T.ink2} />
@@ -40,7 +40,7 @@ export default function CapturaMenu() {
 
         {hasAnimals ? (
           <>
-            <Text style={{ fontSize: T.type.body, color: T.ink3, marginBottom: 16 }}>
+            <Text style={{ fontSize: T.type.body, color: T.ink3, marginBottom: T.space['4'] }}>
               Todo se guarda en el dispositivo y se sube solo al sincronizar.
             </Text>
             <View style={styles.grid}>
@@ -67,16 +67,16 @@ export default function CapturaMenu() {
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: T.space['3'] },
   action: {
     width: '47%',
     backgroundColor: T.surface,
     borderWidth: 1,
     borderColor: T.borderSubtle,
     borderRadius: T.radiusMd,
-    paddingVertical: 20,
+    paddingVertical: T.space['5'],
     alignItems: 'center',
-    gap: 10,
+    gap: T.space['2.5'],
   },
   iconWrap: {
     width: 48,

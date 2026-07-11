@@ -46,7 +46,7 @@ export function AnimalPickerLocal({
 
   return (
     <View>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', gap: T.space['2'] }}>
         <TextInput
           value={tag}
           onChangeText={setTag}
@@ -60,7 +60,7 @@ export function AnimalPickerLocal({
           <Text style={{ fontSize: T.type.body, fontWeight: '600', color: T.ink }}>Buscar</Text>
         </Pressable>
       </View>
-      {!!error && <Text style={{ fontSize: T.type.label, color: T.danger, marginTop: 4 }}>{error}</Text>}
+      {!!error && <Text style={{ fontSize: T.type.label, color: T.danger, marginTop: T.space['1'] }}>{error}</Text>}
     </View>
   );
 }
@@ -72,7 +72,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 12,
+    paddingHorizontal: T.space['3'],
     fontSize: 16,
     fontFamily: 'monospace',
     color: T.ink,
@@ -90,13 +90,13 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: T.space['2'],
     backgroundColor: T.sunken,
     borderWidth: 1,
     borderColor: T.borderSubtle,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: T.space['3'],
+    paddingVertical: T.space['2.5'],
   },
   chipTag: { fontFamily: 'monospace', fontSize: 16, fontWeight: '700', color: T.ink },
   chipInfo: { flex: 1, fontSize: T.type.label, color: T.ink2 },
