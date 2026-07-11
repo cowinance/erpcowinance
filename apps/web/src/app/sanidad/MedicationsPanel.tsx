@@ -24,7 +24,7 @@ export function MedicationsPanel({ products }: { products: any[] }) {
           !adding && (
             <button
               onClick={() => setAdding(true)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-[12px] font-medium text-white hover:opacity-90"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90"
             >
               <Plus size={14} /> Agregar medicamento
             </button>
@@ -47,13 +47,13 @@ export function MedicationsPanel({ products }: { products: any[] }) {
       )}
 
       {products.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-ink-3">
+        <p className="py-6 text-center text-body text-ink-3">
           Sin medicamentos cargados. Agregá el primero para poder registrar vacunas y tratamientos.
         </p>
       ) : (
-        <table className="w-full text-[13px]">
+        <table className="w-full text-body">
           <thead>
-            <tr className="h-8 border-b border-subtle text-left text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+            <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
               <th>Medicamento</th>
               <th>Tipo</th>
               <th>Principio activo</th>

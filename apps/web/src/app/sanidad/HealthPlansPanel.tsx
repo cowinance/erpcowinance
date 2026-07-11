@@ -13,7 +13,7 @@ import { formatDate } from '@/lib/format';
 import { CalendarClock, Check, ChevronRight, Loader2, ClipboardList } from 'lucide-react';
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
-const inputCls = 'h-8 rounded-md border border-strong bg-surface px-2 text-[13px] outline-none focus:ring-2 focus:ring-brand';
+const inputCls = 'h-8 rounded-md border border-strong bg-surface px-2 text-body outline-none focus:ring-2 focus:ring-brand';
 
 export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories: any[] }) {
   const router = useRouter();
@@ -73,10 +73,10 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
     <div className="mt-4 grid grid-cols-2 gap-4 max-lg:grid-cols-1">
       {/* Planes / calendarios */}
       <div className={cardCls}>
-        <h2 className="mb-1 flex items-center gap-2 text-[15px] font-semibold">
+        <h2 className="mb-1 flex items-center gap-2 text-subheading font-semibold">
           <CalendarClock size={16} className="text-brand" /> Planes sanitarios
         </h2>
-        <p className="mb-3 text-[12px] text-ink-3">Calendarios reutilizables — aplicá uno para generar los recordatorios.</p>
+        <p className="mb-3 text-label text-ink-3">Calendarios reutilizables — aplicá uno para generar los recordatorios.</p>
 
         {loading ? (
           <div className="flex justify-center py-6 text-ink-3">
@@ -91,14 +91,14 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
                   className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-sunken"
                 >
                   <ChevronRight size={14} className={`text-ink-3 transition-transform ${openPlan === p.id ? 'rotate-90' : ''}`} />
-                  <span className="flex-1 text-[13px] font-medium">{p.name}</span>
-                  <span className="text-[11px] text-ink-3">{p.steps} pasos · {p.species}</span>
+                  <span className="flex-1 text-body font-medium">{p.name}</span>
+                  <span className="text-caption text-ink-3">{p.steps} pasos · {p.species}</span>
                 </button>
                 {openPlan === p.id && (
                   <div className="border-t border-subtle px-3 py-3">
                     <ul className="mb-3 space-y-1">
                       {(p.schedule ?? []).map((s: any, i: number) => (
-                        <li key={i} className="flex items-center gap-2 text-[12px] text-ink-2">
+                        <li key={i} className="flex items-center gap-2 text-label text-ink-2">
                           <span className="tnum w-14 shrink-0 text-ink-3">día {s.offset_days}</span>
                           <span className="font-medium text-ink">{s.label}</span>
                           <span className="text-ink-3">
@@ -109,7 +109,7 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
                     </ul>
                     <div className="flex flex-wrap items-end gap-2">
                       <label className="flex flex-col gap-1">
-                        <span className="text-[10px] font-medium text-ink-2">Aplicar a</span>
+                        <span className="text-compat-10 font-medium text-ink-2">Aplicar a</span>
                         <select value={target} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
                           <option value="all">Todo el hato</option>
                           {categories.filter((c) => c.animal_count > 0).map((c) => (
@@ -125,13 +125,13 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
                         </select>
                       </label>
                       <label className="flex flex-col gap-1">
-                        <span className="text-[10px] font-medium text-ink-2">Fecha ancla</span>
+                        <span className="text-compat-10 font-medium text-ink-2">Fecha ancla</span>
                         <input type="date" value={anchor} onChange={(e) => setAnchor(e.target.value)} className={inputCls} />
                       </label>
                       <button
                         onClick={() => apply(p.id)}
                         disabled={applying}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90 disabled:opacity-50"
                       >
                         {applying ? <Loader2 size={13} className="animate-spin" /> : 'Aplicar plan'}
                       </button>
@@ -142,29 +142,29 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
             ))}
           </div>
         )}
-        {msg && <p className={`mt-3 text-[12px] ${msg.startsWith('✓') ? 'text-success' : 'text-danger'}`}>{msg}</p>}
+        {msg && <p className={`mt-3 text-label ${msg.startsWith('✓') ? 'text-success' : 'text-danger'}`}>{msg}</p>}
       </div>
 
       {/* Tareas programadas */}
       <div className={cardCls}>
-        <h2 className="mb-1 flex items-center gap-2 text-[15px] font-semibold">
+        <h2 className="mb-1 flex items-center gap-2 text-subheading font-semibold">
           <ClipboardList size={16} className="text-brand" /> Tareas pendientes
         </h2>
-        <p className="mb-3 text-[12px] text-ink-3">{tasks.length} tareas sanitarias programadas.</p>
+        <p className="mb-3 text-label text-ink-3">{tasks.length} tareas sanitarias programadas.</p>
         {tasks.length === 0 ? (
-          <p className="py-6 text-center text-[13px] text-ink-3">Sin tareas pendientes. Aplicá un plan para generarlas.</p>
+          <p className="py-6 text-center text-body text-ink-3">Sin tareas pendientes. Aplicá un plan para generarlas.</p>
         ) : (
           <div className="max-h-80 space-y-1 overflow-y-auto">
             {tasks.slice(0, 40).map((t) => (
               <div key={t.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sunken">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px]">{t.title}</div>
-                  <div className={`text-[11px] ${t.overdue ? 'text-warning' : 'text-ink-3'}`}>
+                  <div className="truncate text-body">{t.title}</div>
+                  <div className={`text-caption ${t.overdue ? 'text-warning' : 'text-ink-3'}`}>
                     {t.overdue ? 'Vencida' : 'Vence'} · {formatDate(t.due_date)}
                   </div>
                 </div>
                 {t.animal_id && (
-                  <Link href={`/animales/${t.animal_id}`} className="shrink-0 text-[11px] text-brand hover:underline">
+                  <Link href={`/animales/${t.animal_id}`} className="shrink-0 text-caption text-brand hover:underline">
                     ver
                   </Link>
                 )}

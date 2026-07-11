@@ -18,7 +18,7 @@ export default async function ReproPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Reproducción</h1>
-      <p className="mt-0.5 mb-5 text-[13px] text-ink-3">Celos, servicios, gestaciones, partos y destetes</p>
+      <p className="mt-0.5 mb-5 text-body text-ink-3">Celos, servicios, gestaciones, partos y destetes</p>
 
       <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
         <KpiCard
@@ -38,15 +38,15 @@ export default async function ReproPage() {
 
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
         <Card className="col-span-3">
-          <CardTitle action={<span className="text-[12px] text-ink-3">{(upcoming ?? []).length} preñeces abiertas</span>}>
+          <CardTitle action={<span className="text-label text-ink-3">{(upcoming ?? []).length} preñeces abiertas</span>}>
             Próximos partos
           </CardTitle>
           {(upcoming ?? []).length === 0 ? (
-            <p className="py-5 text-center text-[13px] text-ink-3">Sin preñeces abiertas.</p>
+            <p className="py-5 text-center text-body text-ink-3">Sin preñeces abiertas.</p>
           ) : (
-            <table className="w-full text-[13px]">
+            <table className="w-full text-body">
               <thead>
-                <tr className="h-8 border-b border-subtle text-left text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+                <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
                   <th>Caravana</th>
                   <th>Nombre</th>
                   <th>Diagnóstico</th>

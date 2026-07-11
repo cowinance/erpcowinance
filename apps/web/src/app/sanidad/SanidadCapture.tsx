@@ -37,7 +37,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
         <button
           type="button"
           onClick={() => setAddingProduct((v) => !v)}
-          className="inline-flex items-center gap-1 text-[11px] font-medium text-brand hover:underline"
+          className="inline-flex items-center gap-1 text-caption font-medium text-brand hover:underline"
         >
           <Plus size={12} /> Nuevo medicamento
         </button>
@@ -211,7 +211,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
               <span className={labelCls}>Pérdida estimada ($)</span>
               <input name="estimated_loss" type="number" className={inputCls} placeholder="45000" />
             </label>
-            <p className="text-[12px] text-warning">El animal quedará dado de baja (estado: muerto). El historial se conserva.</p>
+            <p className="text-label text-warning">El animal quedará dado de baja (estado: muerto). El historial se conserva.</p>
           </>
         )}
 
@@ -219,7 +219,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
         <button
           type="submit"
           disabled={!animal || state === 'saving'}
-          className="h-9 w-full rounded-md bg-brand text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="h-9 w-full rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {state === 'saving' ? 'Guardando…' : `Registrar ${tab.toLowerCase()}`}
         </button>

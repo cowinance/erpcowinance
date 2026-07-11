@@ -102,7 +102,7 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
                     key={v}
                     type="button"
                     onClick={() => setMethod(v)}
-                    className={`h-9 flex-1 rounded-md border text-[13px] font-medium ${
+                    className={`h-9 flex-1 rounded-md border text-body font-medium ${
                       method === v ? 'border-brand bg-brand-soft text-brand' : 'border-strong text-ink-2 hover:bg-sunken'
                     }`}
                   >
@@ -201,7 +201,7 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
         <button
           type="submit"
           disabled={!animal || state === 'saving'}
-          className="h-9 w-full rounded-md bg-brand text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="h-9 w-full rounded-md bg-brand text-body font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {state === 'saving' ? 'Guardando…' : `Registrar ${tab.toLowerCase()}`}
         </button>

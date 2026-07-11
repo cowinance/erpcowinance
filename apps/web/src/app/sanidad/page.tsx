@@ -21,7 +21,7 @@ export default async function SanidadPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Sanidad</h1>
-      <p className="mt-0.5 mb-5 text-[13px] text-ink-3">Vacunaciones, tratamientos, retiros y mortalidad</p>
+      <p className="mt-0.5 mb-5 text-body text-ink-3">Vacunaciones, tratamientos, retiros y mortalidad</p>
 
       <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
         <KpiCard
@@ -48,15 +48,15 @@ export default async function SanidadPage() {
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
         <div className="col-span-3 space-y-4">
           <Card>
-            <CardTitle action={<span className="text-[12px] text-ink-3">{(withdrawals ?? []).length} activos</span>}>
+            <CardTitle action={<span className="text-label text-ink-3">{(withdrawals ?? []).length} activos</span>}>
               Retiros activos
             </CardTitle>
             {(withdrawals ?? []).length === 0 ? (
-              <p className="py-5 text-center text-[13px] text-ink-3">Sin retiros vigentes.</p>
+              <p className="py-5 text-center text-body text-ink-3">Sin retiros vigentes.</p>
             ) : (
-              <table className="w-full text-[13px]">
+              <table className="w-full text-body">
                 <thead>
-                  <tr className="h-8 border-b border-subtle text-left text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+                  <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
                     <th>Caravana</th>
                     <th>Producto</th>
                     <th>Aplicado</th>
@@ -90,7 +90,7 @@ export default async function SanidadPage() {
           <Card>
             <CardTitle>Próximas vacunaciones (60 días)</CardTitle>
             {(upcoming ?? []).length === 0 ? (
-              <p className="py-5 text-center text-[13px] text-ink-3">
+              <p className="py-5 text-center text-body text-ink-3">
                 Nada programado — los refuerzos con fecha aparecerán acá.
               </p>
             ) : (
@@ -99,12 +99,12 @@ export default async function SanidadPage() {
                   <Link
                     key={v.id}
                     href={`/animales/${v.animal_id}`}
-                    className="flex items-center gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-sunken"
+                    className="flex items-center gap-3 rounded-md px-2 py-1.5 text-body hover:bg-sunken"
                   >
                     <Syringe size={14} className="shrink-0 text-info" strokeWidth={1.75} />
                     <TagMono>{v.tag ?? '—'}</TagMono>
                     <span className="text-ink-2">{v.product}</span>
-                    <span className="ml-auto text-[12px] text-ink-3">
+                    <span className="ml-auto text-label text-ink-3">
                       {formatDate(v.next_due_date)} · en {v.days_until} días
                     </span>
                   </Link>

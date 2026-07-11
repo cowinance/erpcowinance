@@ -87,17 +87,17 @@ export function AddProductForm({
           <input name="withdrawal_milk_hours" type="number" min="0" placeholder="0" className={inputCls} />
         </label>
       </div>
-      {error && <p className="text-[12px] text-danger">{error}</p>}
+      {error && <p className="text-label text-danger">{error}</p>}
       <div className="flex gap-2">
         <button
           type="submit"
           disabled={saving}
-          className="h-8 rounded-md bg-brand px-3 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="h-8 rounded-md bg-brand px-3 text-label font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {saving ? 'Guardando…' : 'Guardar medicamento'}
         </button>
         {onCancel && (
-          <button type="button" onClick={onCancel} className="h-8 rounded-md border border-strong px-3 text-[12px] font-medium text-ink-2 hover:bg-surface">
+          <button type="button" onClick={onCancel} className="h-8 rounded-md border border-strong px-3 text-label font-medium text-ink-2 hover:bg-surface">
             Cancelar
           </button>
         )}
