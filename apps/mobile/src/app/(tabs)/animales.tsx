@@ -42,9 +42,9 @@ export default function Animales() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <View style={{ padding: 16, paddingBottom: 8 }}>
+      <View style={{ padding: T.space['4'], paddingBottom: T.space['2'] }}>
         <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Animales</Text>
-        <Text style={{ fontSize: T.type.label, color: T.ink3, marginTop: 2 }}>
+        <Text style={{ fontSize: T.type.label, color: T.ink3, marginTop: T.space['0.5'] }}>
           {animals.length} activos · datos locales (funciona sin señal)
         </Text>
         <TextInput
@@ -61,8 +61,8 @@ export default function Animales() {
         renderItem={({ item }) => <Row a={item} />}
         contentContainerStyle={
           animals.length === 0
-            ? { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 16 }
-            : { paddingHorizontal: 16, paddingBottom: 24 }
+            ? { flexGrow: 1, justifyContent: 'center', paddingHorizontal: T.space['4'] }
+            : { paddingHorizontal: T.space['4'], paddingBottom: T.space['6'] }
         }
         ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: T.borderSubtle }} />}
         ListEmptyComponent={<HerdEmpty status={sync.status} query={q} />}
@@ -73,18 +73,18 @@ export default function Animales() {
 
 const styles = StyleSheet.create({
   search: {
-    marginTop: 10,
+    marginTop: T.space['2.5'],
     height: 40,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
-    paddingHorizontal: 12,
+    paddingHorizontal: T.space['3'],
     fontSize: T.type.input,
     color: T.ink,
     backgroundColor: T.surface,
   },
   emptyNote: { fontSize: T.type.body, color: T.ink3, textAlign: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: T.space['3'], paddingVertical: T.space['2.5'] },
   tag: { fontFamily: 'monospace', fontSize: 15, fontWeight: '700', color: T.brand700, width: 56 },
   weight: { fontSize: 14, fontWeight: '600', color: T.ink, fontVariant: ['tabular-nums'] },
 });

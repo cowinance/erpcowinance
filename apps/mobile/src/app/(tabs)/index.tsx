@@ -24,10 +24,10 @@ export default function Home() {
     return (
       <SafeAreaView style={styles.center}>
         <Text style={{ fontSize: T.compat['16'], fontWeight: '600', color: T.ink }}>No se pudo inicializar</Text>
-        <Text style={{ color: T.ink2, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }}>
+        <Text style={{ color: T.ink2, marginTop: T.space['1.5'], textAlign: 'center', paddingHorizontal: T.space['8'] }}>
           El primer arranque necesita la API ({sync.errorMsg}). Después, la app funciona 100% offline.
         </Text>
-        <View style={{ marginTop: 16, width: 200 }}>
+        <View style={{ marginTop: T.space['4'], width: 200 }}>
           <Button label="Reintentar" onPress={() => sync.resetLocal()} />
         </View>
       </SafeAreaView>
@@ -44,11 +44,11 @@ export default function Home() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <View>
             <Text style={styles.h1}>{firstName ? `${greeting}, ${firstName}` : greeting}</Text>
-            <Text style={{ fontSize: T.type.body, color: T.ink3, marginTop: 2 }}>{sync.farmName ?? 'Cowinance'}</Text>
+            <Text style={{ fontSize: T.type.body, color: T.ink3, marginTop: T.space['0.5'] }}>{sync.farmName ?? 'Cowinance'}</Text>
           </View>
           <SyncDot pending={sync.pendingCount} />
         </View>
@@ -61,7 +61,7 @@ export default function Home() {
           </View>
         )}
 
-        <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ flexDirection: 'row', gap: T.space['3'] }}>
           <Kpi label="Animales activos" value={String(animals.length)} hint="en la base local" />
           <Kpi
             label="Pendientes de subir"
@@ -72,20 +72,20 @@ export default function Home() {
         </View>
 
         <Card>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: T.space['1'] }}>
             <Text style={styles.cardTitle}>Sincronización</Text>
             <Text style={{ fontSize: T.type.label, color: T.brand700, fontWeight: '600' }} onPress={() => router.push('/sincronizacion')}>
               Ver detalle →
             </Text>
           </View>
-          <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: 12 }}>
+          <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: T.space['3'] }}>
             Automática (al capturar y cada 60 s) · último sync:{' '}
             {sync.lastSyncAt ? new Date(sync.lastSyncAt).toLocaleTimeString('es-AR') : 'nunca'}
           </Text>
           <Button label={sync.syncing ? 'Sincronizando…' : 'Sincronizar ahora'} onPress={doSync} disabled={sync.syncing} />
           {sync.lastSyncResult ? (
             <Text
-              style={{ fontSize: T.type.label, marginTop: 8, color: sync.lastSyncResult.startsWith('Sync OK') ? T.success : T.warning }}
+              style={{ fontSize: T.type.label, marginTop: T.space['2'], color: sync.lastSyncResult.startsWith('Sync OK') ? T.success : T.warning }}
             >
               {sync.lastSyncResult}
             </Text>
@@ -101,7 +101,7 @@ export default function Home() {
         ) : (
           <Card>
             <Text style={styles.cardTitle}>Captura de campo</Text>
-            <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: 12 }}>
+            <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: T.space['3'] }}>
               Pesajes con caravana, offline, en menos de 3 toques.
             </Text>
             <Button label="Abrir modo manga" onPress={() => router.push('/manga')} />
@@ -115,6 +115,6 @@ export default function Home() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
   h1: { fontSize: T.type.title, fontWeight: '700', color: T.ink },
-  cardTitle: { fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: 4 },
-  offlineBanner: { backgroundColor: T.warning, borderRadius: T.radiusSm, paddingVertical: 8, paddingHorizontal: 12 },
+  cardTitle: { fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: T.space['1'] },
+  offlineBanner: { backgroundColor: T.warning, borderRadius: T.radiusSm, paddingVertical: T.space['2'], paddingHorizontal: T.space['3'] },
 });
