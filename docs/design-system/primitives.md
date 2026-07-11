@@ -5,13 +5,12 @@
 > en [ADR-0015](../adr/0015-density-runtime-primitive-size-axis.md); la spec del
 > sistema en [P1.4.2-design-system-spec.md](P1.4.2-design-system-spec.md).
 >
-> Estado: **Button** (primary/secondary en `lg` y `md`) e **Input/Select/Field**
-> (`lg`/`md`/`sm` validados) aprobados y **aplicados** a auth, alta de animal,
-> Sanidad, Reproducción, AddProductForm, AnimalPicker, Reportes y HealthPlans. Los
-> `inputCls`/`labelCls` compartidos de captura y el `inputCls` de AuthShell fueron
-> eliminados; se podaron 4 aliases `typeCompat` sin consumidores (18/32/48/64).
-> **Pendiente (P1.4.4.7+):** botones con icono/estado, `sm` de Button, icon-only,
-> danger, toggles, spinner de carga; y los inputs residuales (WeighingForm, búsquedas).
+> Estado: **P1.4.4 CERRADO** (ver [P1.4.4-closure.md](P1.4.4-closure.md)). Button
+> (primary/secondary · sm/md/lg · iconos y estado por composición) e Input/Select/Field
+> (`lg`/`md`/`sm`) **aplicados en toda la web**: no queda control ni botón estándar fuera
+> de primitivos, salvo las **excepciones documentadas** (búsqueda con icono-prefijo,
+> icon-only, `danger`, secondary sobre `bg-sunken`, CTA-Link) y los no-estándar (file
+> oculto, hidden, manga). Deuda diferida y decisiones en el doc de cierre. Móvil: fuera de alcance de P1.4.4.
 
 ## Principio
 
@@ -30,7 +29,7 @@ Dos ejes **independientes** (ADR-0015):
 Las alturas de control salen de la capa de densidad, **por tamaño**, con valores
 explícitos (sin fórmula): en `standard`, `--density-control-h-sm|md|lg` = **32/36/40**.
 En **web**, Button e Input/Select comparten esos tres valores porque el inventario
-real lo confirma; **móvil tendrá su propia tabla** (touch ≥ 44px) en un capítulo futuro.
+real lo confirma. El móvil no comparte estos absolutos (touch ≥ 44px) y **queda fuera de alcance de P1.4.4**.
 
 ## Button — `components/Button.tsx`
 

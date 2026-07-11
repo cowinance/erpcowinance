@@ -129,13 +129,15 @@ Sobre la fuente de tokens, la **especificación completa** del sistema visual vi
 inventario de componentes, motion, accesibilidad AA y responsive). Las decisiones de arquitectura que
 de ella se derivan están en [ADR-0014](docs/adr/0014-design-system-specification.md). **P1.4.3 (aplicación de
 la escala tipográfica y de spacing, web + móvil) está cerrado** — behavior-preserving, ver la nota de
-implementación del ADR y el handoff. **P1.4.4 (primitivos + densidad) en curso:** el mecanismo de densidad
-runtime y el eje de tamaño están en [ADR-0015](docs/adr/0015-density-runtime-primitive-size-axis.md); el
-patrón aprobado de los primitivos web (**Button**, **Input/Select/Field**, tamaños `lg`/`md`/`sm`) y su
-estado real viven en [`docs/design-system/primitives.md`](docs/design-system/primitives.md). Ya aplicados a
-**auth, alta de animal, Sanidad, Reproducción, Reportes y HealthPlans** (behavior-preserving); `inputCls`/`labelCls`
-compartidos eliminados y 4 aliases `typeCompat` sin uso podados. **Pendiente:** botones con icono/estado y `sm`,
-icon-only, danger, toggles, spinner; primitivos móviles, dark mode auditado, iconografía y navegación responsive.
+implementación del ADR y el handoff. **P1.4.4 (primitivos + densidad) está CERRADO:** el mecanismo de densidad
+runtime y el eje de tamaño están en [ADR-0015](docs/adr/0015-density-runtime-primitive-size-axis.md); los
+primitivos web (**Button**, **Input/Select/Field**, tamaños `lg`/`md`/`sm`) están **aplicados en toda la web**
+(auth, alta de animal, Sanidad, Reproducción, Reportes, HealthPlans, FarmMap, WeighingForm…), behavior-preserving;
+`inputCls`/`labelCls` compartidos eliminados y 4 aliases `typeCompat` sin uso podados. Estado, decisiones y deuda
+diferida (icon-only, danger, secondary sobre `bg-sunken`, búsqueda con icono, CTA-Link) en
+[`docs/design-system/P1.4.4-closure.md`](docs/design-system/P1.4.4-closure.md) y
+[`primitives.md`](docs/design-system/primitives.md). Con esto, **P1.4 (Fundamentos de experiencia) está completo**;
+los primitivos y la densidad son web (móvil fuera de alcance de P1.4.4).
 
 ## E2E web — recorrido de onboarding (Playwright)
 
