@@ -129,8 +129,11 @@ Sobre la fuente de tokens, la **especificación completa** del sistema visual vi
 inventario de componentes, motion, accesibilidad AA y responsive). Las decisiones de arquitectura que
 de ella se derivan están en [ADR-0014](docs/adr/0014-design-system-specification.md). **P1.4.3 (aplicación de
 la escala tipográfica y de spacing, web + móvil) está cerrado** — behavior-preserving, ver la nota de
-implementación del ADR y el handoff. **Pendiente (P1.4.4+):** primitivos, aplicación de densidad, dark mode,
-iconografía y navegación responsive.
+implementación del ADR y el handoff. **P1.4.4 (primitivos + densidad) en curso:** el mecanismo de densidad
+runtime y el eje de tamaño están en [ADR-0015](docs/adr/0015-density-runtime-primitive-size-axis.md); el
+patrón aprobado de los primitivos web (**Button**, **Input/Select/Field**) y sus divergencias pendientes viven
+en [`docs/design-system/primitives.md`](docs/design-system/primitives.md). **Pendiente:** resto de superficies
+(auth, filtros, formularios ganaderos), primitivos móviles, dark mode auditado, iconografía y navegación responsive.
 
 ## E2E web — recorrido de onboarding (Playwright)
 
