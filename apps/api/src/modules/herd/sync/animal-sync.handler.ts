@@ -6,20 +6,7 @@ import type { SyncHandler, SyncConflict } from '../../sync/contracts/sync-handle
 import { SyncConflictWriter } from '../../sync/registry/sync-conflict.writer';
 import { SyncVersionStore } from '../../sync/registry/sync-version.store';
 import { SyncHandlerRegistry } from '../../sync/registry/sync-handler.registry';
-
-/** Columnas de animals que un changeset puede escribir (whitelist v0). */
-const ANIMAL_FIELDS = new Set([
-  'name',
-  'status',
-  'current_lot_id',
-  'current_paddock_id',
-  'notes',
-  'birth_date',
-  'sex',
-  'coat_color',
-  'dam_id',
-  'sire_id',
-]);
+import { ANIMAL_SYNCABLE_FIELDS } from '../animal-syncable-fields';
 
 /**
  * animals: aggregate root del hato (put, LWW por campo vía HLC en
@@ -123,7 +110,7 @@ export class AnimalSyncHandler implements SyncHandler, OnModuleInit {
         ]);
     }
 
-    const columns = changed.filter((f) => ANIMAL_FIELDS.has(f));
+    const columns = changed.filter((f) => ANIMAL_SYNCABLE_FIELDS.has(f));
     if (columns.length) {
       const sets = columns.map((c, i) => `"${c}" = $${i + 3}`).join(', ');
       await q.query(`UPDATE animals SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
