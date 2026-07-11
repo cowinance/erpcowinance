@@ -57,7 +57,7 @@ export function Button({
 
 export function SyncDot({ pending }: { pending: number }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1.5'] }}>
       <View style={[styles.dot, { backgroundColor: pending ? T.warning : T.success }]} />
       <Text style={{ fontSize: T.type.label, color: T.ink3 }}>{pending ? `${pending} pendiente${pending === 1 ? '' : 's'}` : 'Sincronizado'}</Text>
     </View>
@@ -70,12 +70,12 @@ const styles = StyleSheet.create({
     borderRadius: T.radiusMd,
     borderWidth: 1,
     borderColor: T.borderSubtle,
-    padding: 16,
+    padding: T.space['4'],
   },
   kpiLabel: { fontSize: T.type.label, color: T.ink2 },
-  kpiValue: { fontSize: T.compat['26'], fontWeight: '700', color: T.ink, marginTop: 4, fontVariant: ['tabular-nums'] },
-  kpiHint: { fontSize: T.type.caption, color: T.ink3, marginTop: 2 },
-  btn: { height: 44, borderRadius: T.radiusSm, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  kpiValue: { fontSize: T.compat['26'], fontWeight: '700', color: T.ink, marginTop: T.space['1'], fontVariant: ['tabular-nums'] },
+  kpiHint: { fontSize: T.type.caption, color: T.ink3, marginTop: T.space['0.5'] },
+  btn: { height: 44, borderRadius: T.radiusSm, alignItems: 'center', justifyContent: 'center', paddingHorizontal: T.space['4'] },
   btnText: { color: '#fff', fontSize: T.type.input, fontWeight: '600' },
   dot: { width: 8, height: 8, borderRadius: 4 },
 });
