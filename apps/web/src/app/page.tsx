@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, KpiCard, EmptyState, TagMono } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
+import { VerificationBanner } from '@/components/VerificationBanner';
+import { EmptyFarmState } from '@/components/EmptyFarmState';
 import { EVENT_LABELS, formatDate, relativeTime } from '@/lib/format';
 import { AlertTriangle, Syringe, Plus } from 'lucide-react';
 
@@ -26,9 +28,20 @@ export default async function Dashboard() {
   const rawDate = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
   const today = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
   const withdrawals = kpis.alerts?.active_withdrawals ?? [];
+  // Estado vacío guiado: misma cuenta que el KPI de cabecera (active_animals),
+  // única fuente → sin inconsistencia entre KPIs y decisión de empty-state.
+  const isEmptyFarm = (kpis.active_animals ?? 0) === 0;
 
   return (
     <div>
+      {/* Banner suave de verificación (P1.3.5): estado inicial de /auth/me;
+          se auto-oculta si ya está verificado. Coexiste con empty-state y dashboard. */}
+      <VerificationBanner initialVerified={!!me?.email_verified} email={me?.email} />
+
+      {isEmptyFarm ? (
+        <EmptyFarmState greetingName={me?.name} farmName={farms?.[0]?.name} />
+      ) : (
+        <>
       {/* Cabecera (doc diseño §11.2) */}
       <div className="mb-6 flex items-end justify-between">
         <div>
@@ -167,6 +180,8 @@ export default async function Dashboard() {
           </div>
         </Card>
       </div>
+        </>
+      )}
     </div>
   );
 }
