@@ -2,11 +2,13 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DbService } from '../../db/db.service';
 import { parseCsv } from './csv';
 import { suggestMapping, DuplicateHeadersError } from './mapping';
-import type { AnimalImportField } from '../herd/animal-import-descriptor';
+import { ANIMAL_IMPORT_DESCRIPTOR, REQUIRED_ANIMAL_IMPORT_FIELDS, type AnimalImportField } from '../herd/animal-import-descriptor';
 
 export const MAX_IMPORT_ROWS = 5000;
 const ROWS_PAGE_DEFAULT = 100;
 const ROWS_PAGE_MAX = 500;
+const VALID_IMPORT_FIELDS = new Set<string>(ANIMAL_IMPORT_DESCRIPTOR.fields.map((f) => f.field));
+const EDITABLE_STATES = new Set(['uploaded', 'mapped', 'previewed']);
 
 export interface ImportBatchDto {
   id: string;
@@ -143,5 +145,49 @@ export class ImportService {
     const hasMore = rows.length > take;
     const data = hasMore ? rows.slice(0, take) : rows;
     return { data, next_cursor: hasMore ? encodeCursor(data[data.length - 1].row_number) : null };
+  }
+
+  /**
+   * PUT /v1/imports/:id/mapping — reemplaza el mapping del batch (campo canónico →
+   * encabezado). Valida forma (keys de campos válidos, valores string no vacíos) y
+   * obligatorios presentes (tag/sex/category_code). La existencia real del header la
+   * revela el preview (3.5). Deja el batch en `mapped`. No valida contra los headers
+   * del CSV (no se persisten) — ver microanálisis 3.4.
+   */
+  async updateMapping(id: string, mapping: unknown): Promise<ImportBatchDto> {
+    const batch = await this.getBatch(id); // 404 si es ajeno o no existe
+    if (!EDITABLE_STATES.has(batch.status)) {
+      throw new BadRequestException({ code: 'import.batch_not_editable', title: `El import en estado '${batch.status}' no admite cambios de mapping` });
+    }
+    if (typeof mapping !== 'object' || mapping === null || Array.isArray(mapping)) {
+      throw new BadRequestException({ code: 'import.invalid_mapping', title: 'mapping debe ser un objeto { campo: encabezado }' });
+    }
+    const entries = Object.entries(mapping as Record<string, unknown>);
+    for (const [field, header] of entries) {
+      if (!VALID_IMPORT_FIELDS.has(field)) {
+        throw new BadRequestException({ code: 'import.invalid_mapping', title: `Campo desconocido en el mapping: '${field}'` });
+      }
+      if (typeof header !== 'string' || header.trim() === '') {
+        throw new BadRequestException({ code: 'import.invalid_mapping', title: `El encabezado de '${field}' debe ser un texto no vacío` });
+      }
+    }
+    const mapped = new Set(entries.map(([f]) => f));
+    const missing = REQUIRED_ANIMAL_IMPORT_FIELDS.filter((f) => !mapped.has(f));
+    if (missing.length) {
+      throw new BadRequestException({ code: 'import.mapping_missing_required', title: `Faltan campos obligatorios en el mapping: ${missing.join(', ')}` });
+    }
+
+    const clean: Partial<Record<AnimalImportField, string>> = {};
+    for (const [field, header] of entries) clean[field as AnimalImportField] = header as string;
+
+    const updated = await this.db.one<ImportBatchDto>(
+      `UPDATE import_batches SET mapping = $3, status = 'mapped', updated_at = now()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id, entity_type, status, source_filename, total_rows, created_count, skipped_count,
+                 invalid_count, error_count, reconcile_mode, mapping, created_at, updated_at`,
+      [id, this.db.tenant, JSON.stringify(clean)],
+    );
+    if (!updated) throw new NotFoundException({ code: 'import.batch_not_found', title: 'Import no encontrado' });
+    return updated;
   }
 }

@@ -15,9 +15,13 @@ async function login(email, password) {
   return (await res.json()).access_token;
 }
 
-/** Request JSON simple (GET, etc.) con token. */
-async function api(token, method, path) {
-  const res = await fetch(`${API}${path}`, { method, headers: { Authorization: `Bearer ${token}` } });
+/** Request JSON (GET/PUT/…) con token y body opcional. */
+async function api(token, method, path, body) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
@@ -106,6 +110,23 @@ async function main() {
   check('María GET batch de Jose → 404', mGet.status === 404, `status=${mGet.status}`);
   const mRows = await api(mToken, 'GET', `/imports/${batchId}/rows`);
   check('María GET rows de Jose → 404', mRows.status === 404, `status=${mRows.status}`);
+
+  // 12. PUT mapping (3.4) — edición del mapping + validaciones
+  const putOk = await api(token, 'PUT', `/imports/${batchId}/mapping`, {
+    mapping: { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoría' },
+  });
+  check('PUT mapping válido → 200 y status mapped', putOk.status === 200 && putOk.json?.status === 'mapped', `${putOk.status} ${putOk.json?.status}`);
+  check(
+    'mapping persistido (3 campos)',
+    putOk.json?.mapping?.tag === 'Caravana' && putOk.json?.mapping?.sex === 'Sexo' && putOk.json?.mapping?.category_code === 'Categoría' && Object.keys(putOk.json?.mapping ?? {}).length === 3,
+    JSON.stringify(putOk.json?.mapping),
+  );
+  const putMissing = await api(token, 'PUT', `/imports/${batchId}/mapping`, { mapping: { tag: 'Caravana' } });
+  check('PUT sin obligatorios → 400 import.mapping_missing_required', putMissing.status === 400 && putMissing.json?.code === 'import.mapping_missing_required', putMissing.json?.code);
+  const putUnknown = await api(token, 'PUT', `/imports/${batchId}/mapping`, { mapping: { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoría', zzz: 'X' } });
+  check('PUT con campo desconocido → 400 import.invalid_mapping', putUnknown.status === 400 && putUnknown.json?.code === 'import.invalid_mapping', putUnknown.json?.code);
+  const mPut = await api(mToken, 'PUT', `/imports/${batchId}/mapping`, { mapping: { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoría' } });
+  check('María PUT mapping en batch de Jose → 404', mPut.status === 404, `status=${mPut.status}`);
 
   console.log(failures === 0 ? '\nE2E upload de importación: TODO OK ✓' : `\nE2E upload de importación: ${failures} fallas ✗`);
   process.exit(failures ? 1 : 0);

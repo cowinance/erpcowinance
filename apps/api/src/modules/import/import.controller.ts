@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, UploadedFile, UseFilters, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, UploadedFile, UseFilters, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ImportService } from './import.service';
@@ -56,5 +56,10 @@ export class ImportController {
   @Get('imports/:id/rows')
   rows(@Param('id') id: string, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {
     return this.imports.listRows(id, cursor, limit ? Number(limit) : undefined);
+  }
+
+  @Put('imports/:id/mapping')
+  updateMapping(@Param('id') id: string, @Body('mapping') mapping: unknown) {
+    return this.imports.updateMapping(id, mapping);
   }
 }
