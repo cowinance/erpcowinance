@@ -128,6 +128,37 @@ async function main() {
   const mPut = await api(mToken, 'PUT', `/imports/${batchId}/mapping`, { mapping: { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoría' } });
   check('María PUT mapping en batch de Jose → 404', mPut.status === 404, `status=${mPut.status}`);
 
+  // 13. Preview (3.5) — validación por fila sin escribir, con caravana activa existente
+  const ts = Date.now();
+  const dupTag = `PRV-${ts}`;
+  const createdDup = await api(token, 'POST', '/animals', { tag: dupTag, sex: 'F', category_code: 'vaca' });
+  check('animal con caravana existente creado', createdDup.status === 201 || createdDup.status === 200, `status=${createdDup.status}`);
+  const mixed = [
+    'Caravana,Sexo,Categoría',
+    `${dupTag},F,vaca`, // duplicado: caravana activa existente
+    `N1-${ts},F,vaca`, // válida
+    `N2-${ts},X,vaca`, // inválida: sexo
+    `N1-${ts},M,toro`, // duplicado intra-archivo (N1 repetida)
+    `N3-${ts},F,nope`, // inválida: categoría inexistente
+  ].join('\n');
+  const pvUp = await upload(token, { csv: mixed, filename: 'mixto.csv' });
+  check('upload mixto → 201', pvUp.status === 201, `status=${pvUp.status}`);
+  const pvId = pvUp.json?.id;
+  const prev = await api(token, 'POST', `/imports/${pvId}/preview`);
+  check('preview → 200/201', prev.status === 200 || prev.status === 201, `${prev.status}`);
+  check(
+    'counts: total 5, valid 1, invalid 2, duplicate 2',
+    prev.json?.counts?.total === 5 && prev.json?.counts?.valid === 1 && prev.json?.counts?.invalid === 2 && prev.json?.counts?.duplicate === 2,
+    JSON.stringify(prev.json?.counts),
+  );
+  check('sample con 5 veredictos', Array.isArray(prev.json?.sample) && prev.json.sample.length === 5);
+  const afterPrev = await api(token, 'GET', `/imports/${pvId}`);
+  check('batch queda en previewed', afterPrev.json?.status === 'previewed', afterPrev.json?.status);
+  const pvRows = await api(token, 'GET', `/imports/${pvId}/rows`);
+  check('preview no escribe: filas siguen pending', (pvRows.json?.data ?? []).every((r) => r.status === 'pending'));
+  const mPrev = await api(mToken, 'POST', `/imports/${pvId}/preview`);
+  check('María preview en batch de Jose → 404', mPrev.status === 404, `status=${mPrev.status}`);
+
   console.log(failures === 0 ? '\nE2E upload de importación: TODO OK ✓' : `\nE2E upload de importación: ${failures} fallas ✗`);
   process.exit(failures ? 1 : 0);
 }

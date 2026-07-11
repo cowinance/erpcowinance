@@ -8,5 +8,6 @@ import { AnimalSyncHandler } from './sync/animal-sync.handler';
 @Module({
   controllers: [HerdController],
   providers: [HerdService, AnimalWriteService, WeighingSyncHandler, AnimalSyncHandler],
+  exports: [AnimalWriteService], // consumido por ImportModule para el preview (P2 3.5)
 })
 export class HerdModule {}

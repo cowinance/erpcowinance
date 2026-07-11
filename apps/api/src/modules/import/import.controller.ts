@@ -62,4 +62,9 @@ export class ImportController {
   updateMapping(@Param('id') id: string, @Body('mapping') mapping: unknown) {
     return this.imports.updateMapping(id, mapping);
   }
+
+  @Post('imports/:id/preview')
+  preview(@Param('id') id: string) {
+    return this.imports.preview(id);
+  }
 }

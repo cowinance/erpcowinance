@@ -3,6 +3,7 @@ import { DbService } from '../../db/db.service';
 import { parseCsv } from './csv';
 import { suggestMapping, DuplicateHeadersError } from './mapping';
 import { ANIMAL_IMPORT_DESCRIPTOR, REQUIRED_ANIMAL_IMPORT_FIELDS, type AnimalImportField } from '../herd/animal-import-descriptor';
+import { AnimalWriteService, type RawAnimalRow, type RowError } from '../herd/animal-write.service';
 
 export const MAX_IMPORT_ROWS = 5000;
 const ROWS_PAGE_DEFAULT = 100;
@@ -56,9 +57,33 @@ function asDomain400(e: unknown): never {
   throw e;
 }
 
+export interface PreviewVerdict {
+  row_number: number;
+  verdict: 'valid' | 'invalid' | 'duplicate';
+  errors?: RowError[];
+  reason?: string;
+}
+export interface PreviewDto {
+  counts: { total: number; valid: number; invalid: number; duplicate: number };
+  sample: PreviewVerdict[];
+}
+const PREVIEW_SAMPLE_SIZE = 20;
+
+/** Arma un RawAnimalRow desde la fila cruda y el mapping (campo canónico → encabezado). */
+function buildRawRow(raw: Record<string, string>, mapping: Partial<Record<AnimalImportField, string>>): RawAnimalRow {
+  const out: RawAnimalRow = {};
+  for (const [field, header] of Object.entries(mapping)) {
+    if (header) (out as Record<string, unknown>)[field] = raw[header];
+  }
+  return out;
+}
+
 @Injectable()
 export class ImportService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly animalWrite: AnimalWriteService,
+  ) {}
 
   /**
    * Crea un batch de importación desde un CSV (P2 3.3b): valida entity_type,
@@ -189,5 +214,68 @@ export class ImportService {
     );
     if (!updated) throw new NotFoundException({ code: 'import.batch_not_found', title: 'Import no encontrado' });
     return updated;
+  }
+
+  /**
+   * POST /v1/imports/:id/preview (P2 3.5) — validación por fila SIN escribir
+   * animales ni estados terminales. Reutiliza Herd: `normalizeAndValidate` (pura)
+   * + `loadAnimalImportValidationContext` (2 queries, batch-context, sin N+1).
+   * Es una estimación; el commit revalida (la base puede cambiar). Deja `previewed`.
+   */
+  async preview(id: string): Promise<PreviewDto> {
+    const batch = await this.getBatch(id);
+    if (!EDITABLE_STATES.has(batch.status)) {
+      throw new BadRequestException({ code: 'import.batch_not_editable', title: `El import en estado '${batch.status}' no admite preview` });
+    }
+    const mapping = (batch.mapping ?? {}) as Partial<Record<AnimalImportField, string>>;
+    const missing = REQUIRED_ANIMAL_IMPORT_FIELDS.filter((f) => !mapping[f]);
+    if (missing.length) {
+      throw new BadRequestException({ code: 'import.mapping_missing_required', title: `Faltan campos obligatorios en el mapping: ${missing.join(', ')}` });
+    }
+
+    const rows = await this.db.query<{ row_number: number; raw: Record<string, string> }>(
+      `SELECT row_number, raw FROM import_rows WHERE tenant_id = $1 AND batch_id = $2 ORDER BY row_number`,
+      [this.db.tenant, id],
+    );
+
+    // 1) Validación PURA por fila + recolección de categorías/caravanas únicas.
+    const evaluated = rows.map((r) => ({ row_number: r.row_number, nv: this.animalWrite.normalizeAndValidate(buildRawRow(r.raw, mapping)) }));
+    const categoryCodes: string[] = [];
+    const tags: string[] = [];
+    for (const e of evaluated) {
+      if (e.nv.ok) {
+        categoryCodes.push(e.nv.input.categoryCode);
+        tags.push(e.nv.input.tag);
+      }
+    }
+
+    // 2) Contexto batch (2 queries).
+    const ctx = await this.animalWrite.loadAnimalImportValidationContext({ categoryCodes, tags });
+
+    // 3) Veredicto por fila con el contexto + duplicados intra-archivo.
+    const seen = new Set<string>();
+    const counts = { total: rows.length, valid: 0, invalid: 0, duplicate: 0 };
+    const sample: PreviewVerdict[] = [];
+    for (const e of evaluated) {
+      let v: PreviewVerdict;
+      if (!e.nv.ok) {
+        v = { row_number: e.row_number, verdict: 'invalid', errors: e.nv.errors };
+        counts.invalid++;
+      } else if (!ctx.existingCategoryCodes.has(e.nv.input.categoryCode)) {
+        v = { row_number: e.row_number, verdict: 'invalid', errors: [{ field: 'category_code', code: 'not_found', message: 'Categoría inexistente' }] };
+        counts.invalid++;
+      } else if (ctx.activeTags.has(e.nv.input.tag) || seen.has(e.nv.input.tag)) {
+        v = { row_number: e.row_number, verdict: 'duplicate', reason: ctx.activeTags.has(e.nv.input.tag) ? 'caravana activa existente' : 'caravana duplicada en el archivo' };
+        counts.duplicate++;
+      } else {
+        seen.add(e.nv.input.tag);
+        v = { row_number: e.row_number, verdict: 'valid' };
+        counts.valid++;
+      }
+      if (sample.length < PREVIEW_SAMPLE_SIZE) sample.push(v);
+    }
+
+    await this.db.query(`UPDATE import_batches SET status = 'previewed', updated_at = now() WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
+    return { counts, sample };
   }
 }

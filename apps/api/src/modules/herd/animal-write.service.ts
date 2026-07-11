@@ -204,4 +204,34 @@ export class AnimalWriteService {
 
     return { animalId: animal!.id };
   }
+
+  /**
+   * Contexto de validación en LOTE para el preview de importación (P2 3.5): en
+   * DOS queries resuelve, para todo el batch, qué códigos de categoría existen y
+   * qué caravanas están activas (→ animalId). Evita el N+1 de `checkAgainstDb`
+   * fila por fila. La regla autoritativa sigue en `checkAgainstDb` (el commit
+   * revalida); esto es la resolución batch del contexto que el preview necesita.
+   */
+  async loadAnimalImportValidationContext(input: { categoryCodes: string[]; tags: string[] }): Promise<{
+    existingCategoryCodes: Set<string>;
+    activeTags: Map<string, string>;
+  }> {
+    const codes = [...new Set(input.categoryCodes)].filter((c) => typeof c === 'string' && c !== '');
+    const tags = [...new Set(input.tags)].filter((t) => typeof t === 'string' && t !== '');
+    const cats = codes.length
+      ? await this.db.query<{ code: string }>(`SELECT code FROM animal_categories WHERE code = ANY($1)`, [codes])
+      : [];
+    const active = tags.length
+      ? await this.db.query<{ tag: string; animal_id: string }>(
+          `SELECT ai.value AS tag, a.id AS animal_id
+           FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
+           WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = ANY($2) AND ai.deleted_at IS NULL AND a.status = 'active'`,
+          [this.db.tenant, tags],
+        )
+      : [];
+    return {
+      existingCategoryCodes: new Set(cats.map((c) => c.code)),
+      activeTags: new Map(active.map((r) => [r.tag, r.animal_id])),
+    };
+  }
 }
