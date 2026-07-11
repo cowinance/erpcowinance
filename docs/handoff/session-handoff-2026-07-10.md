@@ -9,45 +9,41 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto entró en la **Fase Producto**: convertir la base en un SaaS que una finca real pueda adoptar. **Siguiente acción concreta: implementar P1.1 (registro self-service de tenant)** — diseño y ADR-0010 aprobados, **código sin empezar**. Ver §0 abajo.
+Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto está en la **Fase Producto**: convertir la base en un SaaS que una finca real pueda adoptar. **P1.1 (registro self-service de tenant) está COMPLETO y validado** (commits `851c05f`, `bc501cb`, `ef99c2b`; ADR-0010). **Siguiente acción concreta: P1.2 (email transaccional, verificación de email, reset de contraseña).** Ver §0 abajo.
 
 > **Ver también:** `docs/sprints/foundation-hardening-executive-summary.md` (resumen del sprint), `docs/product/*` (visión, roadmap 2026, personas, monetización, design partners), `docs/adr/0001-0010`.
 
-## 0. Fase Producto — P1.1 (SIGUIENTE ACCIÓN, aprobado, código sin empezar)
+## 0. Fase Producto — P1.1 COMPLETADO ✅ (implementado y validado)
 
-**Objetivo P1.1:** eliminar la dependencia de `seed.ts` — que una finca nueva se **registre**, se le cree organización + finca, reciba rol `owner`, pueda **login** y **crear su primer animal**, con **aislamiento multi-tenant**, sin datos demo.
+**Objetivo P1.1 (cumplido):** eliminar la dependencia de `seed.ts` — que una finca nueva se **registre**, se le cree organización + finca, reciba rol `owner`, pueda **login** y **crear su primer animal**, con **aislamiento multi-tenant**, sin datos demo. **Ya no está pendiente de implementación.**
 
-**Decisiones aprobadas (esta sesión):**
-- **ADR-0010** creado y commiteado (`25d3d83`): provisioning self-service de tenant.
-- **Ubicación:** se **expande el módulo `identity`** (NO se crea módulo `account`). `auth` sigue solo con autenticación/sesiones.
-- **Flujo desacoplado:** `POST /register` → **201** → el cliente llama `/auth/login`. **Sin auto-login** (no invertir la dependencia identity↔auth).
-- **Creación atómica** en una tx: `user` → `organization` → `company` → `farm` → `user_role_assignment` (rol `owner`).
-- **RLS en flujo público:** el registro corre `@Public` (sin contexto de tenant); usa `db.tx(q => …)`, inserta users/organizations sin GUC, y tras crear la org hace `SET LOCAL app.tenant_id = orgId` (is_local=true) para los inserts RLS (companies, farms).
-- **Separación `bootstrapCatalogs()` / `seedDemo()`** en `seed.ts` (extracción mínima, lógica conservada). `bootstrapCatalogs` corre siempre (idempotente); `seedDemo` solo con flag.
-- **`SEED_DEMO`:** default **ON en dev, OFF en producción** (`NODE_ENV=production`); override `SEED_DEMO=true|false`.
-- **`email_verified_at`:** se agrega la columna a `users` (default NULL) en P1.1 — **sin tocar `auth`** (no va al token ni a `/auth/me`). El envío/verificación y su exposición son **P1.2**.
-- **Campos del registro (mínimos):** `email, password, full_name, organization_name, farm_name, country_code`. Nada más (teléfono/hectáreas/producción → onboarding posterior).
+**Commits (en `main`):**
+- **`851c05f`** — paso 1: split `bootstrapCatalogs` / `seedDemo` + columna `users.email_verified_at`.
+- **`bc501cb`** — paso 2: `IdentityService.register` + `POST /register` (provisioning self-service de tenant).
+- **`ef99c2b`** — paso 3: `account-e2e.mjs` + validación completa.
 
-**Archivos previstos (P1.1):**
-- `apps/api/src/db/seed.ts` (mod: extraer `bootstrapCatalogs`/`seedDemo`).
-- `apps/api/src/db/db.service.ts` (mod: `ALTER users ADD email_verified_at`; `onModuleInit` corre bootstrap siempre + demo por flag).
-- `apps/api/src/modules/identity/identity.service.ts` (**nuevo**: `register()`).
-- `apps/api/src/modules/identity/identity.controller.ts` (mod: `@Public @Post('register')`).
-- `apps/api/src/modules/identity/identity.module.ts` (mod: provider `IdentityService`).
-- `apps/api/src/modules/identity/country-defaults.ts` (**nuevo**: mapa país→currency/locale/tz, inline).
-- `apps/api/scripts/account-e2e.mjs` (**nuevo**: e2e registro→login→animal→aislamiento).
+**Resultados / decisiones definitivas:**
+- **`SEED_DEMO`:** desarrollo **ON por defecto**; producción (`NODE_ENV=production`) **OFF por defecto**; **override explícito soportado** (`SEED_DEMO=true|false|on|off|1|0`). `bootstrapCatalogs()` (catálogos base + roles de sistema) corre **siempre, idempotente**; `seedDemo()` solo bajo el flag. El boot tolera base vacía (sin org por defecto).
+- **Identity:** el **provisioning vive en `identity`** (se expandió el módulo, NO se creó `account`); `auth` sigue solo con autenticación/sesiones. `register` **desacoplado de `auth`** (no lo invoca; no se invierte la dependencia). **Flujo definitivo:** `register` → `login` → sesión (sin auto-login; `POST /register` responde **201** y el cliente llama después a `/auth/login`).
+- **Seguridad:** **creación atómica** en una sola tx `user → organization → company → farm → owner assignment`; **`SET LOCAL app.tenant_id`** correcto para RLS (inserts sin tenant primero; tras crear la org, GUC is_local para companies/farms); **aislamiento multi-tenant probado** (bidireccional, misma caravana válida en tenants distintos, GET cruzado por id → 404).
+- **`email_verified_at`:** columna agregada a `users` (default NULL); **`auth` no la lee** (no va al token ni a `/auth/me`). Su envío/verificación y exposición son **P1.2**.
+- **Defaults por país (inline):** `country-defaults.ts` mapea AR/UY/MX/CO/US/BR → moneda/locale/tz; país no soportado → 400.
+- **Campos del registro (mínimos):** `email, password, full_name, organization_name, farm_name, country_code`.
 
-**Orden de implementación (commit por paso):**
-1. Split `bootstrapCatalogs`/`seedDemo` + columna `email_verified_at`. (Verif: `SEED_DEMO=off` arranca con catálogos y sin demo; con demo, e2e existentes verdes.)
-2. `IdentityService.register` + endpoint `@Public`. (Verif: `curl` registro → 201.)
-3. `account-e2e.mjs`. 4. Gates finales.
+**Archivos entregados (P1.1):**
+- `apps/api/src/db/seed.ts` — `bootstrapCatalogs()` + `seedDemo()` (comportamiento demo idéntico: 2 orgs, 62 animales).
+- `apps/api/src/db/db.service.ts` — `email_verified_at`; `onModuleInit` corre bootstrap siempre + demo por flag; helper `seedDemoEnabled()`; tolera base vacía.
+- `apps/api/src/modules/identity/identity.service.ts` (nuevo) — `register()`.
+- `apps/api/src/modules/identity/identity.controller.ts` — `@Public @Post('register')`.
+- `apps/api/src/modules/identity/identity.module.ts` — provider `IdentityService`.
+- `apps/api/src/modules/identity/country-defaults.ts` (nuevo) — mapa país→currency/locale/tz.
+- `apps/api/scripts/account-e2e.mjs` (nuevo) — e2e registro→login→animal→aislamiento (re-ejecutable, emails únicos por corrida).
 
-**Gates de aceptación P1.1:**
-- **Funcional:** `SEED_DEMO=off` → registro → tenant creado → login → primer animal, sin `seedDemo`.
-- **Seguridad:** Tenant A y Tenant B completamente aislados (test bidireccional).
-- **Regresión:** sin cambios en login/refresh/sync/tenants actuales; `audit:arch`/`auth-e2e`/`sync-e2e`/sim verdes.
-
-**Al abrir la próxima sesión:** empezar la implementación de P1.1 **desde el paso 1** (split de seed + columna), con el proceso de siempre (commit chico por paso, gates tras cada uno). No hay nada de código de P1.1 escrito aún.
+**Gates finales — todos verdes** (verificado contra instancias aisladas: cwd/`.data`/puerto propios, sin tocar servers de otras sesiones):
+- **`account-e2e` 23/23** (funcional sin demo + aislamiento bidireccional).
+- **`auth-e2e` 15/15** · **`sync-e2e` verde** (regresión, con demo).
+- **`audit:arch` verde** (106 tests, 0 ciclos, typechecks incl. mobile).
+- **simulación de sync 2000/2000** (100%).
 
 ---
 
@@ -60,7 +56,7 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 `main` (los commits son pequeños y directos; `git push` directo, ya trackea origin).
 
 ### Último commit
-`docs: ADR-0010 — provisioning self-service de tenant (P1, Fase Producto)` (`25d3d83`). Antes: cierre del Foundation Hardening (F9 `9c3279e`, resumen ejecutivo `c4b6d28`), y la doc de producto (`508eb80`).
+`test(identity): P1.1 paso 3 — e2e de provisioning self-service (account-e2e)` (`ef99c2b`). Antes: `bc501cb` (register + endpoint), `851c05f` (split seed + `email_verified_at`), y `25d3d83` (ADR-0010). Los tres commits de código de P1.1 están en `main`.
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
@@ -69,12 +65,12 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 - `tsc` (packages/domain, puro) — **limpio**.
 
 ### Estado de las pruebas
-- **102 tests verdes**, 13 archivos (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio (retiro + gestación Modo A/B, delegando en las funciones reales del dominio), VOs de dominio (Brand, ids, TagNumber, Weight, Sex), `DomainExceptionFilter`, y los 3 servicios de dominio de F4 (`withdrawal`, `gestation`, `newborn-category`).
+- **106 tests verdes** (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio (retiro + gestación Modo A/B, delegando en las funciones reales del dominio), VOs de dominio (Brand, ids, TagNumber, Weight, Sex), `DomainExceptionFilter`, los 3 servicios de dominio de F4 (`withdrawal`, `gestation`, `newborn-category`), y el relay de Outbox (F5).
 - **Suite de convergencia de sync:** 2000/2000 (100%).
-- **E2E HTTP:** auth 15/15, sync 19/19 — **re-verificados tras cada commit de F4**, incluyendo T4.4 con la nueva lógica de Server Authority activa. Además, verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos (cliente desactualizado simulado): el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date` en los tres casos probados, y un push con valores ya correctos no generó ningún conflicto espurio (ver §3, F4).
+- **E2E HTTP:** `account-e2e` **23/23** (P1.1: registro→login→primer animal sin demo + aislamiento bidireccional), `auth-e2e` **15/15**, `sync-e2e` **verde**. Re-verificados con Server Authority (T4.4) activa. Verificación **dirigida** de T4.4 con pushes deliberadamente incorrectos: el servidor corrigió `meat/milk_withdrawal_until` y `expected_due_date`, y un push ya correcto no generó conflicto espurio (ver §3, F4).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint COMPLETO (F0-F9)** y **pusheado a GitHub**. **Fase Producto iniciada** — ver §0: P1.1 (registro self-service) aprobado con ADR-0010, código sin empezar. `npm run audit:arch` verde (106 tests, 0 ciclos, cobertura 72.54% domain+sync-core).
+**Foundation Hardening Sprint COMPLETO (F0-F9)** y **pusheado a GitHub**. **Fase Producto en curso** — ver §0: **P1.1 (registro self-service) COMPLETO y validado** (ADR-0010; commits `851c05f`, `bc501cb`, `ef99c2b`). `npm run audit:arch` verde (106 tests, 0 ciclos, cobertura 72.54% domain+sync-core). **Siguiente: P1.2** (email transaccional + verificación + reset de contraseña).
 
 ---
 
@@ -207,22 +203,17 @@ Ver §8 (Reglas permanentes). En síntesis: dominio puro, una regla en un solo l
 
 ## 4. Trabajo pendiente (por prioridad)
 
-### Sprint actual (Foundation Hardening) — lo inmediato
-1. **F6** Sync → SyncHandler registry (elimina el switch de `sync.service`) ← siguiente paso (ver §9). Usa los servicios de dominio de F4; cuidado extra al tocar `applyEvent`/`applyPregnancyPut` (T4.4 les agregó lógica de Server Authority — los handlers nuevos deben conservarla, no perderla al partir el switch).
-2. **F5** Event Bus + Outbox.
-3. **F7** Dashboard → service + costura de proyección.
-4. **F8** ADRs restantes: 0001-0003, 0005, 0008 (Sync Handler registry — renumerado, ver `docs/adr/README.md`).
-5. **F9** Métricas de calidad (formalizar tooling + `npm run audit:arch`).
+### Fase Producto — lo inmediato
+1. **P1.2** Ciclo de vida del email y credenciales ← **siguiente paso** (ver §9): email transaccional, verificación de email (consumir `email_verified_at`), reset de contraseña, decidir política definitiva de `email_verified`, manteniendo la separación `identity`/`auth`.
+2. **UI de onboarding** (web + móvil) sobre el endpoint `POST /register` ya existente; experiencia de los primeros 5 minutos (cierra "tiempo-a-primer-registro < 5 min").
+3. **Documentos formales con vencimiento** (completa A6; reusa el motor de alertas).
+4. **Facturación SaaS** (planes + medición de uso; el cobro real requiere pasarela).
 
-### Próximo sprint (tras el hardening): reanudar features de Fase 1
-- **Onboarding de 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min").
-- **Documentos formales con vencimiento** (completa A6; reusa el motor de alertas).
-- **Facturación SaaS** (planes + medición de uso; el cobro real requiere pasarela).
+> Foundation Hardening (F0-F9) está **cerrado**; no hay pasos pendientes de ese sprint.
 
 ### Backlog inmediato
 - **Config / customizing UI** (A3): editar catálogos (razas, categorías, diagnósticos).
 - **Importadores** (Excel / foto de planilla con OCR).
-- **GitHub**: crear remoto y subir (requiere instalar `gh` o dar URL de repo).
 
 ### Backlog futuro (Fase 2+ del producto)
 Inventario, Compras/Ventas/CRM, Finanzas/Contabilidad, Agricultura, Pasturas, Lechería, Feedlot, IoT, Drones, IA, Blockchain, Marketplace, Multiempresa. Hardware de Fase 1 (báscula Bluetooth, RFID, captura por voz) requiere dispositivos reales.
@@ -302,13 +293,19 @@ Acordadas y **obligatorias**:
 
 ## 9. Próximos pasos
 
-> **Único siguiente paso recomendado:**
+> **Único siguiente paso recomendado: P1.2.**
 
-**Implementar F6 — Sync → `SyncHandler` registry.** `sync.service.ts` es hoy un God object (switch gigante por tabla en `applyEvent`/dispatch de ops) — partirlo en handlers co-ubicados con su módulo (herd → animal/weighing; health → treatment/vaccination; repro → breeding/pregnancy/calving), con un registry central que resuelve por tabla. Open/Closed: un módulo nuevo debe ser un handler nuevo, cero ediciones a `sync.service`.
+**P1.2 — Ciclo de vida del email y credenciales.** Con el provisioning self-service ya en producción (P1.1), lo que falta para que una finca real opere su cuenta con seguridad:
+- **Email transaccional** (proveedor de envío detrás de un puerto; el envío real requiere integración/API key).
+- **Verificación de email** (consumir la columna `users.email_verified_at` que P1.1 ya dejó lista: token de verificación, endpoint, y **decidir la política definitiva de `email_verified`** — si bloquea login, si es soft-gate, y su exposición en el token/`/auth/me`).
+- **Reset de contraseña** (flujo por email con token de un solo uso).
+- **Restricción arquitectónica:** **mantener la separación `identity` / `auth`** — `identity` posee el provisioning y el ciclo de vida de la cuenta; `auth` sigue solo con autenticación/sesiones. La verificación de email vive en `identity`; `auth` solo la consulta si la política decide que login la exige.
 
-**Punto de cuidado real (no presente antes de esta sesión):** T4.4 (F4) le agregó a `applyEvent` (rama `treatments`) y a `applyPregnancyPut` lógica de **Server Authority** — recompute con las funciones de dominio, comparación, y auditoría en `sync_conflicts` con `HlcClock` propio del servidor para el campo LWW. Al partir el switch en handlers, **esa lógica tiene que migrar completa a los handlers `treatments` y `pregnancies`** — no es solo mover el INSERT/UPDATE, es mover el recompute + el HLC del servidor + el registro de conflictos. Usar los tests E2E dirigidos que se corrieron para T4.4 (§3, F4) como referencia de qué comportamiento no debe cambiar al partir el switch.
+**También falta (producto, no cubierto por P1.1/P1.2):**
+- **UI de onboarding** en web y móvil (formulario de registro, primeros pasos) — hoy `register` existe solo como endpoint HTTP, sin pantalla.
+- **Experiencia de los primeros 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min" del roadmap de producto).
 
-Después de F6 → pausa de revisión → F5 (Event Bus + Outbox, fundación sin migrar consumidores).
+**Nota histórica (Foundation Hardening, ya cerrado):** F6 partió `sync.service` en `SyncHandler` por bounded context preservando la lógica de Server Authority de T4.4; F5 instaló Event Bus + Outbox. No hay pasos pendientes del sprint de hardening.
 
 ---
 
@@ -347,12 +344,12 @@ Comandos: `npm test` (Vitest) · `npm run build -w @cowinance/domain` · `cd app
 
 ## 12. Resumen final — "¿Qué necesita saber un arquitecto para no cometer errores?"
 
-Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. **Hoy NO se agregan features**: estamos en un **Foundation Hardening Sprint** que mejora la arquitectura **sin cambiar comportamiento** (F0-F4 hechas, incluye Server Authority; sigue F6). La regla número uno: **behavior-preserving** — antes y después de cada cambio, la API, la convergencia de sync y la UI deben ser idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `auth-e2e` 15/15, `sync-e2e` 19/19, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
+Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. El **Foundation Hardening Sprint (F0-F9) está cerrado** y el proyecto está en la **Fase Producto**: P1.1 (registro self-service de tenant) **completo y validado**; siguiente P1.2 (ciclo de vida del email y credenciales). Al agregar features de producto sigue rigiendo la regla número uno: **behavior-preserving en lo existente** — la API, la convergencia de sync y la UI ya construidas deben seguir idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `account-e2e` 23/23, `auth-e2e` 15/15, `sync-e2e` verde, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
 
 El corazón de la deuda **ya se eliminó en F4**: retiro sanitario, gestación (dos modos) y categoría de cría al nacer vivían triplicados en `health.service`/`repro.service`/`SyncContext` móvil — ahora son funciones puras en `packages/domain` (`health/withdrawal.ts`, `reproduction/gestation.ts`, `reproduction/newborn-category.ts`), consumidas por los tres lugares. Y desde **T4.4/ADR-0007**, el servidor de sync **ya no confía ciegamente** en lo que calcula el cliente: recomputa y corrige (sin tolerancia) para los campos derivados de reglas — con un mecanismo distinto según si el dato es un evento inmutable o un campo LWW (para este último, la corrección del servidor participa del mismo `HlcClock` que los dispositivos, no es un `UPDATE` por fuera del mecanismo de sync). `classifyCategory` completo (edad+sexo+especie, catálogo configurable) **no se construyó**: no existía como comportamiento real, hubiera sido una feature nueva disfrazada de refactor — quedó en backlog de producto.
 
 `packages/domain` es **sagrado: 100% puro**, sin ninguna dependencia de infraestructura (el `tsconfig` lo fuerza; si un import no compila, es a propósito). Aplicá **YAGNI** con rigor: nada de Result/Either, fábricas de errores, carpetas vacías ni abstracciones "por si acaso"; si diferís algo, escribí un ADR. **Ninguna abstracción de dominio (VO, `DomainError`, servicio, categoría de conflicto de sync) se crea sin demostrar antes qué problema real resuelve y por qué lo existente no alcanza** — regla confirmada tres veces en este sprint (`Breed` como VO en F2.4, el catálogo de errores en F3, `recompute_mismatch` como tipo de conflicto en T4.4) y ya generalizada más allá de los VOs. Antes de proponer cualquier abstracción nueva, investigá el estado real del código (no asumas duplicación ni necesidad — verificala).
 
-Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q` **y preservar la lógica de Server Authority que T4.4 agregó a `applyEvent`/`applyPregnancyPut`** al partirlos en handlers; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`, ya usado también para `domain` desde F4.1). No hay CI ni remoto Git — **creá el remoto pronto** (todo vive local) y corré los gates a mano. Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
+Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q` **y preservar la lógica de Server Authority que T4.4 agregó a `applyEvent`/`applyPregnancyPut`** al partirlos en handlers; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`, ya usado también para `domain` desde F4.1). No hay CI — corré los gates a mano (el remoto Git ya existe: `origin/main`, ver §0). Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
 
-**Siguiente acción concreta:** implementar **F6 — Sync → SyncHandler registry** (§9).
+**Siguiente acción concreta:** implementar **P1.2 — ciclo de vida del email y credenciales** (email transaccional, verificación de email, reset de contraseña; mantener la separación `identity`/`auth`). Ver §9.
