@@ -1,27 +1,38 @@
-/** Tokens Cowinance UI (doc Design System §4) para React Native. */
+/**
+ * Adaptador de tokens para React Native (P1.4.1, ADR-0013).
+ *
+ * `T` se DERIVA de la fuente canónica única (@cowinance/design-tokens); acá NO se
+ * re-tipean valores hex, radios ni ningún token a mano. Preserva la API `T.*` y
+ * los mismos valores que hoy (tema claro) → los ~15 consumidores no se tocan.
+ * El móvil no usa `raised`/`accent`/`accentSoft`/`shadow`; se omiten como antes.
+ */
+import { primitive, semantic, radius } from '@cowinance/design-tokens';
+
+const L = semantic.light;
+
 export const T = {
-  brand900: '#0E2A20',
-  brand700: '#1F4E3D',
-  brand500: '#2E7D5B',
-  brand300: '#7FBFA3',
-  brand100: '#E7F2EC',
-  amber: '#D97B2B',
+  brand900: primitive.brand['900'],
+  brand700: primitive.brand['700'],
+  brand500: primitive.brand['500'],
+  brand300: primitive.brand['300'],
+  brand100: primitive.brand['100'],
+  amber: primitive.amber['500'],
 
-  canvas: '#FAFAF7',
-  surface: '#FFFFFF',
-  sunken: '#F2F2ED',
-  borderSubtle: '#E8E8E2',
-  borderStrong: '#D1D1C9',
-  ink: '#191C1A',
-  ink2: '#5A605C',
-  ink3: '#8B918D',
+  canvas: L.bg.canvas,
+  surface: L.bg.surface,
+  sunken: L.bg.sunken,
+  borderSubtle: L.border.subtle,
+  borderStrong: L.border.strong,
+  ink: L.text.primary,
+  ink2: L.text.secondary,
+  ink3: L.text.tertiary,
 
-  success: '#1E7F4F',
-  warning: '#B45309',
-  danger: '#B3261E',
-  info: '#20618A',
+  success: L.status.success,
+  warning: L.status.warning,
+  danger: L.status.danger,
+  info: L.status.info,
 
-  radiusSm: 6,
-  radiusMd: 10,
-  radiusLg: 16,
+  radiusSm: radius.sm,
+  radiusMd: radius.md,
+  radiusLg: radius.lg,
 };
