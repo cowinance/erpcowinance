@@ -108,6 +108,90 @@ export class DbService implements OnModuleInit {
     CREATE INDEX IF NOT EXISTS ix_event_outbox_unpublished ON event_outbox (created_at) WHERE published_at IS NULL;
   `;
 
+  /**
+   * Migración de datos del ERP (P2 oleada 2.4, ADR-0016 relacionado). Dos tablas:
+   *  - import_batches: cabecera del job. RLS forzada + excepción de DESCUBRIMIENTO
+   *    (`app.job_scope='import_worker'`) para que el futuro procesador reclame
+   *    trabajo cross-tenant; ningún path de request fija ese GUC.
+   *  - import_rows: filas del archivo (dato del cliente). RLS estándar por
+   *    app.tenant_id (está en RLS_TABLES; la política la aplica rlsMigration).
+   * FK COMPUESTA multi-tenant (tenant_id, batch_id) -> (tenant_id, id): impide
+   * estructuralmente asociar una fila a un batch de otro tenant, aun ante un bug
+   * de código. SIN ON DELETE CASCADE (política de borrado de batches indefinida).
+   * `tenant_id` redundante en import_rows es deliberado: defensa estructural.
+   * Idempotente: la UNIQUE(tenant_id,id) la referencia la FK, así que se dropea
+   * primero la FK y luego la UNIQUE antes de re-crearlas (orden de dependencia;
+   * sin plpgsql). Esta oleada NO crea ImportClaimRepository, endpoints, procesador
+   * ni filas reales.
+   */
+  private static readonly IMPORT_MIGRATION = `
+    CREATE TABLE IF NOT EXISTS import_batches (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL,
+      entity_type varchar(64) NOT NULL DEFAULT 'animal',
+      source_filename varchar(255),
+      file_ref varchar(255),
+      mapping jsonb,
+      reconcile_mode varchar(32) NOT NULL DEFAULT 'create_skip_duplicates',
+      status varchar(32) NOT NULL DEFAULT 'uploaded',
+      phase varchar(16),
+      total_rows int NOT NULL DEFAULT 0,
+      created_count int NOT NULL DEFAULT 0,
+      skipped_count int NOT NULL DEFAULT 0,
+      invalid_count int NOT NULL DEFAULT 0,
+      error_count int NOT NULL DEFAULT 0,
+      heartbeat_at timestamptz,
+      started_at timestamptz,
+      finished_at timestamptz,
+      created_by uuid,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    ALTER TABLE import_batches DROP CONSTRAINT IF EXISTS ck_import_batches_status;
+    ALTER TABLE import_batches ADD CONSTRAINT ck_import_batches_status CHECK (
+      status IN ('uploaded','mapped','previewed','queued','processing','completed','completed_with_errors','failed'));
+    CREATE INDEX IF NOT EXISTS ix_import_batches_discovery ON import_batches (status, created_at);
+
+    CREATE TABLE IF NOT EXISTS import_rows (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL,
+      batch_id uuid NOT NULL,
+      row_number int NOT NULL,
+      raw jsonb NOT NULL,
+      normalized jsonb,
+      status varchar(16) NOT NULL DEFAULT 'pending',
+      skip_reason varchar(64),
+      errors jsonb,
+      warnings jsonb,
+      resulting_entity_id uuid,
+      processed_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (batch_id, row_number)
+    );
+    ALTER TABLE import_rows DROP CONSTRAINT IF EXISTS ck_import_rows_status;
+    ALTER TABLE import_rows ADD CONSTRAINT ck_import_rows_status CHECK (
+      status IN ('pending','created','skipped','invalid','error'));
+    CREATE INDEX IF NOT EXISTS ix_import_rows_batch ON import_rows (batch_id, row_number);
+
+    -- FK compuesta y su UNIQUE de respaldo (orden de dependencia: FK primero al dropear).
+    ALTER TABLE import_rows DROP CONSTRAINT IF EXISTS fk_import_rows_batch;
+    ALTER TABLE import_batches DROP CONSTRAINT IF EXISTS uq_import_batches_tenant_id_id;
+    ALTER TABLE import_batches ADD CONSTRAINT uq_import_batches_tenant_id_id UNIQUE (tenant_id, id);
+    ALTER TABLE import_rows ADD CONSTRAINT fk_import_rows_batch
+      FOREIGN KEY (tenant_id, batch_id) REFERENCES import_batches (tenant_id, id);
+
+    -- RLS de import_batches: tenant + excepción de descubrimiento del worker.
+    -- import_rows recibe la política estándar vía rlsMigration (RLS_TABLES).
+    ALTER TABLE import_batches ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE import_batches FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation ON import_batches;
+    CREATE POLICY tenant_isolation ON import_batches
+      USING (tenant_id = current_setting('app.tenant_id', true)::uuid
+             OR current_setting('app.job_scope', true) = 'import_worker')
+      WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid
+                  OR current_setting('app.job_scope', true) = 'import_worker');
+  `;
+
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
   private static readonly RLS_TABLES = [
     'companies',
@@ -144,6 +228,9 @@ export class DbService implements OnModuleInit {
     'sync_changesets',
     'sync_conflicts',
     'sync_row_state',
+    // import_rows: política estándar por tenant. import_batches NO va aquí: lleva
+    // una política bespoke (tenant + excepción app.job_scope) en IMPORT_MIGRATION.
+    'import_rows',
   ];
 
   /**
@@ -178,6 +265,10 @@ export class DbService implements OnModuleInit {
       this.logger.log('Esquema cargado.');
     }
     await this.db.exec(DbService.SYNC_MIGRATION);
+    // Tablas de import ANTES de rlsMigration: import_rows debe existir para que la
+    // política estándar (RLS_TABLES) se le aplique; import_batches trae su propia
+    // política bespoke dentro de IMPORT_MIGRATION.
+    await this.db.exec(DbService.IMPORT_MIGRATION);
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
