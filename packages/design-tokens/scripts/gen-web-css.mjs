@@ -16,7 +16,7 @@ const TARGET = resolve(REPO_ROOT, 'apps/web/src/app/tokens.generated.css');
 const DIST = resolve(__dirname, '../dist/tokens.js');
 
 const require = createRequire(import.meta.url);
-const { primitive, semantic, radius, font, isRef } = require(DIST);
+const { primitive, semantic, radius, font, typeRole, typeCompat, isRef } = require(DIST);
 
 const cssValue = (v) => (isRef(v) ? `var(--${v.$ref})` : v);
 
@@ -99,6 +99,13 @@ function buildCss() {
     ['font-sans', font.sans],
     ['font-mono', font.mono],
   ];
+  // Escala tipográfica — roles semánticos ESTABLES (ADR-0014). Solo tamaño:
+  // line-height/peso/tracking siguen siendo ejes separados en P1.4.3.
+  // (Spacing NO se emite: la web ya consume la escala de Tailwind. Densidad
+  //  tampoco: se define en la fuente y se aplica en P1.4.4.)
+  for (const [name, size] of Object.entries(typeRole)) theme.push([`text-${name}`, `${size}px`]);
+  // Aliases TEMPORALES de compatibilidad (DEUDA P1.4.3; se eliminan al converger).
+  for (const [n, size] of Object.entries(typeCompat)) theme.push([`text-compat-${n}`, `${size}px`]);
   for (const [name, value] of theme) lines.push(`  --${name}: ${value};`);
   lines.push('}');
   lines.push(''); // termina en newline

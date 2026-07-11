@@ -76,4 +76,24 @@
   --radius-lg: 16px;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --text-display: 30px;
+  --text-title: 20px;
+  --text-heading: 17px;
+  --text-subheading: 15px;
+  --text-input: 14px;
+  --text-body: 13px;
+  --text-label: 12px;
+  --text-caption: 11px;
+  --text-hero: 56px;
+  --text-compat-9: 9px;
+  --text-compat-10: 10px;
+  --text-compat-16: 16px;
+  --text-compat-18: 18px;
+  --text-compat-22: 22px;
+  --text-compat-24: 24px;
+  --text-compat-26: 26px;
+  --text-compat-28: 28px;
+  --text-compat-32: 32px;
+  --text-compat-48: 48px;
+  --text-compat-64: 64px;
 }
