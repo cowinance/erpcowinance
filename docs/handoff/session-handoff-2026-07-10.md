@@ -9,7 +9,7 @@
 ## 1. Estado actual del proyecto
 
 ### Resumen ejecutivo
-Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. Fase Producto: ADR-0010 (P1.1) y ADR-0011 (P1.2). El proyecto está en la **Fase Producto**: convertir la base en un SaaS que una finca real pueda adoptar. **P1.1 (registro self-service) y P1.2 (email transaccional + verificación + reset) están COMPLETOS y validados** (P1.1: ADR-0010; P1.2: ADR-0011). El backend de onboarding SaaS está cerrado end-to-end. **Siguiente acción concreta: UI de onboarding (web + móvil) sobre los endpoints existentes + experiencia de los primeros 5 minutos.** Ver §0 / §0bis / §9.
+Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y multi-tenant. El **alcance ganadero de Fase 1 está construido y verificado** (Hato, Sanidad, Reproducción, Producción/manga, Mapa, Reportes, Alertas, Fotos, Planes sanitarios), sobre 3 apps (`api` NestJS, `web` Next.js, `mobile` Expo) + 3 packages (`db`, `sync-core`, `domain`). El **Foundation Hardening Sprint (F0-F9) está COMPLETO** — dominio puro con VOs y servicios, Server Authority en sync, sync en handlers por bounded context, Event Bus + Outbox, dashboard desacoplado, 9 ADRs (0001-0009), y `audit:arch`. El proyecto está en la **Fase Producto**: ADR-0010 (P1.1), ADR-0011 (P1.2), ADR-0012 (P1.3). **P1.1 (registro self-service), P1.2 (email/verificación/reset) y P1.3 (onboarding y experiencia inicial web+móvil) están COMPLETOS y validados.** P1.3 llevó el onboarding SaaS a la UI **sobre el diseño existente** (no fue un rediseño): shell de auth web, verificación/recuperación, banner suave, empty-states, capa de cuenta móvil separada del sync, **corrección de una fuga local multi-tenant** (P1.3.6a), y una suite **Playwright 5/5**. **Siguiente acción concreta recomendada: P1.4 — Fundamentos de experiencia y sistema de diseño (empezar por auditoría + propuesta, no implementación).** Ver §0ter / §9.
 
 > **Ver también:** `docs/sprints/foundation-hardening-executive-summary.md` (resumen del sprint), `docs/product/*` (visión, roadmap 2026, personas, monetización, design partners), `docs/adr/0001-0011`.
 
@@ -76,6 +76,31 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 
 ---
 
+## 0ter. Fase Producto — P1.3 COMPLETADO ✅ (onboarding y experiencia inicial web+móvil)
+
+**Objetivo P1.3 (cumplido):** la cara de usuario de los primeros cinco minutos, **sobre el diseño visual existente** (no un rediseño). **ADR-0012** documenta las decisiones (web dueña del ciclo de cuenta; móvil de campo; cuenta separada del sync; `/auth/me` como fuente; países vía DTO público; onboarding por `total_animals`; aislamiento local por `(user_id, tenant_id, farm_id)`; Playwright serial). **Ya no está pendiente.**
+
+**Commits (14, en `main`):**
+- **`8e2212a`** P1.3.1 — `email_verified` en `/auth/me`.
+- **`06dd993`** P1.3.2 — `GET /catalogs/countries` público (DTO `{code,name}`; `country-defaults.ts` sigue canónica).
+- **`9506330`** P1.3.3 — shell de auth web (`/register` con auto-login + fallback, links, allowlist de middleware, sin credenciales demo).
+- **`86cbb4f`** + **`b84b37d`** P1.3.4 — helpers de auth público (`postPublic`/`clearSession`/`hasSession`, `AuthShell`) + páginas `/verify-email`, `/forgot-password`, `/reset-password`.
+- **`1ed2a5d`** P1.3.5 — banner suave de verificación (revalida `/auth/me` en foco/visibilidad/manual) + empty-state guiado del dashboard.
+- **`319266a`** P1.3.5a — **fix**: empty-state por `total_animals` (inventario no borrado, cualquier estado), no `active_animals`; distingue "finca nunca poblada" de "sin animales activos".
+- **`bfff874`** + **`f984b60`** + **`b8e84fc`** P1.3.6 — móvil: `AccountContext` separado del sync (identidad + `email_verified` de `/auth/me` vía `authFetch`); fix del saludo hardcodeado "Jose"; aviso de verificación no bloqueante; forgot in-app; empty-states de hato/home y **gating de las 7 capturas** cuando el store está vacío; `EXPO_PUBLIC_WEB_URL`.
+- **`5fc0baf`** P1.3.6a — **fix crítico**: aislamiento local por usuario/tenant (ver abajo).
+- **`23e2a71`** + **`6eab8a3`** + **`4f2997d`** P1.3.7 — suite Playwright (infra + 5 escenarios + docs).
+
+**Funcionalidades entregadas:**
+- **Web:** registro + auto-login (con fallback "Tu cuenta fue creada" si el login post-registro falla, sin re-registrar); `/verify-email`, `/forgot-password`, `/reset-password` (anti-enum, tokens single-use, sin exponer el token); banner suave de email pendiente que se auto-oculta al verificar (revalida en foco); empty-state guiado "Cargar primer animal" y transición a dashboard operativo; login con links a registro/recuperación y sin credenciales demo.
+- **Móvil:** capa de cuenta separada del sync (nombre/email/rol/`email_verified` de `/auth/me`, saludo neutral en frío, refresco en foreground); aviso de verificación no bloqueante (reenvío anti-enum; el enlace se abre en la web); recuperación iniciada in-app (`POST /forgot-password`); empty-states reales de hato/home que distinguen carga/error/vacío; captura deshabilitada con 0 animales; el primer animal se carga desde la web (sin alta móvil).
+
+**Corrección de aislamiento multi-tenant local (P1.3.6a):** el store operativo se persistía solo por `serverDeviceId` sin registrar su dueño; al cambiar de usuario, un segundo usuario restauraba el store del primero (fuga local; el backend ya bloqueaba el uso cross-tenant del `device_id` con 404, así que además quedaba inservible). Ahora el store es propiedad de `(user_id, tenant_id, farm_id)`: mismo dueño → se conserva (offline preservado); distinto dueño → se descarta + `device_id` nuevo + bootstrap limpio con carga neutral; con **operaciones pendientes** del dueño anterior el cambio se **bloquea** (no se pierden ni se envían bajo la cuenta nueva). Verificado con 2 tenants reales (H1-H8).
+
+**Gates finales P1.3 — todos verdes:** `Playwright` **5/5** (2 corridas consecutivas; una en el gate final) · `account-e2e` 23/23 · `identity-email-e2e` 22/22 · `auth-e2e` 16/16 (incluye assert `email_verified`) · `sync-e2e` verde · `audit:arch` verde (114 tests, 0 ciclos, typechecks incl. mobile) · `next build` + `nest build` limpios · sim **2000/2000**.
+
+---
+
 ### Estado general del repositorio
 - **Working tree:** limpio (solo `.claude/settings.local.json`, config local del agente, no se sube).
 - **Remoto:** ✅ configurado y **pusheado** — `origin` → https://github.com/cowinance/erpcowinance.git; `main` trackea `origin/main`; local = remoto. `gh` CLI **no** instalado (auth por credential helper del sistema).
@@ -85,7 +110,7 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 `main` (los commits son pequeños y directos; `git push` directo, ya trackea origin).
 
 ### Último commit
-`test(identity): P1.2.5 — e2e consolidado de email` (`96ba4fc`), más el commit de docs (ADR-0011 + este handoff) que lo sigue. Cadena P1.2: `f1de451` (tokens) → `1c0ddec` (puerto EmailSender) → `2eeb84e` (verificación) → `74282ee` (reset) → `96ba4fc` (e2e). Antes, P1.1: `851c05f`, `bc501cb`, `ef99c2b`.
+Al cerrar P1.3.7: `test(web): P1.3.7 — escenario de primer animal + doc de ejecución` (`4f2997d`), más los commits de cierre documental de P1.3.8 (ADR-0012 + índice, docs/config, handoff). Los 14 commits de P1.3.1-P1.3.7 están listados en §0ter. **Pendientes de push** (ver "Rama actual").
 
 ### Estado de compilación
 - `nest build` (api) — **limpio**.
@@ -96,10 +121,11 @@ Cowinance es una **plataforma ERP bovina** (carne/leche/mixta), offline-first y 
 ### Estado de las pruebas
 - **114 tests verdes** (Vitest). Incluye `sync-core` (HLC/merge/convergencia), golden de reglas de negocio (retiro + gestación Modo A/B), VOs de dominio (Brand, ids, TagNumber, Weight, Sex), `DomainExceptionFilter`, los 3 servicios de dominio de F4 (`withdrawal`, `gestation`, `newborn-category`), el relay de Outbox (F5), el ciclo de vida de `EmailActionTokenService` (P1.2, contra PGlite real) y el adaptador `LogEmailSender`.
 - **Suite de convergencia de sync:** 2000/2000 (100%).
-- **E2E HTTP:** `account-e2e` **23/23** (P1.1: registro→login→primer animal + aislamiento bidireccional), `identity-email-e2e` **22/22** (P1.2: verificación + reset + revocación de sesiones), `auth-e2e` **15/15**, `sync-e2e` **verde**.
+- **E2E HTTP:** `account-e2e` **23/23** (P1.1), `identity-email-e2e` **22/22** (P1.2), `auth-e2e` **16/16** (incluye assert `email_verified` de P1.3.1), `sync-e2e` **verde**.
+- **E2E web (Playwright, P1.3.7):** **5/5** (registro+auto-login, fallback, verificación, recuperación+reset, primer animal), serial; instancias aisladas en puertos 3210/3211 y temporales fuera del repo. `npm run e2e:web` (ver `apps/web/e2e/README.md`).
 
 ### Estado del sprint actual
-**Foundation Hardening Sprint COMPLETO (F0-F9)**. **Fase Producto en curso** — **P1.1 (registro self-service, ADR-0010) y P1.2 (email/verificación/reset, ADR-0011) COMPLETOS y validados** (ver §0 y §0bis). `npm run audit:arch` verde (114 tests, 0 ciclos, cobertura 72.54% domain+sync-core). **Siguiente: UI de onboarding (web + móvil) + experiencia de 5 minutos** (§9).
+**Foundation Hardening Sprint COMPLETO (F0-F9)**. **Fase Producto en curso** — **P1.1 (ADR-0010), P1.2 (ADR-0011) y P1.3 (onboarding + experiencia inicial, ADR-0012) COMPLETOS y validados** (ver §0 / §0bis / §0ter). `npm run audit:arch` verde (114 tests, 0 ciclos, cobertura 72.54% domain+sync-core); Playwright 5/5. **Siguiente recomendado: P1.4 — Fundamentos de experiencia y sistema de diseño (auditoría + propuesta primero)** (§9).
 
 ---
 
@@ -233,12 +259,12 @@ Ver §8 (Reglas permanentes). En síntesis: dominio puro, una regla en un solo l
 ## 4. Trabajo pendiente (por prioridad)
 
 ### Fase Producto — lo inmediato
-1. **P1.2** Ciclo de vida del email y credenciales ← **siguiente paso** (ver §9): email transaccional, verificación de email (consumir `email_verified_at`), reset de contraseña, decidir política definitiva de `email_verified`, manteniendo la separación `identity`/`auth`.
-2. **UI de onboarding** (web + móvil) sobre el endpoint `POST /register` ya existente; experiencia de los primeros 5 minutos (cierra "tiempo-a-primer-registro < 5 min").
+1. **P1.4 — Fundamentos de experiencia y sistema de diseño** ← **siguiente paso recomendado** (ver §9): dirección visual, tokens/tipografía/espaciado/color/componentes, navegación e IA, componentes reutilizables web+móvil, consistencia/accesibilidad/responsive. **Empieza por auditoría + propuesta, no implementación masiva.**
+2. **Candidatos posteriores** (ver §9): invitaciones y roles multiusuario; CRUD de lotes y potreros; endurecimiento de seguridad + rate limiting; cookies seguras web (`httpOnly`); deep-linking móvil; stores móviles namespaced (multicuenta offline).
 3. **Documentos formales con vencimiento** (completa A6; reusa el motor de alertas).
 4. **Facturación SaaS** (planes + medición de uso; el cobro real requiere pasarela).
 
-> Foundation Hardening (F0-F9) está **cerrado**; no hay pasos pendientes de ese sprint.
+> Foundation Hardening (F0-F9) **cerrado**; P1.1/P1.2/P1.3 (Fase Producto) **cerrados** — no hay pasos pendientes de esos tramos.
 
 ### Backlog inmediato
 - **Config / customizing UI** (A3): editar catálogos (razas, categorías, diagnósticos).
@@ -322,15 +348,18 @@ Acordadas y **obligatorias**:
 
 ## 9. Próximos pasos
 
-> **Único siguiente paso recomendado: UI de onboarding + experiencia de 5 minutos.**
+> **Único siguiente paso recomendado: P1.4 — Fundamentos de experiencia y sistema de diseño.**
 
-El **backend del onboarding SaaS está completo end-to-end** (P1.1 provisioning + P1.2 email/verificación/reset). Lo que falta es la **cara de usuario**:
-- **UI de onboarding (web + móvil)** sobre los endpoints ya existentes: registro (`POST /register`), verificación (`/verify-email`, `/resend-verification`), y recuperación (`/forgot-password`, `/reset-password`). Hoy todo existe solo como HTTP, sin pantallas. Sugerencia: mostrar un banner "verificá tu email" (política soft, no bloquea), y las pantallas de reset con el token que llega por link.
-- **Experiencia de los primeros 5 minutos** (cierra el criterio "tiempo-a-primer-registro < 5 min" del roadmap): del registro al primer animal cargado, con fricción mínima.
+El **onboarding SaaS está completo end-to-end** (P1.1 provisioning + P1.2 email/verificación/reset + P1.3 UI web/móvil). P1.3 construyó las pantallas **sobre el diseño existente**, sin un sistema de diseño formal. Antes de seguir ampliando módulos funcionales conviene una **fase de diseño de producto y sistema visual**:
 
-**Candidatos siguientes de producto** (ver §4): documentos formales con vencimiento (completa A6, reusa alertas); facturación SaaS (planes + uso; cobro real requiere pasarela).
+**P1.4 — Fundamentos de experiencia y sistema de diseño.** Objetivo: definir la dirección visual limpia y profesional de Cowinance; establecer **tokens de diseño** (tipografía, espaciado, color, componentes); revisar **navegación y arquitectura de información**; crear **componentes reutilizables** web y móvil; mejorar **consistencia, accesibilidad y responsive**; evitar rediseñar pantallas de forma aislada. **Debe empezar solo con auditoría + propuesta, no con implementación masiva.**
 
-**Deuda visible de P1.2 (registrada, no bloqueante):** proveedor de email real (solo existe el adaptador `log` de dev; SMTP/SES/Resend = adaptador nuevo); rate limiting / anti-abuso en las superficies públicas (`register`/`forgot`/`resend`); gating de acciones sensibles por `email_verified` (el estado existe, su enforcement es futuro). Todo listado en "Fuera de alcance" de ADR-0011.
+**Candidatos posteriores (registrados, no ahora):** invitaciones y roles multiusuario; CRUD de lotes y potreros; endurecimiento de seguridad + **rate limiting** (superficies públicas `register`/`forgot`/`resend`); **cookies seguras web** (`httpOnly`); **deep-linking móvil**; **stores móviles namespaced** para varias cuentas/fincas offline (Alternativa C-2 de ADR-0012). Producto: documentos formales con vencimiento (A6); facturación SaaS.
+
+**Deuda visible (registrada, no bloqueante):**
+- **P1.2/ADR-0011:** proveedor de email real (solo el adaptador `log` de dev; SMTP/SES/Resend = adaptador nuevo); gating de acciones sensibles por `email_verified` (el estado existe, su enforcement es futuro).
+- **P1.3/ADR-0012:** dependencia de conectividad para registro/login/primer bootstrap; **sin alta móvil del primer animal** (se carga desde la web); **sin multicuenta offline simultáneo** (un store por dispositivo); cambio de cuenta con pendientes requiere intervención del usuario; puertos E2E fijos (3210/3211, verificados) no dinámicos; pantallas nuevas sobre el diseño actual (deuda que P1.4 aborda).
+- **CI:** el repo **no tiene workflow de CI** todavía; los gates (incl. Playwright) se corren a mano. Comando listo: `npx playwright install --with-deps chromium && npm run e2e:web`. Cablear CI (audit:arch + E2E, jobs separados, sin compartir DB/log) es **deuda inmediata** — no se hizo en P1.3.8 para no reestructurar CI de cero solo por esto.
 
 **Nota histórica (Foundation Hardening, ya cerrado):** F6 partió `sync.service` en `SyncHandler` por bounded context preservando la lógica de Server Authority de T4.4; F5 instaló Event Bus + Outbox. No hay pasos pendientes del sprint de hardening.
 
@@ -371,7 +400,7 @@ Comandos: `npm test` (Vitest) · `npm run build -w @cowinance/domain` · `cd app
 
 ## 12. Resumen final — "¿Qué necesita saber un arquitecto para no cometer errores?"
 
-Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. El **Foundation Hardening Sprint (F0-F9) está cerrado** y el proyecto está en la **Fase Producto**: P1.1 (registro self-service de tenant) **completo y validado**; siguiente P1.2 (ciclo de vida del email y credenciales). Al agregar features de producto sigue rigiendo la regla número uno: **behavior-preserving en lo existente** — la API, la convergencia de sync y la UI ya construidas deben seguir idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `account-e2e` 23/23, `auth-e2e` 15/15, `sync-e2e` verde, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
+Cowinance es un ERP ganadero real, offline-first y multi-tenant, con el **alcance funcional de Fase 1 ya construido y funcionando**. El **Foundation Hardening Sprint (F0-F9) está cerrado** y el proyecto está en la **Fase Producto**: P1.1 (registro self-service), P1.2 (email/verificación/reset) y **P1.3 (onboarding + experiencia inicial web/móvil, ADR-0012)** **completos y validados**; siguiente recomendado **P1.4 (fundamentos de experiencia y sistema de diseño — auditoría + propuesta primero)**. Al agregar features de producto sigue rigiendo la regla número uno: **behavior-preserving en lo existente** — la API, la convergencia de sync y la UI ya construidas deben seguir idénticas; el oráculo es `docs/golden/business-rules.md` + los gates (`sync-core` sim 2000/2000, `account-e2e` 23/23, `identity-email-e2e` 22/22, `auth-e2e` 16/16, `sync-e2e` verde, Playwright 5/5, builds limpios, madge 0 ciclos). Corré esos gates después de **cada** cambio.
 
 El corazón de la deuda **ya se eliminó en F4**: retiro sanitario, gestación (dos modos) y categoría de cría al nacer vivían triplicados en `health.service`/`repro.service`/`SyncContext` móvil — ahora son funciones puras en `packages/domain` (`health/withdrawal.ts`, `reproduction/gestation.ts`, `reproduction/newborn-category.ts`), consumidas por los tres lugares. Y desde **T4.4/ADR-0007**, el servidor de sync **ya no confía ciegamente** en lo que calcula el cliente: recomputa y corrige (sin tolerancia) para los campos derivados de reglas — con un mecanismo distinto según si el dato es un evento inmutable o un campo LWW (para este último, la corrección del servidor participa del mismo `HlcClock` que los dispositivos, no es un `UPDATE` por fuera del mecanismo de sync). `classifyCategory` completo (edad+sexo+especie, catálogo configurable) **no se construyó**: no existía como comportamiento real, hubiera sido una feature nueva disfrazada de refactor — quedó en backlog de producto.
 
@@ -379,4 +408,4 @@ El corazón de la deuda **ya se eliminó en F4**: retiro sanitario, gestación (
 
 Trampas operativas que ya nos costaron tiempo: **nunca** corras `nest build`/`next build` mientras el server en watch está vivo (corrompe `.next`/`dist` — pará, buildeá, reiniciá); PGlite tiene **una sola conexión** y transacciones delicadas, así que el refactor de sync (F6) debe conservar las fronteras de tx pasando el mismo handle `Q` **y preservar la lógica de Server Authority que T4.4 agregó a `applyEvent`/`applyPregnancyPut`** al partirlos en handlers; y Metro/Expo es quisquilloso al linkear packages del workspace (replicá el setup de `sync-core`, ya usado también para `domain` desde F4.1). No hay CI — corré los gates a mano (el remoto Git ya existe: `origin/main`, ver §0). Commits **chicos y revisables**, y **pausá para revisión al terminar cada sub-fase**. Si respetás esto, el proyecto avanza sin regresiones hacia el ERP de clase mundial que es el objetivo.
 
-**Siguiente acción concreta:** implementar **P1.2 — ciclo de vida del email y credenciales** (email transaccional, verificación de email, reset de contraseña; mantener la separación `identity`/`auth`). Ver §9.
+**Siguiente acción concreta:** **P1.4 — Fundamentos de experiencia y sistema de diseño**, empezando por **auditoría + propuesta** (no implementación masiva). Ver §9.
