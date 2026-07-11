@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { API_URL } from '@/lib/api';
 import { login, readErrorTitle } from '@/lib/auth';
 import { Button } from '@/components/Button';
-
-const inputCls =
-  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 interface Country {
   code: string;
@@ -108,32 +108,34 @@ export default function RegisterPage() {
   return (
     <Shell>
       <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
-        <Field label="Nombre completo">
-          <input name="full_name" type="text" required autoFocus autoComplete="name" placeholder="Ana Ruiz" className={inputCls} />
+        <Field label="Nombre completo" htmlFor="full_name">
+          <Input id="full_name" name="full_name" type="text" required autoFocus autoComplete="name" placeholder="Ana Ruiz" controlSize="lg" className="placeholder:text-ink-3" />
         </Field>
-        <Field label="Email">
-          <input name="email" type="email" required autoComplete="email" placeholder="tu@email.com" className={inputCls} />
+        <Field label="Email" htmlFor="email">
+          <Input id="email" name="email" type="email" required autoComplete="email" placeholder="tu@email.com" controlSize="lg" className="placeholder:text-ink-3" />
         </Field>
-        <Field label="Contraseña">
-          <input
+        <Field label="Contraseña" htmlFor="password">
+          <Input
+            id="password"
             name="password"
             type="password"
             required
             minLength={8}
             autoComplete="new-password"
             placeholder="Al menos 8 caracteres"
-            className={inputCls}
+            controlSize="lg"
+            className="placeholder:text-ink-3"
           />
         </Field>
-        <Field label="Organización">
-          <input name="organization_name" type="text" required autoComplete="organization" placeholder="Finca Verde" className={inputCls} />
+        <Field label="Organización" htmlFor="organization_name">
+          <Input id="organization_name" name="organization_name" type="text" required autoComplete="organization" placeholder="Finca Verde" controlSize="lg" className="placeholder:text-ink-3" />
         </Field>
-        <Field label="Finca">
-          <input name="farm_name" type="text" required placeholder="La Primera" className={inputCls} />
+        <Field label="Finca" htmlFor="farm_name">
+          <Input id="farm_name" name="farm_name" type="text" required placeholder="La Primera" controlSize="lg" className="placeholder:text-ink-3" />
         </Field>
-        <Field label="País">
+        <Field label="País" htmlFor="country_code">
           {countries ? (
-            <select name="country_code" required defaultValue="" className={inputCls}>
+            <Select id="country_code" name="country_code" required defaultValue="" controlSize="lg">
               <option value="" disabled>
                 Elegí un país…
               </option>
@@ -142,7 +144,7 @@ export default function RegisterPage() {
                   {c.name}
                 </option>
               ))}
-            </select>
+            </Select>
           ) : countriesError ? (
             <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-strong bg-surface px-3 py-2 text-body text-danger">
               <span>No se pudieron cargar los países.</span>
@@ -186,14 +188,5 @@ function Shell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-label font-medium text-ink-2">{label}</span>
-      {children}
-    </label>
   );
 }
