@@ -10,3 +10,9 @@ dist/
 # tsc incremental build info
 *.tsbuildinfo
 coverage/
+
+# Playwright E2E (P1.3.7): artefactos de resultados/reportes y navegadores locales
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
