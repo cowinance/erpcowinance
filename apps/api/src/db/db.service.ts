@@ -32,6 +32,28 @@ export class DbService implements OnModuleInit {
     CREATE SEQUENCE IF NOT EXISTS sync_changesets_server_seq;
     ALTER TABLE sync_changesets ADD COLUMN IF NOT EXISTS server_seq bigint DEFAULT nextval('sync_changesets_server_seq');
     CREATE INDEX IF NOT EXISTS ix_sync_changesets_server_seq ON sync_changesets (tenant_id, server_seq);
+    -- Changesets de origen servidor (P2 oleada 2.2, ADR-0016): habilita propagar
+    -- entidades creadas server-side (importación) a dispositivos ya bootstrapeados,
+    -- vía pull, SIN dispositivo ni secuencia sintéticos. Para source='server',
+    -- sync_device_id y seq son NULL (seq NO se falsea); la idempotencia la da
+    -- (tenant_id, origin_ref). El CHECK prohíbe estados híbridos. Orden deliberado:
+    -- se rellena la columna source (default 'device') ANTES del CHECK, así las
+    -- filas existentes (todas device) ya satisfacen la forma válida. CHECK idempotente
+    -- por drop+add (sin plpgsql; PGlite-safe). Esta migración NO inserta filas
+    -- server (eso llega con el procesador) y NO toca el pull ni los tipos remotos
+    -- (commit 2.3).
+    ALTER TABLE sync_changesets ADD COLUMN IF NOT EXISTS source varchar(16) NOT NULL DEFAULT 'device';
+    ALTER TABLE sync_changesets ADD COLUMN IF NOT EXISTS origin_ref varchar(128);
+    ALTER TABLE sync_changesets ALTER COLUMN sync_device_id DROP NOT NULL;
+    ALTER TABLE sync_changesets ALTER COLUMN seq DROP NOT NULL;
+    ALTER TABLE sync_changesets DROP CONSTRAINT IF EXISTS ck_sync_changesets_source_shape;
+    ALTER TABLE sync_changesets ADD CONSTRAINT ck_sync_changesets_source_shape CHECK (
+      (source = 'device' AND sync_device_id IS NOT NULL AND seq IS NOT NULL AND origin_ref IS NULL)
+      OR
+      (source = 'server' AND sync_device_id IS NULL AND seq IS NULL AND origin_ref IS NOT NULL)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_sync_changesets_server_origin
+      ON sync_changesets (tenant_id, origin_ref) WHERE source = 'server';
     ALTER TABLE sync_conflicts ADD COLUMN IF NOT EXISTS detail text;
     CREATE TABLE IF NOT EXISTS sync_row_state (
       tenant_id uuid NOT NULL,
