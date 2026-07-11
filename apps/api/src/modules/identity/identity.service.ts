@@ -1,7 +1,14 @@
-import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { hashPassword } from '../../common/passwords';
 import { countryDefaults, isSupportedCountry } from './country-defaults';
+import { EmailActionTokenService } from './email-action-token.service';
+import { EMAIL_SENDER, type EmailSender } from '../../application/ports/email-sender.port';
+
+/** Base URL del front para armar los links de email (dev: localhost del web). */
+function appBaseUrl(): string {
+  return (process.env.APP_BASE_URL?.trim().replace(/\/$/, '')) || 'http://localhost:3000';
+}
 
 /**
  * Provisioning self-service de tenant (P1.1, ADR-0010).
@@ -19,7 +26,11 @@ import { countryDefaults, isSupportedCountry } from './country-defaults';
 @Injectable()
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly tokens: EmailActionTokenService,
+    @Inject(EMAIL_SENDER) private readonly email: EmailSender,
+  ) {}
 
   async register(body: {
     email?: string;
@@ -104,11 +115,71 @@ export class IdentityService {
     });
 
     this.logger.log(`Registro self-service: org=${result.organizationId} finca=${result.farmId} (${email})`);
+
+    // Envío de verificación best-effort (P1.2): el token se emite y el email se
+    // envía DESPUÉS del commit del registro. Si falla, el registro ya quedó
+    // firme — el usuario recupera con `resend-verification`. Nunca aborta el alta.
+    try {
+      await this.sendVerificationEmail(result.userId, email);
+    } catch (err) {
+      this.logger.warn(`No se pudo enviar la verificación a ${email}: ${String(err)}`);
+    }
+
     return {
       organization_id: result.organizationId,
       farm_id: result.farmId,
       user_id: result.userId,
       email,
     };
+  }
+
+  /**
+   * Verificación de email (P1.2, @Public): consume el token de verificación y
+   * marca `email_verified_at`. No bloquea el acceso (ADR-0010 §5: política soft);
+   * el estado queda disponible para gating de acciones sensibles futuras.
+   */
+  async verifyEmail(body: { token?: string }) {
+    const token = (body?.token ?? '').trim();
+    if (!token)
+      throw new BadRequestException({ code: 'identity.missing_token', title: 'token es obligatorio' });
+    const userId = await this.tokens.consume(token, 'verify_email');
+    if (!userId)
+      throw new BadRequestException({ code: 'identity.invalid_token', title: 'Token de verificación inválido o expirado' });
+    await this.db.query(`UPDATE users SET email_verified_at = now() WHERE id = $1 AND email_verified_at IS NULL`, [userId]);
+    return { verified: true };
+  }
+
+  /**
+   * Reenvío de verificación (P1.2, @Public). Respuesta CONSTANTE
+   * (anti-enumeración): no revela si el email existe ni si ya está verificado.
+   * Solo emite un token nuevo si el usuario existe y aún no verificó.
+   */
+  async resendVerification(body: { email?: string }) {
+    const email = (body?.email ?? '').trim().toLowerCase();
+    if (email) {
+      const user = await this.db.one<{ id: string; email_verified_at: string | null }>(
+        `SELECT id, email_verified_at FROM users WHERE email = $1 AND deleted_at IS NULL`,
+        [email],
+      );
+      if (user && !user.email_verified_at) {
+        try {
+          await this.sendVerificationEmail(user.id, email);
+        } catch (err) {
+          this.logger.warn(`No se pudo reenviar la verificación a ${email}: ${String(err)}`);
+        }
+      }
+    }
+    return { ok: true };
+  }
+
+  /** Emite un token de verificación y envía el email con el link. */
+  private async sendVerificationEmail(userId: string, email: string): Promise<void> {
+    const token = await this.tokens.issue(userId, 'verify_email');
+    const link = `${appBaseUrl()}/verify-email?token=${token}`;
+    await this.email.send({
+      to: email,
+      subject: 'Verificá tu email — Cowinance',
+      text: `Confirmá tu cuenta de Cowinance abriendo este enlace:\n${link}\n\nSi no creaste una cuenta, ignorá este mensaje.`,
+    });
   }
 }

@@ -20,6 +20,20 @@ export class IdentityController {
     return this.identity.register(body);
   }
 
+  /** Verificación de email (P1.2). Público: el link del email trae el token. */
+  @Public()
+  @Post('verify-email')
+  verifyEmail(@Body() body: any) {
+    return this.identity.verifyEmail(body);
+  }
+
+  /** Reenvío de verificación (P1.2). Público, respuesta constante (anti-enumeración). */
+  @Public()
+  @Post('resend-verification')
+  resendVerification(@Body() body: any) {
+    return this.identity.resendVerification(body);
+  }
+
   @Get('organizations/current')
   async currentOrganization() {
     return this.db.one(
