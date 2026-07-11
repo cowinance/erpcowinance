@@ -104,3 +104,20 @@ sobre datos ya migrados.
 - **Costo / known-issues:** `device_id`/`seq` pueden ser `NULL` en la response de pull (documentado en
   los tipos remotos); `sync-core`/la simulación no modelan el origen servidor; el `CHECK` acopla las
   tres columnas nuevas (`source`, `sync_device_id`/`seq`, `origin_ref`) por forma.
+
+## Nota de implementación (P-a / P-b)
+
+Entregado en dos olas (ver `docs/import.md` §Propagación):
+- **P-a** — apply de cliente: `sync-core` expone `RemoteChangeset` (derivado de `Changeset`, identidad
+  nullable) y `PullResult` lo usa; el móvil aplica un `source='server'` por `ops`/`hlc`/`cursor` sin
+  fabricar identidad. `Changeset` de push permanece estricto; sim 2000/2000 intacta.
+- **P-b** — emisión: `persistNewAnimal(sync='server_origin')` versiona con `HlcClock('server')` en
+  `sync_row_state` y devuelve el `syncOp`; `ServerOriginChangesetWriter.emit` escribe la fila
+  `source='server'` (dedup por `(tenant_id, origin_ref)`). **`REST createAnimal` es el primer emisor**
+  (`origin_ref='rest:animal:<id>'`), cerrando además la brecha de que las altas web no se propagaban
+  incrementalmente. Verificado end-to-end por `server-origin-e2e.mjs`. El procesador de import (P-c)
+  reutilizará el mismo mecanismo por lote.
+
+> Efecto secundario correcto: como el alta server-side ahora siembra `status='active'` con HLC de
+> servidor, una transición de estado de un dispositivo debe tener un HLC posterior a la creación para
+> ganar por LWW (un dispositivo no edita un animal antes de que exista) — reflejado en `sync-e2e`.

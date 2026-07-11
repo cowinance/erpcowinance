@@ -174,6 +174,13 @@ Sigue las convenciones del documento de APIs: prefijo `/v1`, paginación por cur
 - `POST /v1/animals/:id/events` — evento polimórfico (`weighing`, `note`, …)
 - `GET /v1/lots` · `GET /v1/farms` · `GET /v1/organizations/current`
 
+**Importación / migración de datos (P2, en curso).** Capacidad transversal de migración; primer
+caso: animales. `POST /v1/imports` (multipart CSV) · `GET /v1/imports/:id` · `GET /v1/imports/:id/rows`
+(paginado) · `PUT /v1/imports/:id/mapping` · `POST /v1/imports/:id/preview`. El vertical **subir →
+mapear → previsualizar** está completo; el commit/procesador y la genealogía son la fase siguiente.
+Detalle en [docs/import.md](docs/import.md). Las entidades creadas server-side (altas web e import)
+se propagan por pull a dispositivos vía **changesets de origen servidor** ([ADR-0016](docs/adr/0016-server-origin-changesets.md)).
+
 ## Identidad y multi-tenant
 
 - **Login con JWT** (access 15 min + refresh 7 días con **rotación y detección de reuso**): el emisor dev
