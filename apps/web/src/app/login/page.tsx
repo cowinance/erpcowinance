@@ -4,9 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { login } from '@/lib/auth';
 import { Button } from '@/components/Button';
-
-const inputCls =
-  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -45,9 +44,9 @@ export default function LoginPage() {
           <p className="mt-1 text-body text-ink-3">El sistema operativo de tu finca</p>
         </div>
         <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
-          <label className="block">
-            <span className="mb-1 block text-label font-medium text-ink-2">Email</span>
-            <input
+          <Field label="Email" htmlFor="email">
+            <Input
+              id="email"
               name="email"
               type="email"
               required
@@ -56,20 +55,22 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="tu@email.com"
-              className={inputCls}
+              controlSize="lg"
+              className="placeholder:text-ink-3"
             />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-label font-medium text-ink-2">Contraseña</span>
-            <input
+          </Field>
+          <Field label="Contraseña" htmlFor="password">
+            <Input
+              id="password"
               name="password"
               type="password"
               required
               autoComplete="current-password"
               placeholder="••••••••"
-              className={inputCls}
+              controlSize="lg"
+              className="placeholder:text-ink-3"
             />
-          </label>
+          </Field>
           {error && (
             <p role="alert" className="text-label text-danger">
               {error}

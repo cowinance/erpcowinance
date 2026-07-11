@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { AuthShell, inputCls } from '@/components/AuthShell';
+import { AuthShell } from '@/components/AuthShell';
 import { postPublic } from '@/lib/auth';
 import { Button } from '@/components/Button';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
 
 export default function ForgotPasswordPage() {
   const [busy, setBusy] = useState(false);
@@ -47,10 +49,9 @@ export default function ForgotPasswordPage() {
   return (
     <AuthShell title="Restablecer contraseña" subtitle="Te enviaremos un enlace a tu email">
       <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
-        <label className="block">
-          <span className="mb-1 block text-label font-medium text-ink-2">Email</span>
-          <input name="email" type="email" required autoFocus autoComplete="email" placeholder="tu@email.com" className={inputCls} />
-        </label>
+        <Field label="Email" htmlFor="email">
+          <Input id="email" name="email" type="email" required autoFocus autoComplete="email" placeholder="tu@email.com" controlSize="lg" className="placeholder:text-ink-3" />
+        </Field>
         {error && (
           <p role="alert" className="text-label text-danger">
             {error}

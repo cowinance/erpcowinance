@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AuthShell, PrimaryLink, inputCls } from '@/components/AuthShell';
+import { AuthShell, PrimaryLink } from '@/components/AuthShell';
 import { postPublic, hasSession } from '@/lib/auth';
 import { Button } from '@/components/Button';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
 
 type State = 'verifying' | 'success' | 'missing' | 'invalid' | 'unavailable';
 
@@ -106,10 +108,9 @@ function ResendVerification() {
 
   return (
     <form onSubmit={submit} className="space-y-3">
-      <label className="block">
-        <span className="mb-1 block text-label font-medium text-ink-2">Reenviar verificación a tu email</span>
-        <input name="email" type="email" required autoFocus autoComplete="email" placeholder="tu@email.com" className={inputCls} />
-      </label>
+      <Field label="Reenviar verificación a tu email" htmlFor="email">
+        <Input id="email" name="email" type="email" required autoFocus autoComplete="email" placeholder="tu@email.com" controlSize="lg" className="placeholder:text-ink-3" />
+      </Field>
       {error && (
         <p role="alert" className="text-label text-danger">
           {error}
