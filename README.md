@@ -105,6 +105,16 @@ npm run tokens:check   # falla si el artefacto derivó de la fuente (gate; no au
 
 `tokens:check` es Gate 0 de `audit:arch`.
 
+### Especificación del Design System (ADR-0014)
+
+Sobre la fuente de tokens, la **especificación completa** del sistema visual vive en
+[`docs/design-system/P1.4.2-design-system-spec.md`](docs/design-system/P1.4.2-design-system-spec.md)
+(contrato del frontend: escala tipográfica por roles, spacing, densidad ERP, dark mode, iconografía,
+inventario de componentes, motion, accesibilidad AA y responsive). Las decisiones de arquitectura que
+de ella se derivan están en [ADR-0014](docs/adr/0014-design-system-specification.md). La especificación
+está **aprobada pero aún no implementada**: aplicar la escala, los primitivos y la navegación responsive
+es trabajo de P1.4.3+ (behavior-preserving, con Playwright y `tokens:check` como gates).
+
 ## E2E web — recorrido de onboarding (Playwright)
 
 Suite Playwright que protege los cinco flujos de onboarding (registro+auto-login, fallback de auto-login,
