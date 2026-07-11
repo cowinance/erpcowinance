@@ -59,7 +59,7 @@ export function SyncDot({ pending }: { pending: number }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <View style={[styles.dot, { backgroundColor: pending ? T.warning : T.success }]} />
-      <Text style={{ fontSize: 12, color: T.ink3 }}>{pending ? `${pending} pendiente${pending === 1 ? '' : 's'}` : 'Sincronizado'}</Text>
+      <Text style={{ fontSize: T.type.label, color: T.ink3 }}>{pending ? `${pending} pendiente${pending === 1 ? '' : 's'}` : 'Sincronizado'}</Text>
     </View>
   );
 }
@@ -76,6 +76,6 @@ const styles = StyleSheet.create({
   kpiValue: { fontSize: T.compat['26'], fontWeight: '700', color: T.ink, marginTop: 4, fontVariant: ['tabular-nums'] },
   kpiHint: { fontSize: T.type.caption, color: T.ink3, marginTop: 2 },
   btn: { height: 44, borderRadius: T.radiusSm, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-  btnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  btnText: { color: '#fff', fontSize: T.type.input, fontWeight: '600' },
   dot: { width: 8, height: 8, borderRadius: 4 },
 });

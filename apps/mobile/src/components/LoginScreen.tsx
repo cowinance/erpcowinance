@@ -112,7 +112,7 @@ export function LoginScreen() {
 
         {mode === 'forgot-sent' && (
           <View style={{ width: '100%', gap: 12, marginTop: 24 }}>
-            <Text accessibilityRole="text" style={[styles.hint, { fontSize: 13, color: T.ink2 }]}>
+            <Text accessibilityRole="text" style={[styles.hint, { fontSize: T.type.body, color: T.ink2 }]}>
               Si existe una cuenta con ese email, te enviamos un enlace para restablecer tu contraseña. El enlace se abre
               en la web.
             </Text>
@@ -136,8 +136,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
-  title: { fontSize: 22, fontWeight: '700', color: T.ink },
-  subtitle: { fontSize: 13, color: T.ink3, marginTop: 2 },
+  title: { fontSize: T.compat['22'], fontWeight: '700', color: T.ink },
+  subtitle: { fontSize: T.type.body, color: T.ink3, marginTop: 2 },
   input: {
     height: 46,
     borderWidth: 1,
@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
     color: T.ink,
     backgroundColor: T.surface,
   },
-  error: { fontSize: 12, color: T.danger },
-  link: { fontSize: 13, color: T.brand700, fontWeight: '600', textAlign: 'center', paddingVertical: 4 },
-  hint: { fontSize: 11, color: T.ink3, textAlign: 'center' },
+  error: { fontSize: T.type.label, color: T.danger },
+  link: { fontSize: T.type.body, color: T.brand700, fontWeight: '600', textAlign: 'center', paddingVertical: 4 },
+  hint: { fontSize: T.type.caption, color: T.ink3, textAlign: 'center' },
 });

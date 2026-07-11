@@ -12,10 +12,10 @@ import { T } from '@/theme';
 export function EmptyHerd() {
   return (
     <View style={{ alignItems: 'center', paddingVertical: 24, paddingHorizontal: 8, gap: 8 }}>
-      <Text style={{ fontSize: 15, fontWeight: '700', color: T.ink, textAlign: 'center' }}>
+      <Text style={{ fontSize: T.type.subheading, fontWeight: '700', color: T.ink, textAlign: 'center' }}>
         Tu finca aún no tiene animales
       </Text>
-      <Text style={{ fontSize: 13, color: T.ink3, textAlign: 'center', lineHeight: 19 }}>
+      <Text style={{ fontSize: T.type.body, color: T.ink3, textAlign: 'center', lineHeight: 19 }}>
         El primer animal se carga desde Cowinance web. Cuando lo hagas, se descargará a este dispositivo y vas a poder
         capturar en el campo, incluso sin señal.
       </Text>

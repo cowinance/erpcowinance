@@ -30,7 +30,7 @@ export default function Menu() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: T.ink }}>Menú</Text>
+        <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Menú</Text>
 
         <Card>
           <Text style={styles.title}>Usuario</Text>
@@ -50,14 +50,14 @@ export default function Menu() {
         {account.emailVerified === false && (
           <Card>
             <Text style={styles.title}>Verificá tu email</Text>
-            <Text style={{ fontSize: 12, color: T.ink3, marginVertical: 8 }}>
+            <Text style={{ fontSize: T.type.label, color: T.ink3, marginVertical: 8 }}>
               Te enviamos un enlace de verificación{account.email ? ` a ${account.email}` : ''}. El enlace se abre en la
               web, no dentro de la app. Podés seguir usando Cowinance mientras tanto.
             </Text>
             {resendMsg ? (
               <Text
                 accessibilityRole={resendMsg.startsWith('No se pudo') ? 'alert' : 'text'}
-                style={{ fontSize: 12, marginBottom: 8, color: resendMsg.startsWith('No se pudo') ? T.danger : T.success }}
+                style={{ fontSize: T.type.label, marginBottom: 8, color: resendMsg.startsWith('No se pudo') ? T.danger : T.success }}
               >
                 {resendMsg}
               </Text>
@@ -86,7 +86,7 @@ export default function Menu() {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.title}>Simular sin señal</Text>
-              <Text style={{ fontSize: 12, color: T.ink3, marginTop: 2 }}>
+              <Text style={{ fontSize: T.type.label, color: T.ink3, marginTop: 2 }}>
                 Bloquea el transporte para probar la captura offline; los registros quedan en cola.
               </Text>
             </View>
@@ -100,7 +100,7 @@ export default function Menu() {
 
         <Card>
           <Text style={styles.title}>Base local</Text>
-          <Text style={{ fontSize: 12, color: T.ink3, marginVertical: 8 }}>
+          <Text style={{ fontSize: T.type.label, color: T.ink3, marginVertical: 8 }}>
             Borra el snapshot local y vuelve a hidratar desde el servidor (requiere red).
           </Text>
           <Button
@@ -119,20 +119,20 @@ export default function Menu() {
 
         <Card>
           <Text style={styles.title}>Sesión</Text>
-          <Text style={{ fontSize: 12, color: T.ink3, marginVertical: 8 }}>
+          <Text style={{ fontSize: T.type.label, color: T.ink3, marginVertical: 8 }}>
             Los datos locales se conservan; al volver a ingresar seguís donde estabas.
           </Text>
           <Button label="Cerrar sesión" variant="secondary" onPress={() => sync.logout()} />
         </Card>
 
-        <Text style={{ fontSize: 11, color: T.ink3, textAlign: 'center' }}>Cowinance móvil · esqueleto v0.1</Text>
+        <Text style={{ fontSize: T.type.caption, color: T.ink3, textAlign: 'center' }}>Cowinance móvil · esqueleto v0.1</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 13, fontWeight: '600', color: T.ink },
+  title: { fontSize: T.type.body, fontWeight: '600', color: T.ink },
   value: { fontSize: 14, color: T.ink2, marginTop: 2 },
-  mono: { fontFamily: 'monospace', fontSize: 12, color: T.ink2, marginTop: 2 },
+  mono: { fontFamily: 'monospace', fontSize: T.type.label, color: T.ink2, marginTop: 2 },
 });

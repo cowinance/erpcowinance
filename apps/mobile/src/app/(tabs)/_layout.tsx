@@ -27,7 +27,7 @@ export default function TabsLayout() {
         tabBarActiveTintColor: T.brand700,
         tabBarInactiveTintColor: T.ink3,
         tabBarStyle: { backgroundColor: T.surface, borderTopColor: T.borderSubtle, height: 64, paddingTop: 6 },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        tabBarLabelStyle: { fontSize: T.type.caption, fontWeight: '500' },
       }}
     >
       <Tabs.Screen
