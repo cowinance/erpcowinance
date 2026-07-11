@@ -2,8 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, inputCls, labelCls, useSubmit } from '@/components/capture';
+import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, useSubmit } from '@/components/capture';
 import { Button } from '@/components/Button';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 export function ReproCapture({ bulls }: { bulls: any[] }) {
   const router = useRouter();
@@ -74,26 +77,24 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
       <Tabs tabs={['Celo', 'Servicio', 'Diagnóstico', 'Parto', 'Destete']} active={tab} onChange={setTab} />
       <div className="space-y-3">
         <div>
-          <span className={labelCls}>{tab === 'Parto' ? 'Madre *' : tab === 'Destete' ? 'Ternero/a *' : 'Hembra *'}</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">{tab === 'Parto' ? 'Madre *' : tab === 'Destete' ? 'Ternero/a *' : 'Hembra *'}</span>
           <AnimalPicker animal={animal} onSelect={setAnimal} />
         </div>
 
-        <label className="block">
-          <span className={labelCls}>Fecha</span>
-          <input name="date" type="date" className={inputCls} defaultValue={new Date().toISOString().slice(0, 10)} />
-        </label>
+        <Field label="Fecha" htmlFor="date">
+          <Input id="date" name="date" type="date" controlSize="md" defaultValue={new Date().toISOString().slice(0, 10)} />
+        </Field>
 
         {tab === 'Celo' && (
-          <label className="block">
-            <span className={labelCls}>Notas</span>
-            <input name="notes" className={inputCls} placeholder="Intensidad, observador…" />
-          </label>
+          <Field label="Notas" htmlFor="notes">
+            <Input id="notes" name="notes" controlSize="md" placeholder="Intensidad, observador…" />
+          </Field>
         )}
 
         {tab === 'Servicio' && (
           <>
             <div>
-              <span className={labelCls}>Método</span>
+              <span className="mb-1 block text-label font-medium text-ink-2">Método</span>
               <div className="flex gap-2">
                 {[
                   ['ai', 'Inseminación (IA)'],
@@ -113,9 +114,8 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
               </div>
             </div>
             {method === 'natural' && (
-              <label className="block">
-                <span className={labelCls}>Toro</span>
-                <select name="sire_id" className={inputCls} defaultValue="">
+              <Field label="Toro" htmlFor="sire_id">
+                <Select id="sire_id" name="sire_id" controlSize="md" defaultValue="">
                   <option value="">Sin especificar</option>
                   {bulls.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -123,79 +123,71 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
                       {b.name ? ` — ${b.name}` : ''}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
             )}
           </>
         )}
 
         {tab === 'Diagnóstico' && (
           <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className={labelCls}>Resultado *</span>
-              <select name="result" required className={inputCls}>
+            <Field label="Resultado" htmlFor="result" required>
+              <Select id="result" name="result" required controlSize="md">
                 <option value="pregnant">Preñada</option>
                 <option value="empty">Vacía</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className={labelCls}>Método</span>
-              <select name="diag_method" className={inputCls} defaultValue="ultrasound">
+              </Select>
+            </Field>
+            <Field label="Método" htmlFor="diag_method">
+              <Select id="diag_method" name="diag_method" controlSize="md" defaultValue="ultrasound">
                 <option value="ultrasound">Ecografía</option>
                 <option value="palpation">Palpación</option>
                 <option value="blood">Sangre</option>
-              </select>
-            </label>
+              </Select>
+            </Field>
           </div>
         )}
 
         {tab === 'Parto' && (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className={labelCls}>Facilidad (1–5)</span>
-                <select name="ease" className={inputCls} defaultValue="1">
+              <Field label="Facilidad (1–5)" htmlFor="ease">
+                <Select id="ease" name="ease" controlSize="md" defaultValue="1">
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
                       {n} {n === 1 ? '(sin ayuda)' : n === 5 ? '(cesárea)' : ''}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className={labelCls}>Vitalidad</span>
-                <select name="vitality" className={inputCls} defaultValue="live">
+                </Select>
+              </Field>
+              <Field label="Vitalidad" htmlFor="vitality">
+                <Select id="vitality" name="vitality" controlSize="md" defaultValue="live">
                   <option value="live">Viva</option>
                   <option value="stillborn">Mortinato</option>
                   <option value="died_soon">Murió a las horas</option>
-                </select>
-              </label>
+                </Select>
+              </Field>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <label className="block">
-                <span className={labelCls}>Sexo de la cría *</span>
-                <select name="calf_sex" required className={inputCls}>
+              <Field label="Sexo de la cría" htmlFor="calf_sex" required>
+                <Select id="calf_sex" name="calf_sex" required controlSize="md">
                   <option value="F">Hembra</option>
                   <option value="M">Macho</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className={labelCls}>Caravana de la cría</span>
-                <input name="calf_tag" className={`${inputCls} font-mono`} placeholder="801" />
-              </label>
-              <label className="block">
-                <span className={labelCls}>Peso al nacer (kg)</span>
-                <input name="calf_weight" type="number" step="0.5" className={inputCls} placeholder="35" />
-              </label>
+                </Select>
+              </Field>
+              <Field label="Caravana de la cría" htmlFor="calf_tag">
+                <Input id="calf_tag" name="calf_tag" controlSize="md" className="font-mono" placeholder="801" />
+              </Field>
+              <Field label="Peso al nacer (kg)" htmlFor="calf_weight">
+                <Input id="calf_weight" name="calf_weight" type="number" step="0.5" controlSize="md" placeholder="35" />
+              </Field>
             </div>
           </>
         )}
 
         {tab === 'Destete' && (
-          <label className="block">
-            <span className={labelCls}>Peso al destete (kg)</span>
-            <input name="weight" type="number" step="0.5" className={inputCls} placeholder="180" />
-          </label>
+          <Field label="Peso al destete (kg)" htmlFor="weight">
+            <Input id="weight" name="weight" type="number" step="0.5" controlSize="md" placeholder="180" />
+          </Field>
         )}
 
         <SubmitFeedback state={state} message={message} />
