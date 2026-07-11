@@ -2,10 +2,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, inputCls, labelCls, useSubmit } from '@/components/capture';
+import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, useSubmit } from '@/components/capture';
 import { AddProductForm } from './AddProductForm';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/Button';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 
 export function SanidadCapture({ products }: { products: any[] }) {
   const router = useRouter();
@@ -34,7 +37,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
   const ProductPicker = ({ options, label, defaultType }: { options: any[]; label: string; defaultType: string }) => (
     <div>
       <div className="flex items-center justify-between">
-        <span className={labelCls}>{label} *</span>
+        <label htmlFor="product_id" className="mb-1 block text-label font-medium text-ink-2">{label} *</label>
         <button
           type="button"
           onClick={() => setAddingProduct((v) => !v)}
@@ -43,7 +46,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
           <Plus size={12} /> Nuevo medicamento
         </button>
       </div>
-      <select name="product_id" required value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
+      <Select id="product_id" name="product_id" controlSize="md" required value={productId} onChange={(e) => setProductId(e.target.value)}>
         <option value="">Elegir…</option>
         {options.map((p) => (
           <option key={p.id} value={p.id}>
@@ -51,7 +54,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
             {p.withdrawal_meat_days ? ` (retiro ${p.withdrawal_meat_days} d)` : ''}
           </option>
         ))}
-      </select>
+      </Select>
       {addingProduct && (
         <div className="mt-2">
           <AddProductForm defaultType={defaultType} onCreated={onProductCreated} onCancel={() => setAddingProduct(false)} />
@@ -125,7 +128,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
       <Tabs tabs={['Vacunación', 'Tratamiento', 'Diagnóstico', 'Mortalidad']} active={tab} onChange={changeTab} />
       <div className="space-y-3">
         <div>
-          <span className={labelCls}>Animal *</span>
+          <span className="mb-1 block text-label font-medium text-ink-2">Animal *</span>
           <AnimalPicker animal={animal} onSelect={setAnimal} />
         </div>
 
@@ -133,18 +136,15 @@ export function SanidadCapture({ products }: { products: any[] }) {
           <>
             <ProductPicker options={vaccines} label="Vacuna" defaultType="vaccine" />
             <div className="grid grid-cols-3 gap-3">
-              <label className="block">
-                <span className={labelCls}>Dosis (ml)</span>
-                <input name="dose" type="number" step="0.5" className={inputCls} placeholder="2" />
-              </label>
-              <label className="block">
-                <span className={labelCls}>Lote del frasco</span>
-                <input name="batch_number" className={inputCls} placeholder="AF-2026-…" />
-              </label>
-              <label className="block">
-                <span className={labelCls}>Refuerzo (días)</span>
-                <input name="next_due_days" type="number" className={inputCls} placeholder="180" />
-              </label>
+              <Field label="Dosis (ml)" htmlFor="dose">
+                <Input id="dose" name="dose" type="number" step="0.5" controlSize="md" placeholder="2" />
+              </Field>
+              <Field label="Lote del frasco" htmlFor="batch_number">
+                <Input id="batch_number" name="batch_number" controlSize="md" placeholder="AF-2026-…" />
+              </Field>
+              <Field label="Refuerzo (días)" htmlFor="next_due_days">
+                <Input id="next_due_days" name="next_due_days" type="number" controlSize="md" placeholder="180" />
+              </Field>
             </div>
           </>
         )}
@@ -153,65 +153,57 @@ export function SanidadCapture({ products }: { products: any[] }) {
           <>
             <ProductPicker options={drugs} label="Producto" defaultType="antibiotic" />
             <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className={labelCls}>Dosis (ml)</span>
-                <input name="dose" type="number" step="0.5" className={inputCls} placeholder="10" />
-              </label>
-              <label className="block">
-                <span className={labelCls}>Vía</span>
-                <select name="route" className={inputCls} defaultValue="sc">
+              <Field label="Dosis (ml)" htmlFor="dose">
+                <Input id="dose" name="dose" type="number" step="0.5" controlSize="md" placeholder="10" />
+              </Field>
+              <Field label="Vía" htmlFor="route">
+                <Select id="route" name="route" controlSize="md" defaultValue="sc">
                   <option value="sc">Subcutánea</option>
                   <option value="im">Intramuscular</option>
                   <option value="iv">Intravenosa</option>
                   <option value="oral">Oral</option>
                   <option value="topical">Tópica</option>
-                </select>
-              </label>
+                </Select>
+              </Field>
             </div>
-            <label className="block">
-              <span className={labelCls}>Notas</span>
-              <input name="notes" className={inputCls} placeholder="Motivo, observaciones…" />
-            </label>
+            <Field label="Notas" htmlFor="notes">
+              <Input id="notes" name="notes" controlSize="md" placeholder="Motivo, observaciones…" />
+            </Field>
           </>
         )}
 
         {tab === 'Diagnóstico' && (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className={labelCls}>Severidad</span>
-                <select name="severity" className={inputCls} defaultValue="mild">
+              <Field label="Severidad" htmlFor="severity">
+                <Select id="severity" name="severity" controlSize="md" defaultValue="mild">
                   <option value="mild">Leve</option>
                   <option value="moderate">Moderada</option>
                   <option value="severe">Severa</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className={labelCls}>Desenlace</span>
-                <select name="outcome" className={inputCls} defaultValue="ongoing">
+                </Select>
+              </Field>
+              <Field label="Desenlace" htmlFor="outcome">
+                <Select id="outcome" name="outcome" controlSize="md" defaultValue="ongoing">
                   <option value="ongoing">En curso</option>
                   <option value="recovered">Recuperado</option>
                   <option value="referred">Derivado</option>
-                </select>
-              </label>
+                </Select>
+              </Field>
             </div>
-            <label className="block">
-              <span className={labelCls}>Notas</span>
-              <input name="notes" className={inputCls} placeholder="Síntomas, diagnóstico presuntivo…" />
-            </label>
+            <Field label="Notas" htmlFor="notes">
+              <Input id="notes" name="notes" controlSize="md" placeholder="Síntomas, diagnóstico presuntivo…" />
+            </Field>
           </>
         )}
 
         {tab === 'Mortalidad' && (
           <>
-            <label className="block">
-              <span className={labelCls}>Causa</span>
-              <input name="notes" className={inputCls} placeholder="Causa probable de muerte…" />
-            </label>
-            <label className="block">
-              <span className={labelCls}>Pérdida estimada ($)</span>
-              <input name="estimated_loss" type="number" className={inputCls} placeholder="45000" />
-            </label>
+            <Field label="Causa" htmlFor="notes">
+              <Input id="notes" name="notes" controlSize="md" placeholder="Causa probable de muerte…" />
+            </Field>
+            <Field label="Pérdida estimada ($)" htmlFor="estimated_loss">
+              <Input id="estimated_loss" name="estimated_loss" type="number" controlSize="md" placeholder="45000" />
+            </Field>
             <p className="text-label text-warning">El animal quedará dado de baja (estado: muerto). El historial se conserva.</p>
           </>
         )}
