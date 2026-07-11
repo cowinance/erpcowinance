@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/Button';
+import { Field } from '@/components/Field';
+import { Input } from '@/components/Input';
 
 export function WeighingForm({ animalId }: { animalId: string }) {
   const router = useRouter();
@@ -45,32 +47,34 @@ export function WeighingForm({ animalId }: { animalId: string }) {
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="mb-1 block text-label font-medium text-ink-2">Peso (kg)</span>
-          <input
+        <Field label="Peso (kg)" htmlFor="weight_kg">
+          <Input
+            id="weight_kg"
             type="number"
             required
             min={1}
             step="0.5"
             value={kg}
             onChange={(e) => setKg(e.target.value)}
-            className="tnum h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand"
+            controlSize="md"
+            className="tnum"
             placeholder="412"
           />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-label font-medium text-ink-2">Cond. corporal (1–5)</span>
-          <input
+        </Field>
+        <Field label="Cond. corporal (1–5)" htmlFor="body_condition">
+          <Input
+            id="body_condition"
             type="number"
             min={1}
             max={5}
             step="0.5"
             value={cc}
             onChange={(e) => setCc(e.target.value)}
-            className="tnum h-9 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand"
+            controlSize="md"
+            className="tnum"
             placeholder="3.5"
           />
-        </label>
+        </Field>
       </div>
       {state === 'error' && <p className="text-label text-danger">{error}</p>}
       <Button type="submit" size="md" fullWidth loading={state === 'saving'} disabled={!kg} className="gap-1.5">
