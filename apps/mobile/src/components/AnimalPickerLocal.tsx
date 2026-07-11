@@ -57,10 +57,10 @@ export function AnimalPickerLocal({
           style={styles.input}
         />
         <Pressable onPress={lookup} disabled={!tag.trim()} style={[styles.searchBtn, !tag.trim() && { opacity: 0.4 }]}>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: T.ink }}>Buscar</Text>
+          <Text style={{ fontSize: T.type.body, fontWeight: '600', color: T.ink }}>Buscar</Text>
         </Pressable>
       </View>
-      {!!error && <Text style={{ fontSize: 12, color: T.danger, marginTop: 4 }}>{error}</Text>}
+      {!!error && <Text style={{ fontSize: T.type.label, color: T.danger, marginTop: 4 }}>{error}</Text>}
     </View>
   );
 }
@@ -99,5 +99,5 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   chipTag: { fontFamily: 'monospace', fontSize: 16, fontWeight: '700', color: T.ink },
-  chipInfo: { flex: 1, fontSize: 12, color: T.ink2 },
+  chipInfo: { flex: 1, fontSize: T.type.label, color: T.ink2 },
 });

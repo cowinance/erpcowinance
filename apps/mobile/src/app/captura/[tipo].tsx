@@ -119,26 +119,26 @@ export default function CaptureForm() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />
-            <Text style={{ fontSize: 13, color: T.ink2 }}>Volver</Text>
+            <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
           </Pressable>
-          {count > 0 && <Text style={{ fontSize: 12, color: T.success, fontWeight: '600' }}>{count} en esta sesión</Text>}
+          {count > 0 && <Text style={{ fontSize: T.type.label, color: T.success, fontWeight: '600' }}>{count} en esta sesión</Text>}
         </View>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: T.ink }}>{TITLES[tipo] ?? tipo}</Text>
+        <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>{TITLES[tipo] ?? tipo}</Text>
 
         <View>
           <Text style={styles.label}>{tipo === 'parto' ? 'Madre' : 'Animal'} *</Text>
           <AnimalPickerLocal animal={animal} onSelect={setAnimal} onlyFemales={onlyFemales} />
           {animal && pregnancy && tipo !== 'parto' && (
-            <Text style={{ fontSize: 12, color: T.info, marginTop: 4 }}>
+            <Text style={{ fontSize: T.type.label, color: T.info, marginTop: 4 }}>
               Preñada — parto probable{' '}
               {pregnancy.expected_due_date ? new Date(pregnancy.expected_due_date).toLocaleDateString('es-AR') : '—'}
             </Text>
           )}
           {animal && tipo === 'diagnostico' && pregnancy && result === 'pregnant' && (
-            <Text style={{ fontSize: 12, color: T.warning, marginTop: 4 }}>Ya tiene una preñez abierta.</Text>
+            <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: 4 }}>Ya tiene una preñez abierta.</Text>
           )}
           {animal && tipo === 'parto' && !pregnancy && (
-            <Text style={{ fontSize: 12, color: T.warning, marginTop: 4 }}>
+            <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: 4 }}>
               Sin preñez abierta registrada — el parto se guarda igual.
             </Text>
           )}
@@ -155,7 +155,7 @@ export default function CaptureForm() {
                   style={[styles.productRow, productId === p.id && { borderColor: T.brand700, backgroundColor: T.brand100 }]}
                 >
                   <Text style={{ fontSize: 14, fontWeight: '600', color: T.ink }}>{p.name}</Text>
-                  <Text style={{ fontSize: 11, color: T.ink3 }}>
+                  <Text style={{ fontSize: T.type.caption, color: T.ink3 }}>
                     {p.default_dose ?? ''}
                     {p.withdrawal_meat_days ? ` · retiro ${p.withdrawal_meat_days} d` : ''}
                   </Text>
@@ -254,12 +254,12 @@ export default function CaptureForm() {
         {!!success && (
           <View style={styles.successBox}>
             <Ionicons name="checkmark-circle" size={16} color={T.success} />
-            <Text style={{ fontSize: 13, color: T.success, flex: 1 }}>{success}</Text>
+            <Text style={{ fontSize: T.type.body, color: T.success, flex: 1 }}>{success}</Text>
           </View>
         )}
 
         <Button label={`Guardar ${TITLES[tipo]?.toLowerCase() ?? ''}`} onPress={save} disabled={!canSave} />
-        <Text style={{ fontSize: 11, color: T.ink3, textAlign: 'center' }}>
+        <Text style={{ fontSize: T.type.caption, color: T.ink3, textAlign: 'center' }}>
           Se guarda local y se sube solo al sincronizar.
         </Text>
       </ScrollView>
@@ -268,7 +268,7 @@ export default function CaptureForm() {
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: 12, fontWeight: '600', color: T.ink2, marginBottom: 6 },
+  label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: 6 },
   input: {
     height: 44,
     borderWidth: 1,
@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
-  segText: { fontSize: 13, fontWeight: '600', color: T.ink2 },
+  segText: { fontSize: T.type.body, fontWeight: '600', color: T.ink2 },
   productRow: {
     borderWidth: 1,
     borderColor: T.borderStrong,

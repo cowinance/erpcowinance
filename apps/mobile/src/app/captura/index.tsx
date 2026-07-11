@@ -32,7 +32,7 @@ export default function CapturaMenu() {
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <View style={{ padding: 16, flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <Text style={{ fontSize: 20, fontWeight: '700', color: T.ink }}>Capturar</Text>
+          <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Capturar</Text>
           <Pressable onPress={() => router.back()} hitSlop={8}>
             <Ionicons name="close" size={24} color={T.ink2} />
           </Pressable>
@@ -40,7 +40,7 @@ export default function CapturaMenu() {
 
         {hasAnimals ? (
           <>
-            <Text style={{ fontSize: 13, color: T.ink3, marginBottom: 16 }}>
+            <Text style={{ fontSize: T.type.body, color: T.ink3, marginBottom: 16 }}>
               Todo se guarda en el dispositivo y se sube solo al sincronizar.
             </Text>
             <View style={styles.grid}>
@@ -86,5 +86,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionLabel: { fontSize: 14, fontWeight: '600', color: T.ink },
+  actionLabel: { fontSize: T.type.input, fontWeight: '600', color: T.ink },
 });
