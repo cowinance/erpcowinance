@@ -2,9 +2,6 @@ import Link from 'next/link';
 
 /** Marco visual compartido de las páginas de auth públicas (P1.3.4). Solo
  *  presentación — sin lógica de negocio. */
-export const inputCls =
-  'h-10 w-full rounded-md border border-strong bg-surface px-3 text-input outline-none focus:ring-2 focus:ring-brand placeholder:text-ink-3';
-
 export const primaryBtnCls =
   'inline-flex h-10 w-full items-center justify-center rounded-md bg-brand text-input font-medium text-white hover:opacity-90 disabled:opacity-50';
 
