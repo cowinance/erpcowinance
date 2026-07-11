@@ -90,6 +90,21 @@ En producción el mismo DDL corre sobre PostgreSQL 17 + PostGIS + TimescaleDB (l
 
 > Ningún token de acción se documenta ni se registra: viajan solo en el email y se guardan hasheados (ADR-0011).
 
+### Tokens de diseño (fuente única — ADR-0013)
+
+`packages/design-tokens/src/tokens.ts` es la **única fuente editable** de tokens (color/radio/sombra/fuente).
+Los artefactos por plataforma se **derivan**, no se editan a mano:
+
+- **Web:** `apps/web/src/app/tokens.generated.css` (generado; `globals.css` lo importa). **No editar el `.css`.**
+- **Móvil:** `apps/mobile/src/theme.ts` es un adaptador que reexporta `T` desde la fuente.
+
+```bash
+npm run tokens:build   # edita tokens.ts → regenera el CSS de la web (explícito)
+npm run tokens:check   # falla si el artefacto derivó de la fuente (gate; no autocorrige)
+```
+
+`tokens:check` es Gate 0 de `audit:arch`.
+
 ## E2E web — recorrido de onboarding (Playwright)
 
 Suite Playwright que protege los cinco flujos de onboarding (registro+auto-login, fallback de auto-login,

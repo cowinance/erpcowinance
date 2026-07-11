@@ -37,6 +37,7 @@ const BASELINE = {
 const TYPECHECK_TARGETS = [
   ['@cowinance/domain', 'packages/domain/tsconfig.json'],
   ['@cowinance/sync-core', 'packages/sync-core/tsconfig.json'],
+  ['@cowinance/design-tokens', 'packages/design-tokens/tsconfig.json'],
   ['@cowinance/api', 'apps/api/tsconfig.json'],
   ['@cowinance/mobile', 'apps/mobile/tsconfig.json'],
 ];
@@ -75,6 +76,16 @@ const gate = (name, ok, detail = '') => {
 };
 
 console.log(bold('\n══ ARCHITECTURE GATES ') + dim('(bloquean — invariantes no negociables)'));
+
+// Gate 0: tokens — la fuente canónica única genera el artefacto CSS de la web sin
+// deriva manual (P1.4.1, ADR-0013). Corre PRIMERO: `tokens:check` construye
+// @cowinance/design-tokens (su dist lo necesita el typecheck de mobile) y compara
+// el CSS generado contra el commiteado SIN modificar archivos (nunca autocorrige).
+{
+  const r = trySh('npm run tokens:check');
+  gate('tokens (fuente única, sin deriva)', r.ok, r.ok ? '' : 'corré: npm run tokens:build');
+  if (!r.ok) console.log(dim(r.out.split('\n').slice(-6).join('\n')));
+}
 
 // Gate 1: typecheck de cada workspace TypeScript propio.
 for (const [name, tsconfig] of TYPECHECK_TARGETS) {

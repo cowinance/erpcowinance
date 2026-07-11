@@ -22,8 +22,9 @@ numerado `NNNN-titulo.md`. Estados: `propuesto` · `aceptado` · `reemplazado po
 | [0010](0010-tenant-self-service-provisioning.md) | Provisioning self-service de tenant (registro SaaS) | aceptado |
 | [0011](0011-email-transactional-credential-lifecycle.md) | Email transaccional y ciclo de vida de credenciales (verificación + reset) | aceptado |
 | [0012](0012-onboarding-initial-experience.md) | Arquitectura de onboarding y experiencia inicial (web/móvil, aislamiento local, E2E) | aceptado |
+| [0013](0013-design-tokens-single-source.md) | Design System: fuente única de tokens (neutral + generación web, adaptador móvil) | aceptado |
 
-ADR 0001-0009: Foundation Hardening Sprint. ADR 0010+: Fase Producto.
+ADR 0001-0009: Foundation Hardening Sprint. ADR 0010-0012: Fase Producto (onboarding). ADR 0013+: Fase Producto (P1.4 — sistema de diseño).
 
 > Nota de numeración: los ADR se numeran en el orden en que la decisión realmente se
 > toma, no en el orden planeado originalmente — `0004` se escribió primero porque F1
