@@ -19,7 +19,7 @@ export class DashboardService {
   async kpis() {
     const t = this.db.tenant;
 
-    const [actives, byCategory, avgAdg, pregnancy, withdrawals, vaccinesDue, weightSeries, recent] = await Promise.all([
+    const [actives, byCategory, avgAdg, pregnancy, withdrawals, vaccinesDue, weightSeries, recent, total] = await Promise.all([
       this.db.one<any>(
         `SELECT count(*)::int AS n,
                 count(*) FILTER (WHERE created_at >= date_trunc('month', now()))::int AS new_this_month
@@ -74,10 +74,20 @@ export class DashboardService {
          WHERE e.tenant_id = $1 ORDER BY e.occurred_at DESC LIMIT 12`,
         [t],
       ),
+      // total_animals: inventario existente = animales NO borrados lógicamente,
+      // de CUALQUIER estado (active/sold/dead/culled/lost/transferred). Misma
+      // política deleted_at que el listado GET /animals (herd.listAnimals). Sirve
+      // para distinguir "finca nunca poblada" (total 0 → onboarding) de "finca con
+      // historial pero 0 activos". NO sustituye a active_animals (KPI intacto).
+      this.db.one<any>(
+        `SELECT count(*)::int AS n FROM animals WHERE tenant_id = $1 AND deleted_at IS NULL`,
+        [t],
+      ),
     ]);
 
     return {
       active_animals: actives?.n ?? 0,
+      total_animals: total?.n ?? 0,
       new_this_month: actives?.new_this_month ?? 0,
       by_category: byCategory,
       avg_adg_kg_day: avgAdg?.adg ? +avgAdg.adg.toFixed(2) : null,

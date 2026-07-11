@@ -28,9 +28,11 @@ export default async function Dashboard() {
   const rawDate = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
   const today = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
   const withdrawals = kpis.alerts?.active_withdrawals ?? [];
-  // Estado vacío guiado: misma cuenta que el KPI de cabecera (active_animals),
-  // única fuente → sin inconsistencia entre KPIs y decisión de empty-state.
-  const isEmptyFarm = (kpis.active_animals ?? 0) === 0;
+  // Onboarding SOLO si la finca nunca tuvo animales: total_animals cuenta el
+  // inventario existente (no borrados, cualquier estado; ver DashboardService).
+  // active_animals sigue siendo el KPI y NO decide el onboarding (P1.3.5a).
+  const neverPopulated = (kpis.total_animals ?? 0) === 0;
+  const noActiveButHasHistory = !neverPopulated && (kpis.active_animals ?? 0) === 0;
 
   return (
     <div>
@@ -38,8 +40,15 @@ export default async function Dashboard() {
           se auto-oculta si ya está verificado. Coexiste con empty-state y dashboard. */}
       <VerificationBanner initialVerified={!!me?.email_verified} email={me?.email} />
 
-      {isEmptyFarm ? (
+      {neverPopulated ? (
         <EmptyFarmState greetingName={me?.name} farmName={farms?.[0]?.name} />
+      ) : noActiveButHasHistory ? (
+        <EmptyState
+          title="No tenés animales activos"
+          body="Tu finca tiene animales registrados, pero ninguno activo en este momento. Revisá el historial completo en tu hato."
+          actionHref="/animales"
+          actionLabel="Ver hato"
+        />
       ) : (
         <>
       {/* Cabecera (doc diseño §11.2) */}
