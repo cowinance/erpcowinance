@@ -36,19 +36,47 @@ interface Desired {
   message: string;
   related_type: string | null;
   related_id: string | null;
+  /** Datos estructurados que la agenda (P4) reutiliza; `evaluate()` los ignora. */
+  due_at?: string | null;
+  tag?: string | null;
+}
+
+/** Ítem de la agenda diaria (P4-1): hecho accionable estructurado del hato. */
+export interface AgendaItemDto {
+  code: string;
+  category: string;
+  severity: 'info' | 'warning' | 'critical';
+  due_at: string | null;
+  title: string;
+  message: string;
+  related_type: string | null;
+  related_id: string | null;
+  tag: string | null;
+  /** Acción SEMÁNTICA; cada superficie la mapea a su ruta (móvil/web). */
+  action: 'vaccinate' | 'review_pregnancy' | 'view_animal' | 'complete_task';
 }
 
 const fmt = (d: string | Date) => new Date(d).toLocaleDateString('es-AR');
+const iso = (d: string | Date | null | undefined) => (d ? new Date(d).toISOString() : null);
+const SEVERITY_RANK: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+const AGENDA_ACTION: Record<string, AgendaItemDto['action']> = {
+  vaccination_due: 'vaccinate',
+  pregnancy_overdue: 'review_pregnancy',
+  calving_soon: 'view_animal',
+  withdrawal_active: 'view_animal',
+  health_task_due: 'complete_task',
+};
 
 @Injectable()
 export class AlertsService {
   constructor(private readonly db: DbService) {}
 
-  /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente. */
-  async evaluate() {
+  /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente.
+   *  `precomputed` evita recomputar cuando el caller ya tiene los hechos (agenda, P4-1). */
+  async evaluate(precomputed?: Desired[]) {
     const t = this.db.tenant;
     const ruleIds = await this.ensureRules();
-    const desired = await this.computeDesired();
+    const desired = precomputed ?? (await this.computeDesired());
 
     // Activas (para actualizar/auto-resolver) + resueltas/descartadas recientes
     // (para respetar la acción del usuario y no recrear la misma alerta al toque).
@@ -104,6 +132,38 @@ export class AlertsService {
       }
     }
     return { created, updated, resolved };
+  }
+
+  /**
+   * Agenda diaria del hato (P4-1): los hechos ACCIONABLES estructurados. Reutiliza la
+   * fuente única de reglas (`computeDesired`) — un solo cómputo — y hace read-through de
+   * `evaluate()` (mantiene alertas/badge frescos, como `kpis`). Solo categorías de campo
+   * (`health` + `reproduction`); los ítems de sistema (sync) viven en la pantalla de
+   * sincronización. Ordena por vencimiento (vencidos/próximos primero) y severidad.
+   */
+  async agenda(): Promise<AgendaItemDto[]> {
+    const desired = await this.computeDesired();
+    await this.evaluate(desired); // read-through, sin recomputar
+    return desired
+      .filter((d) => d.category === 'health' || d.category === 'reproduction')
+      .map((d) => ({
+        code: d.code,
+        category: d.category,
+        severity: d.severity,
+        due_at: iso(d.due_at),
+        title: d.title,
+        message: d.message,
+        related_type: d.related_type,
+        related_id: d.related_id,
+        tag: d.tag ?? null,
+        action: AGENDA_ACTION[d.code] ?? 'view_animal',
+      }))
+      .sort((a, b) => {
+        const ad = a.due_at ?? '9999-12-31';
+        const bd = b.due_at ?? '9999-12-31';
+        if (ad !== bd) return ad < bd ? -1 : 1;
+        return SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+      });
   }
 
   async list(status = 'active') {
@@ -213,6 +273,8 @@ export class AlertsService {
         message: w.meat_until ? `No apto para faena hasta el ${fmt(w.meat_until)}` : 'Retiro de leche activo',
         related_type: 'animal',
         related_id: w.rid,
+        due_at: iso(w.meat_until),
+        tag: w.tag ?? null,
       });
 
     // Vacunaciones próximas o vencidas
@@ -237,6 +299,8 @@ export class AlertsService {
         message: `${v.product ?? 'Refuerzo'} ${overdue ? 'venció el' : 'vence el'} ${fmt(v.due)}`,
         related_type: 'animal',
         related_id: v.rid,
+        due_at: iso(v.due),
+        tag: v.tag ?? null,
       });
     }
 
@@ -257,6 +321,8 @@ export class AlertsService {
         message: `${tk.overdue ? 'Tarea vencida' : 'Tarea programada'} para el ${fmt(tk.due_date)}`,
         related_type: 'task',
         related_id: tk.rid,
+        due_at: iso(tk.due_date),
+        tag: null,
       });
 
     // Partos próximos (≤ 15 días)
@@ -278,6 +344,8 @@ export class AlertsService {
         message: `Parto probable el ${fmt(c.due)}`,
         related_type: 'animal',
         related_id: c.rid,
+        due_at: iso(c.due),
+        tag: c.tag ?? null,
       });
 
     // Preñeces vencidas (parto probable pasó, sin parto registrado)
@@ -298,6 +366,8 @@ export class AlertsService {
         message: `Parto probable era el ${fmt(o.due)} — sin parto registrado`,
         related_type: 'animal',
         related_id: o.rid,
+        due_at: iso(o.due),
+        tag: o.tag ?? null,
       });
 
     // Dispositivos sin sincronizar (> 7 días)
