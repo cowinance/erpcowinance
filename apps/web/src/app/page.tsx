@@ -4,14 +4,16 @@ import { Card, CardTitle, KpiCard, EmptyState, TagMono } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { EmptyFarmState } from '@/components/EmptyFarmState';
-import { EVENT_LABELS, formatDate, relativeTime } from '@/lib/format';
-import { AlertTriangle, Syringe, Plus } from 'lucide-react';
+import { EVENT_LABELS, relativeTime } from '@/lib/format';
+import { Plus } from 'lucide-react';
+import { AgendaAttention } from '@/components/AgendaAttention';
 
 export default async function Dashboard() {
-  const [kpis, me, farms] = await Promise.all([
+  const [kpis, me, farms, agenda] = await Promise.all([
     apiSafe<any>('/dashboard/kpis'),
     apiSafe<any>('/auth/me'),
     apiSafe<any[]>('/farms'),
+    apiSafe<any[]>('/agenda'),
   ]);
 
   if (!kpis) {
@@ -98,38 +100,10 @@ export default async function Dashboard() {
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-4 max-lg:grid-cols-1">
-        {/* Atención hoy */}
+        {/* Atención hoy — agenda estructurada de /agenda (P4-4), misma fuente que el móvil */}
         <Card>
           <CardTitle>Atención hoy</CardTitle>
-          <div className="space-y-1.5">
-            {withdrawals.map((w: any) => (
-              <Link
-                key={w.animal_id}
-                href={`/animales/${w.animal_id}`}
-                className="flex items-center gap-3 rounded-md border-l-[3px] border-warning bg-sunken px-3 py-2 hover:bg-brand-soft"
-              >
-                <AlertTriangle size={16} className="shrink-0 text-warning" strokeWidth={1.75} />
-                <div className="min-w-0 flex-1 text-body">
-                  <span className="font-medium">
-                    Retiro de carne — caravana <TagMono>{w.tag ?? '—'}</TagMono>
-                  </span>
-                  <span className="text-ink-3"> · {w.product ?? 'tratamiento'} hasta {formatDate(w.meat_withdrawal_until)}</span>
-                </div>
-              </Link>
-            ))}
-            {kpis.alerts.vaccinations_due_30d > 0 && (
-              <div className="flex items-center gap-3 rounded-md border-l-[3px] border-info bg-sunken px-3 py-2">
-                <Syringe size={16} className="shrink-0 text-info" strokeWidth={1.75} />
-                <div className="text-body">
-                  <span className="font-medium">{kpis.alerts.vaccinations_due_30d} vacunaciones</span>
-                  <span className="text-ink-3"> vencen en los próximos 30 días</span>
-                </div>
-              </div>
-            )}
-            {!withdrawals.length && !kpis.alerts.vaccinations_due_30d && (
-              <p className="py-6 text-center text-body text-ink-3">Todo en orden — sin alertas pendientes.</p>
-            )}
-          </div>
+          <AgendaAttention items={agenda ?? []} />
         </Card>
 
         {/* Evolución de peso */}
