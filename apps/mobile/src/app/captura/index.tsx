@@ -21,6 +21,7 @@ const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphM
   { tipo: 'mover', label: 'Mover', icon: 'swap-horizontal-outline', href: '/captura/mover' },
   { tipo: 'destete', label: 'Destete', icon: 'cut-outline', href: '/captura/destete' },
   { tipo: 'nota', label: 'Nota', icon: 'create-outline', href: '/captura/nota' },
+  { tipo: 'mortalidad', label: 'Baja', icon: 'alert-circle-outline', href: '/captura/mortalidad' },
 ];
 
 export default function CapturaMenu() {
