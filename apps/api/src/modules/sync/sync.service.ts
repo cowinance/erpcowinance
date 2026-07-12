@@ -189,6 +189,15 @@ export class SyncService {
        ORDER BY l.name`,
       [this.db.tenant],
     );
+    // Tareas pendientes (P6-1.b): entidad mutable sincronizada (put/LWW). Incluye las de
+    // Sanidad → permite completarlas offline. El potrero/regla no aplican; solo transporte.
+    const tasks = await this.db.query<any>(
+      `SELECT tk.id, tk.title, tk.description, tk.type, tk.status, tk.due_date, tk.priority, tk.related_type, tk.related_id, tk.completed_at, rs.versions
+       FROM tasks tk
+       LEFT JOIN sync_row_state rs ON rs.tenant_id = tk.tenant_id AND rs.table_name = 'tasks' AND rs.row_id = tk.id
+       WHERE tk.tenant_id = $1 AND tk.status = 'pending' AND tk.deleted_at IS NULL`,
+      [this.db.tenant],
+    );
 
     const bootstrapRows = [
       ...rows.map((r) => ({
@@ -252,6 +261,24 @@ export class SyncService {
             paddock_name: l.paddock_name,
           },
           versions: {},
+        },
+      })),
+      ...tasks.map((tk) => ({
+        table: 'tasks',
+        rowId: tk.id,
+        state: {
+          fields: {
+            title: tk.title,
+            description: tk.description,
+            type: tk.type,
+            status: tk.status,
+            due_date: tk.due_date,
+            priority: tk.priority,
+            related_type: tk.related_type,
+            related_id: tk.related_id,
+            completed_at: tk.completed_at,
+          },
+          versions: tk.versions ?? {},
         },
       })),
     ];
