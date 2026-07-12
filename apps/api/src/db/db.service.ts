@@ -233,6 +233,18 @@ export class DbService implements OnModuleInit {
       ON notification_deliveries (tenant_id, notification_id, sync_device_id);
     CREATE INDEX IF NOT EXISTS ix_notification_deliveries_claim
       ON notification_deliveries (status, next_attempt_at);
+
+    -- Política RLS BESPOKE (P7-3.b), como import_batches: tenant normal + EXCEPCIÓN de
+    -- descubrimiento del worker de push (app.job_scope='push_worker'), que el
+    -- PushDeliveryClaimRepository fija SOLO en su tx de reclamo. Por eso NO va en RLS_TABLES.
+    ALTER TABLE notification_deliveries ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE notification_deliveries FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation ON notification_deliveries;
+    CREATE POLICY tenant_isolation ON notification_deliveries
+      USING (tenant_id = current_setting('app.tenant_id', true)::uuid
+             OR current_setting('app.job_scope', true) = 'push_worker')
+      WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid
+                  OR current_setting('app.job_scope', true) = 'push_worker');
   `;
 
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
@@ -260,7 +272,8 @@ export class DbService implements OnModuleInit {
     'alerts',
     'alert_rules',
     'notifications',
-    'notification_deliveries',
+    // notification_deliveries NO va acá: tiene política bespoke (tenant + excepción
+    // app.job_scope='push_worker'), definida en la migración junto a la tabla (P7-3.b).
     'files',
     'attachments',
     'documents',

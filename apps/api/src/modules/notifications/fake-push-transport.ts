@@ -7,7 +7,7 @@ import type { PushMessage, PushSendResult, PushTransport } from './push-transpor
  * para aserciones (p. ej. «el reintento solo envía la entrega fallida»). El adapter real
  * (ExpoPushTransport) llega en P7-3.c; el procesador (P7-3.b) depende del PUERTO, no de éste.
  */
-type Outcome = { ok: true } | { ok: false; error: PushSendResult['error']; transient: boolean };
+type Outcome = { ok: true } | { ok: false; error: PushSendResult['error']; transient: boolean } | { omit: true };
 
 @Injectable()
 export class FakePushTransport implements PushTransport {
@@ -30,10 +30,13 @@ export class FakePushTransport implements PushTransport {
   }
 
   async send(messages: PushMessage[]): Promise<PushSendResult[]> {
-    return messages.map((m) => {
+    const out: PushSendResult[] = [];
+    for (const m of messages) {
       this.sent.push(m);
       const o = this.byToken.get(m.token) ?? this.defaultOutcome;
-      return o.ok ? { ref: m.ref, ok: true, transient: false } : { ref: m.ref, ok: false, error: o.error, transient: o.transient };
-    });
+      if ('omit' in o) continue; // el proveedor no devolvió resultado para este ref (missing result)
+      out.push(o.ok ? { ref: m.ref, ok: true, transient: false } : { ref: m.ref, ok: false, error: o.error, transient: o.transient });
+    }
+    return out;
   }
 }
