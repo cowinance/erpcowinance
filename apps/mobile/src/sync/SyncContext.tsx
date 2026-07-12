@@ -58,6 +58,14 @@ export interface VetProduct {
   default_dose?: string;
 }
 
+/** Lote del catálogo local (P3 M-3.1): destino de movimientos, usable 100% offline. */
+export interface LotRow {
+  id: string;
+  name: string;
+  current_paddock_id: string | null;
+  paddock_name: string | null;
+}
+
 export interface LocalPregnancy {
   id: string;
   animal_id: string;
@@ -110,6 +118,7 @@ interface SyncCtx {
   findByTag: (tag: string) => AnimalRow | null;
   products: (type?: 'vaccine' | 'other') => VetProduct[];
   bulls: () => AnimalRow[];
+  lots: () => LotRow[];
   openPregnancy: (animalId: string) => LocalPregnancy | null;
   captureWeighing: (animalId: string, kg: number, cc?: number) => void;
   captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
@@ -513,6 +522,19 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           if (st.fields.status === 'active' && st.fields.category_code === 'toro') list.push(rowToAnimal(id, st.fields));
         }
         return list;
+      },
+
+      // Catálogo de lotes hidratado en el bootstrap (P3 M-3.1). Colección estable
+      // (orden por nombre) y 100% offline: lee del store local, sin red.
+      lots: (): LotRow[] => {
+        const m = store()?.rows.get('lots');
+        if (!m) return [];
+        const list: LotRow[] = [];
+        for (const [id, st] of m) {
+          const f = st.fields as any;
+          list.push({ id, name: String(f.name ?? ''), current_paddock_id: (f.current_paddock_id as string) ?? null, paddock_name: (f.paddock_name as string) ?? null });
+        }
+        return list.sort((a, b) => a.name.localeCompare(b.name));
       },
 
       openPregnancy: (animalId: string) => {

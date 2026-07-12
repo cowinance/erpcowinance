@@ -179,6 +179,16 @@ export class SyncService {
        WHERE p.tenant_id = $1 AND p.status = 'open' AND p.deleted_at IS NULL`,
       [this.db.tenant],
     );
+    // Catálogo de lotes (P3 M-3.1): destino de movimientos offline en el móvil. Solo
+    // transporte — el potrero deriva del lote; sin reglas de dominio aquí.
+    const lots = await this.db.query<any>(
+      `SELECT l.id, l.name, l.current_paddock_id, p.name AS paddock_name
+       FROM lots l
+       LEFT JOIN paddocks p ON p.id = l.current_paddock_id
+       WHERE l.tenant_id = $1 AND l.deleted_at IS NULL AND l.is_active
+       ORDER BY l.name`,
+      [this.db.tenant],
+    );
 
     const bootstrapRows = [
       ...rows.map((r) => ({
@@ -226,6 +236,18 @@ export class SyncService {
             withdrawal_meat_days: p.withdrawal_meat_days,
             withdrawal_milk_hours: p.withdrawal_milk_hours,
             default_dose: p.default_dose,
+          },
+          versions: {},
+        },
+      })),
+      ...lots.map((l) => ({
+        table: 'lots',
+        rowId: l.id,
+        state: {
+          fields: {
+            name: l.name,
+            current_paddock_id: l.current_paddock_id,
+            paddock_name: l.paddock_name,
           },
           versions: {},
         },
