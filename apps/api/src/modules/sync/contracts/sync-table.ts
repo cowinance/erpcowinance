@@ -7,6 +7,7 @@
  */
 export type SyncTable =
   | 'animals'
+  | 'animal_movements'
   | 'pregnancies'
   | 'weighings'
   | 'animal_events'
