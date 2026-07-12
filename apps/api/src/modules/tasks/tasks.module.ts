@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TasksController } from './tasks.controller';
 import { TaskService } from './task.service';
+import { TaskSyncHandler } from './task-sync.handler';
 
 /**
  * Tareas (P6): bounded context propio. `TaskService` es la fuente única del CÓMO se crea y
@@ -9,7 +10,7 @@ import { TaskService } from './task.service';
  */
 @Module({
   controllers: [TasksController],
-  providers: [TaskService],
+  providers: [TaskService, TaskSyncHandler],
   exports: [TaskService],
 })
 export class TasksModule {}
