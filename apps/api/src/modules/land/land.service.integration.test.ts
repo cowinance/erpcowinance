@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { DbService } from '../../db/db.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
@@ -52,7 +53,7 @@ describe('LandService.moveLot · caracterización', () => {
     (await db.query<{ id: string }>(`INSERT INTO paddocks (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [tenantId, farmId, name]))[0].id;
   const lot = async (name: string, paddockId: string | null) =>
     (await db.query<{ id: string }>(`INSERT INTO lots (tenant_id, farm_id, name, current_paddock_id) VALUES ($1,$2,$3,$4) RETURNING id`, [tenantId, farmId, name, paddockId]))[0].id;
-  const animal = async (lotId: string, paddockId: string) =>
+  const animal = async (lotId: string | null, paddockId: string | null) =>
     (
       await db.query<{ id: string }>(
         `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, origin, current_lot_id, current_paddock_id)
@@ -121,5 +122,75 @@ describe('LandService.moveLot · caracterización', () => {
     await expect(land.moveLot(pB, { lot_id: lX })).rejects.toThrow();
     // Rollback total: el lote sigue en su potrero original.
     expect((await db.query<any>(`SELECT current_paddock_id FROM lots WHERE id = $1`, [lX]))[0].current_paddock_id).toBe(pA);
+  });
+
+  // ─────────────── moveAnimals (P3 M-1.d): endpoint individual/grupal ───────────────
+
+  const facts2 = facts; // alias legible
+
+  it('moveAnimals individual → lote+potrero derivado, un hecho (origin=web), un evento, changeset y respuesta', async () => {
+    const pA = await paddock(uniq('A'));
+    const lX = await lot(uniq('X'), pA);
+    const a = await animal(null, null);
+    const mid = randomUUID();
+    const res = await land.moveAnimals({ animal_ids: [a], lot_id: lX, reason: 'compra' }, mid);
+    expect(res).toEqual({ moved: 1, skipped: 0, movement_id: mid });
+    expect(await loc(a)).toEqual({ current_lot_id: lX, current_paddock_id: pA });
+    const f = await facts2(a);
+    expect(f).toHaveLength(1);
+    expect({ to_lot: f[0].to_lot_id, origin: f[0].origin }).toEqual({ to_lot: lX, origin: 'web' });
+    expect(await events(a)).toHaveLength(1);
+    const cs = await db.query<any>(`SELECT operations FROM sync_changesets WHERE source='server' AND origin_ref = $1`, [`movement:${mid}`]);
+    expect(cs).toHaveLength(1);
+  });
+
+  it('moveAnimals grupal → un hecho por animal', async () => {
+    const pA = await paddock(uniq('A'));
+    const lX = await lot(uniq('X'), pA);
+    const a1 = await animal(null, null);
+    const a2 = await animal(null, null);
+    const res = await land.moveAnimals({ animal_ids: [a1, a2], lot_id: lX }, randomUUID());
+    expect(res.moved).toBe(2);
+    expect(await facts2(a1)).toHaveLength(1);
+    expect(await facts2(a2)).toHaveLength(1);
+  });
+
+  it('moveAnimals limpieza (lot_id:null) saca del lote conservando el potrero', async () => {
+    const pA = await paddock(uniq('A'));
+    const lX = await lot(uniq('X'), pA);
+    const a = await animal(lX, pA);
+    const res = await land.moveAnimals({ animal_ids: [a], lot_id: null }, randomUUID());
+    expect(res.moved).toBe(1);
+    expect(await loc(a)).toEqual({ current_lot_id: null, current_paddock_id: pA });
+  });
+
+  it('moveAnimals incoherente (lote X + potrero B) → 400, sin escritura parcial', async () => {
+    const pA = await paddock(uniq('A'));
+    const pB = await paddock(uniq('B'));
+    const lX = await lot(uniq('X'), pA);
+    const a = await animal(null, null);
+    await expect(land.moveAnimals({ animal_ids: [a], lot_id: lX, paddock_id: pB }, randomUUID())).rejects.toMatchObject({
+      response: { code: 'movement.lot_paddock_mismatch' },
+    });
+    expect(await loc(a)).toEqual({ current_lot_id: null, current_paddock_id: null });
+    expect(await facts2(a)).toHaveLength(0);
+  });
+
+  it('moveAnimals idempotente: mismo movementId no duplica; diff-aware con id fresco tampoco', async () => {
+    const pA = await paddock(uniq('A'));
+    const lX = await lot(uniq('X'), pA);
+    const a = await animal(null, null);
+    const mid = randomUUID();
+    await land.moveAnimals({ animal_ids: [a], lot_id: lX }, mid);
+    const again = await land.moveAnimals({ animal_ids: [a], lot_id: lX }, mid); // mismo movementId
+    expect(again.moved).toBe(0);
+    const fresh = await land.moveAnimals({ animal_ids: [a], lot_id: lX }, randomUUID()); // diff-aware (ya en destino)
+    expect(fresh.moved).toBe(0);
+    expect(await facts2(a)).toHaveLength(1);
+    expect(await events(a)).toHaveLength(1);
+  });
+
+  it('moveAnimals sin animal_ids → 400 movement.no_animals', async () => {
+    await expect(land.moveAnimals({ lot_id: 'x' } as any, randomUUID())).rejects.toMatchObject({ response: { code: 'movement.no_animals' } });
   });
 });

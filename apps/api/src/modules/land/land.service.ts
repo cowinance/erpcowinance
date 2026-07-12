@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { DbService } from '../../db/db.service';
-import { MovementService } from './movement.service';
+import { MovementService, type MovementIntent } from './movement.service';
 
 @Injectable()
 export class LandService {
@@ -91,5 +91,38 @@ export class LandService {
 
       return { moved: animals.length, lot: lot.name, from: lot.from_name ?? null, to: paddock.name };
     });
+  }
+
+  /**
+   * Movimiento individual/grupal (P3 M-1.d) — adaptador REST DELGADO que delega en
+   * la regla única `MovementService.recordMovement(origin='web')` dentro de UNA tx.
+   * La INTENCIÓN se toma por PRESENCIA de clave en el body: ausente = sin cambio;
+   * `null` = limpiar; uuid = asignar. `movementId` es la clave de idempotencia
+   * (Idempotency-Key del cliente o uuid fresco por request). Emite server-origin.
+   * Errores de dominio (mismatch/lot|paddock.not_found/noop) suben como 400.
+   */
+  async moveAnimals(
+    body: { animal_ids?: unknown; lot_id?: string | null; paddock_id?: string | null; reason?: string },
+    movementId: string,
+  ) {
+    const animalIds = Array.isArray(body?.animal_ids) ? (body.animal_ids as string[]) : [];
+    if (!animalIds.length) throw new BadRequestException({ code: 'movement.no_animals', title: 'animal_ids es obligatorio (1..N)' });
+
+    const to: MovementIntent = {};
+    if ('lot_id' in body) to.lot = body.lot_id ?? null;
+    if ('paddock_id' in body) to.paddock = body.paddock_id ?? null;
+
+    const res = await this.db.tx((q) =>
+      this.movement.recordMovement(q, {
+        animalIds,
+        to,
+        reason: body.reason ?? 'movimiento',
+        actorUserId: this.db.user,
+        origin: 'web',
+        movementId,
+        emitServerOrigin: true,
+      }),
+    );
+    return { moved: res.moved, skipped: res.skipped, movement_id: movementId };
   }
 }
