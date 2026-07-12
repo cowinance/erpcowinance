@@ -1,4 +1,5 @@
 import { ANIMAL_IMPORT_DESCRIPTOR, AnimalImportField } from '../herd/animal-import-descriptor';
+import type { RawAnimalRow } from '../herd/animal-write.service';
 
 /**
  * Mapping sugerido de columnas (P2 oleada 3.3a). Puro: dado el conjunto de
@@ -60,4 +61,16 @@ export function suggestMapping(headers: string[]): Partial<Record<AnimalImportFi
     if (match !== undefined) result[field.field] = match;
   }
   return result;
+}
+
+/**
+ * Arma un `RawAnimalRow` desde la fila cruda del CSV y el mapping (campo canónico
+ * → encabezado). Compartido por el preview (3.5) y el procesador (P-c). Puro.
+ */
+export function buildRawRow(raw: Record<string, string>, mapping: Partial<Record<AnimalImportField, string>>): RawAnimalRow {
+  const out: RawAnimalRow = {};
+  for (const [field, header] of Object.entries(mapping)) {
+    if (header) (out as Record<string, unknown>)[field] = raw[header];
+  }
+  return out;
 }

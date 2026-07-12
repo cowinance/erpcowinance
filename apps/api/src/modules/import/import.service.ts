@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { parseCsv } from './csv';
-import { suggestMapping, DuplicateHeadersError } from './mapping';
+import { suggestMapping, DuplicateHeadersError, buildRawRow } from './mapping';
 import { ANIMAL_IMPORT_DESCRIPTOR, REQUIRED_ANIMAL_IMPORT_FIELDS, type AnimalImportField } from '../herd/animal-import-descriptor';
-import { AnimalWriteService, type RawAnimalRow, type RowError } from '../herd/animal-write.service';
+import { AnimalWriteService, type RowError } from '../herd/animal-write.service';
 
 export const MAX_IMPORT_ROWS = 5000;
 const ROWS_PAGE_DEFAULT = 100;
@@ -68,15 +68,6 @@ export interface PreviewDto {
   sample: PreviewVerdict[];
 }
 const PREVIEW_SAMPLE_SIZE = 20;
-
-/** Arma un RawAnimalRow desde la fila cruda y el mapping (campo canónico → encabezado). */
-function buildRawRow(raw: Record<string, string>, mapping: Partial<Record<AnimalImportField, string>>): RawAnimalRow {
-  const out: RawAnimalRow = {};
-  for (const [field, header] of Object.entries(mapping)) {
-    if (header) (out as Record<string, unknown>)[field] = raw[header];
-  }
-  return out;
-}
 
 @Injectable()
 export class ImportService {
