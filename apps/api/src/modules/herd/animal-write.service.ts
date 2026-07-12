@@ -59,6 +59,18 @@ export type CheckResult =
   | { ok: false; errors: RowError[] }
   | { skip: 'duplicate_active_tag'; existingAnimalId: string };
 
+/** Resultado de un vínculo genealógico (dam/sire) de una fila. `linked` es interno. */
+export interface LinkOutcome {
+  field: 'dam' | 'sire';
+  outcome: 'linked' | 'not_found' | 'sex_incompatible' | 'self_ref' | 'cycle' | 'cycle_check_limit';
+}
+
+/** Candidato hijo→padre para la detección de ciclos batch. */
+export interface GenealogyPair {
+  childId: string;
+  parentId: string;
+}
+
 const ORIGINS = new Set(['born', 'purchased', 'transferred']);
 
 /** Campos crudos que ambos canales mapean a un alta de animal. */
@@ -267,5 +279,127 @@ export class AnimalWriteService {
       existingCategoryCodes: new Set(cats.map((c) => c.code)),
       activeTags: new Map(active.map((r) => [r.tag, r.animal_id])),
     };
+  }
+
+  // ──────────────────── Genealogía (P2 P-d) ────────────────────
+
+  /** Resuelve caravanas de dam/sire → {animalId, sex} en UNA query (animales activos del tenant). */
+  async loadGenealogyContext(q: Q, tags: string[]): Promise<Map<string, { animalId: string; sex: string }>> {
+    const uniq = [...new Set(tags)].filter((t) => typeof t === 'string' && t !== '');
+    if (!uniq.length) return new Map();
+    const rows = await q.query<{ tag: string; animal_id: string; sex: string }>(
+      `SELECT ai.value AS tag, a.id AS animal_id, a.sex
+       FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
+       WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = ANY($2) AND ai.deleted_at IS NULL AND a.status = 'active'`,
+      [this.db.tenant, uniq],
+    );
+    return new Map(rows.map((r) => [r.tag, { animalId: r.animal_id, sex: r.sex }]));
+  }
+
+  /**
+   * Detección de ciclos en LOTE: para todos los pares (child, parent) del chunk,
+   * en UNA consulta recursiva determina si el `parentId` propuesto ya tiene al
+   * `childId` entre sus ancestros (lo que crearía un ciclo). Profundidad máxima
+   * defensiva (32) + protección contra repetir nodos (`path`). Devuelve por par:
+   * `cycle` (se encontró el hijo), `cycle_check_limit` (se agotó la profundidad sin
+   * concluir → rechazo conservador) u `ok`. Key = `childId|parentId`.
+   */
+  async detectCycles(q: Q, pairs: GenealogyPair[]): Promise<Map<string, 'cycle' | 'cycle_check_limit' | 'ok'>> {
+    const result = new Map<string, 'cycle' | 'cycle_check_limit' | 'ok'>();
+    if (!pairs.length) return result;
+    const rows = await q.query<{ child_id: string; parent_id: string; is_cycle: boolean; max_depth: number }>(
+      `WITH RECURSIVE cand(child_id, parent_id) AS (
+         SELECT * FROM unnest($1::uuid[], $2::uuid[]) AS c(child_id, parent_id)
+       ),
+       anc(child_id, parent_id, node, depth, path) AS (
+         SELECT child_id, parent_id, parent_id, 0, ARRAY[parent_id] FROM cand
+         UNION ALL
+         SELECT a.child_id, a.parent_id, nxt.id, a.depth + 1, a.path || nxt.id
+         FROM anc a JOIN animals cur ON cur.id = a.node
+         CROSS JOIN LATERAL (VALUES (cur.dam_id), (cur.sire_id)) nxt(id)
+         WHERE nxt.id IS NOT NULL AND a.depth < 32 AND NOT (nxt.id = ANY(a.path)) AND a.node <> a.child_id
+       )
+       SELECT child_id, parent_id, bool_or(node = child_id) AS is_cycle, max(depth) AS max_depth
+       FROM anc GROUP BY child_id, parent_id`,
+      [pairs.map((p) => p.childId), pairs.map((p) => p.parentId)],
+    );
+    for (const r of rows) {
+      result.set(`${r.child_id}|${r.parent_id}`, r.is_cycle ? 'cycle' : Number(r.max_depth) >= 32 ? 'cycle_check_limit' : 'ok');
+    }
+    return result;
+  }
+
+  /**
+   * Evalúa los vínculos de una fila (PURA): usa el contexto de genealogía y los
+   * resultados de ciclos ya resueltos en lote. Devuelve los outcomes por vínculo y
+   * los `damId`/`sireId` a escribir (solo los válidos). No consulta la base.
+   */
+  evaluateLink(
+    childId: string,
+    refs: { damTag?: string; sireTag?: string },
+    genCtx: Map<string, { animalId: string; sex: string }>,
+    cycles: Map<string, 'cycle' | 'cycle_check_limit' | 'ok'>,
+  ): { outcomes: LinkOutcome[]; damId?: string; sireId?: string } {
+    const outcomes: LinkOutcome[] = [];
+    let damId: string | undefined;
+    let sireId: string | undefined;
+    const each: [LinkOutcome['field'], string | undefined, 'F' | 'M'][] = [
+      ['dam', refs.damTag, 'F'],
+      ['sire', refs.sireTag, 'M'],
+    ];
+    for (const [field, tag, expectSex] of each) {
+      if (!tag) continue;
+      const resolved = genCtx.get(tag);
+      if (!resolved) {
+        outcomes.push({ field, outcome: 'not_found' });
+        continue;
+      }
+      if (resolved.sex !== expectSex) {
+        outcomes.push({ field, outcome: 'sex_incompatible' });
+        continue;
+      }
+      if (resolved.animalId === childId) {
+        outcomes.push({ field, outcome: 'self_ref' });
+        continue;
+      }
+      const cyc = cycles.get(`${childId}|${resolved.animalId}`);
+      if (cyc === 'cycle' || cyc === 'cycle_check_limit') {
+        outcomes.push({ field, outcome: cyc });
+        continue;
+      }
+      if (field === 'dam') damId = resolved.animalId;
+      else sireId = resolved.animalId;
+      outcomes.push({ field, outcome: 'linked' });
+    }
+    return { outcomes, damId, sireId };
+  }
+
+  /**
+   * Escribe el/los vínculo(s) de un animal ya validado (dam_id/sire_id), versiona
+   * los campos cambiados con HLC de servidor en sync_row_state (MERGE con las
+   * versiones existentes) y devuelve el `syncOp`. Si nada cambia, no devuelve
+   * syncOp (evita changeset vacío). Se invoca dentro de la tx del chunk (P-d.2).
+   */
+  async applyGenealogyLink(q: Q, childId: string, damId?: string, sireId?: string): Promise<{ syncOp?: PutOp }> {
+    const fields: Record<string, unknown> = {};
+    if (damId) fields.dam_id = damId;
+    if (sireId) fields.sire_id = sireId;
+    const cols = Object.keys(fields);
+    if (!cols.length) return {};
+
+    const t = this.db.tenant;
+    const sets = cols.map((c, i) => `"${c}" = $${i + 3}`).join(', ');
+    await q.query(`UPDATE animals SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
+      childId,
+      t,
+      ...cols.map((c) => fields[c]),
+    ]);
+
+    const hlc = this.serverClock.tick();
+    const existing = (await this.versions.read(q, 'animals', childId)) ?? {};
+    const merged = { ...existing, ...Object.fromEntries(cols.map((c) => [c, hlc])) };
+    await this.versions.write(q, 'animals', childId, merged);
+
+    return { syncOp: { kind: 'put', table: 'animals', rowId: childId, fields, hlc } };
   }
 }

@@ -14,7 +14,7 @@
  * encabezados compare contra la misma forma.
  */
 
-export type AnimalImportField = 'tag' | 'sex' | 'category_code' | 'name' | 'birth_date' | 'origin';
+export type AnimalImportField = 'tag' | 'sex' | 'category_code' | 'name' | 'birth_date' | 'origin' | 'dam_tag' | 'sire_tag';
 
 export interface ImportFieldDescriptor {
   field: AnimalImportField;
@@ -37,6 +37,8 @@ export const ANIMAL_IMPORT_DESCRIPTOR: EntityImportDescriptor = {
     { field: 'name', label: 'Nombre', required: false, synonyms: ['nombre', 'name'] },
     { field: 'birth_date', label: 'Fecha de nacimiento', required: false, synonyms: ['nacimiento', 'fecha nacimiento', 'fecha_nacimiento', 'birth', 'birthdate', 'fecha'] },
     { field: 'origin', label: 'Origen', required: false, synonyms: ['origen', 'origin'] },
+    { field: 'dam_tag', label: 'Caravana de la madre', required: false, synonyms: ['madre', 'dam', 'caravana madre', 'madre caravana', 'id madre'] },
+    { field: 'sire_tag', label: 'Caravana del padre', required: false, synonyms: ['padre', 'sire', 'caravana padre', 'padre caravana', 'id padre'] },
   ],
 };
 
