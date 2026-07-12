@@ -4,6 +4,7 @@
  * de animal navega a su ficha; los de tarea son informativos. 100% offline (lee el
  * último snapshot cacheado); muestra su antigüedad.
  */
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,9 +44,22 @@ function relTime(iso: string): string {
 
 export function AgendaToday() {
   const sync = useSync();
-  const items = sync.agenda();
+  const [, setTick] = useState(0); // fuerza re-lectura tras completar una tarea offline
   const agendaAt = sync.agendaAt;
   const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Cross-ref con el store LOCAL (P6-3.c): el snapshot cacheado no se refresca offline, así
+  // que se ocultan los ítems de tarea que ya están completadas/canceladas localmente (el put
+  // de captureTaskComplete las marcó). Así la agenda se auto-corrige sin esperar al sync.
+  const closedTaskIds = new Set(sync.tasks().filter((t) => t.status !== 'pending').map((t) => t.id));
+  const items = sync.agenda().filter((i) => !(i.related_type === 'task' && i.related_id && closedTaskIds.has(i.related_id)));
+
+  const completeTask = (i: AgendaItem) => {
+    if (i.related_type === 'task' && i.related_id) {
+      sync.captureTaskComplete(i.related_id);
+      setTick((n) => n + 1);
+    }
+  };
 
   const header = (right?: string) => (
     <View style={styles.headerRow}>
@@ -87,6 +101,7 @@ export function AgendaToday() {
           </Text>
           {g.list.map((i, idx) => {
             const tappable = i.related_type === 'animal' && !!i.related_id;
+            const isTask = i.related_type === 'task' && !!i.related_id;
             const color = i.severity === 'warning' || i.severity === 'critical' ? T.warning : T.info;
             return (
               <Pressable
@@ -102,6 +117,12 @@ export function AgendaToday() {
                   {!!i.message && <Text style={styles.itemMsg}>{i.message}</Text>}
                 </View>
                 {tappable && <Ionicons name="chevron-forward" size={16} color={T.ink3} />}
+                {isTask && (
+                  <Pressable onPress={() => completeTask(i)} hitSlop={6} style={styles.completeBtn}>
+                    <Ionicons name="checkmark" size={15} color={T.success} />
+                    <Text style={styles.completeText}>Completar</Text>
+                  </Pressable>
+                )}
               </Pressable>
             );
           })}
@@ -121,4 +142,6 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   itemTitle: { fontSize: T.type.body, fontWeight: '600', color: T.ink },
   itemMsg: { fontSize: T.type.label, color: T.ink3, marginTop: 1 },
+  completeBtn: { flexDirection: 'row', alignItems: 'center', gap: T.space['1'], paddingHorizontal: T.space['1.5'], paddingVertical: T.space['1'] },
+  completeText: { fontSize: T.type.label, fontWeight: '600', color: T.success },
 });
