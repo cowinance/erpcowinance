@@ -6,6 +6,7 @@ import { WeightChart } from '@/components/WeightChart';
 import { ageFrom, EVENT_LABELS, formatDate, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { WeighingForm } from './WeighingForm';
 import { PhotoGallery } from './PhotoGallery';
+import { MoveAction } from './MoveAction';
 import { fileUrl } from '@/lib/api';
 import { ArrowLeft, Baby, Clock, Heart, Scale, Stethoscope, Syringe, StickyNote } from 'lucide-react';
 
@@ -20,9 +21,10 @@ const EVENT_ICON: Record<string, any> = {
 
 export default async function AnimalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [animal, timeline] = await Promise.all([
+  const [animal, timeline, lots] = await Promise.all([
     apiSafe<any>(`/animals/${id}`),
     apiSafe<any[]>(`/animals/${id}/timeline`),
+    apiSafe<any[]>('/lots'),
   ]);
   if (!animal) notFound();
 
@@ -104,6 +106,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
           </p>
           </div>
         </div>
+        <MoveAction animalId={id} lots={lots ?? []} />
       </div>
 
       {/* Vitales */}
