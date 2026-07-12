@@ -3,7 +3,7 @@ import { apiSafe } from '@/lib/server-api';
 import { fileUrl } from '@/lib/api';
 import { EmptyState, StatusBadge } from '@/components/ui';
 import { ageFrom, formatAdg, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Upload } from 'lucide-react';
 
 export default async function AnimalsPage({
   searchParams,
@@ -50,12 +50,20 @@ export default async function AnimalsPage({
             {params.status === 'all' ? '' : `${STATUS_LABELS[params.status ?? 'active']?.toLowerCase() ?? 'activo'}${animals.length === 1 ? '' : 's'}`}
           </p>
         </div>
-        <Link
-          href="/animales/nuevo"
-          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-body font-medium text-white hover:opacity-90"
-        >
-          <Plus size={15} /> Nuevo animal
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/animales/importar"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken"
+          >
+            <Upload size={15} /> Importar
+          </Link>
+          <Link
+            href="/animales/nuevo"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-body font-medium text-white hover:opacity-90"
+          >
+            <Plus size={15} /> Nuevo animal
+          </Link>
+        </div>
       </div>
 
       {/* Búsqueda + chips de filtro (doc diseño §12.1) */}
