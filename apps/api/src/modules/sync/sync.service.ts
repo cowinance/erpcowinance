@@ -148,7 +148,7 @@ export class SyncService {
     const rows = await this.db.query<any>(
       `SELECT a.id, a.name, a.status, a.sex, a.birth_date, a.notes,
               c.code AS category_code, c.name AS category,
-              l.name AS lot_name,
+              a.current_lot_id, a.current_paddock_id, l.name AS lot_name,
               ai.value AS visual_tag,
               w.weight_kg::float AS last_weight_kg, w.weighed_at AS last_weighed_at,
               rs.versions
@@ -204,6 +204,8 @@ export class SyncService {
             notes: r.notes,
             category: r.category,
             category_code: r.category_code,
+            current_lot_id: r.current_lot_id,
+            current_paddock_id: r.current_paddock_id,
             lot_name: r.lot_name,
             last_weight_kg: r.last_weight_kg,
             last_weighed_at: r.last_weighed_at,

@@ -17,8 +17,13 @@ import { MovementService, type MovementIntent } from '../movement.service';
  * a `sync/`). Se auto-registra en el `SyncHandlerRegistry` al arrancar.
  *
  * Idempotencia por `movementId = op.rowId` (índice único + omisión en recordMovement).
- * `emitServerOrigin:false`: el changeset del device ya re-propaga el `event` op al
- * resto de dispositivos por pull; el servidor no re-emite.
+ *
+ * Atomicidad semántica (P3 M-3.2, event-only): la op de movimiento es ÚNICA — si el
+ * evento se ACEPTA, `recordMovement` escribe campo+hecho+timeline y emite UN changeset
+ * server-origin con el `put` de `current_lot_id`/`current_paddock_id`, que converge el
+ * campo en TODOS los dispositivos (incluido el emisor: pull entrega los server-origin
+ * al propio device); si se RECHAZA, no se emite nada → cero cambio de campo. No hay
+ * `put` compañero que pueda quedar aplicado sin hecho.
  *
  * Rechazo de dominio → CONFLICTO (no throw): si el movimiento entrante es incoherente
  * (lote no pertenece al potrero, lote/potrero inexistente, sin destino), NO se lanza
@@ -66,7 +71,7 @@ export class MovementSyncHandler implements SyncHandler, OnModuleInit {
         origin: 'sync',
         movementId: op.rowId, // clave de idempotencia (event id del device)
         hlc: op.hlc,
-        emitServerOrigin: false, // el changeset del device ya se re-propaga por pull
+        emitServerOrigin: true, // al aceptar → server-origin put converge el campo en todos los devices; al rechazar → nada (atómico)
       });
       return [];
     } catch (e) {

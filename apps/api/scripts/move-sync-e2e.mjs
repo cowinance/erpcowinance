@@ -88,16 +88,25 @@ async function main() {
   );
   check('B recibe el event op de movimiento de A', !!fromA, `changesets=${pullB.changesets?.length}`);
 
-  // 5) NO se emitió un changeset server-origin para el movimiento (device_id=null con el nuevo potrero).
-  const serverOriginMove = (pullB.changesets ?? [])
+  // 5) Convergencia device→device: al ACEPTAR, el servidor emite UN changeset
+  //    server-origin (device_id=null) con el put de current_lot_id/current_paddock_id
+  //    → device B converge el campo (M-3.2, atómico: nada al rechazar).
+  const soPut = (pullB.changesets ?? [])
     .filter((c) => c.device_id === null)
     .flatMap((c) => c.ops ?? [])
-    .some((o) => o.table === 'animals' && o.rowId === animalId && o.fields?.current_paddock_id === targetPaddock);
-  check('sin changeset server-origin para el movimiento (origin=sync)', !serverOriginMove);
+    .find((o) => o.table === 'animals' && o.rowId === animalId && o.kind === 'put' && o.fields && 'current_lot_id' in o.fields);
+  check('B recibe el put server-origin del movimiento (converge lote+potrero)',
+    !!soPut && soPut.fields?.current_lot_id === targetLot && soPut.fields?.current_paddock_id === targetPaddock,
+    JSON.stringify(soPut?.fields));
 
-  // 6) A no recibe su propio changeset.
+  // 6) A no recibe su propio changeset de device (pero SÍ el server-origin, device_id=null).
   const pullA = (await api('GET', `/sync/pull?device_id=${devA.id}&cursor=0`)).json;
-  check('A no recibe sus propios changesets', (pullA.changesets ?? []).every((c) => c.device_id !== devA.id));
+  check('A no recibe sus propios changesets de device', (pullA.changesets ?? []).every((c) => c.device_id !== devA.id));
+  const aConverges = (pullA.changesets ?? [])
+    .filter((c) => c.device_id === null)
+    .flatMap((c) => c.ops ?? [])
+    .some((o) => o.table === 'animals' && o.rowId === animalId && o.fields?.current_lot_id === targetLot);
+  check('A converge por el put server-origin (llega al propio emisor)', aConverges);
 
   // 7) Reintento del mismo changeset → dedupe exactly-once; el timeline no se duplica.
   const retry = await api('POST', '/sync/push', changesetA);
