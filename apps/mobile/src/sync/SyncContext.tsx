@@ -129,6 +129,9 @@ interface SyncCtx {
   captureService: (animalId: string, method: 'ai' | 'natural', sireId?: string) => void;
   captureDiagnosis: (animalId: string, result: 'pregnant' | 'empty') => { expectedDue?: string };
   captureCalving: (damId: string, calf: { sex: 'F' | 'M'; tag?: string }) => { calfId: string };
+  /** Mueve un animal a un lote (o lo saca: toLotId=null). Emite SOLO el event op de
+   *  animal_movements (event-only, M-3.2.a); el servidor deriva el potrero y converge. */
+  captureMovement: (animalId: string, toLotId: string | null, reason?: string) => void;
   pendingDetail: () => PendingItem[];
   fetchConflicts: () => Promise<ServerConflict[] | { error: string }>;
   resolveConflict: (conflictId: string) => Promise<boolean>;
@@ -754,6 +757,25 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         bump();
         scheduleSync();
         return { calfId };
+      },
+
+      // Movimiento offline (P3 M-3.3.a): emite SOLO el event op de intención. El
+      // servidor (MovementSyncHandler → recordMovement) deriva el potrero del lote,
+      // escribe hecho+timeline y emite el server-origin put que converge el campo en
+      // todos los devices. `toLotId=null` ⇒ sacar del lote. Sin put compañero
+      // (atomicidad de M-3.2.a): el lote local converge al sincronizar (accept-lag).
+      captureMovement: (animalId: string, toLotId: string | null, reason?: string) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        d.addEvent('animal_movements', Crypto.randomUUID(), {
+          animal_id: animalId,
+          to_lot_id: toLotId,
+          reason: reason ?? 'movimiento',
+          moved_at: new Date().toISOString(),
+        });
+        d.commit();
+        bump();
+        scheduleSync();
       },
 
       captureWeighing: (animalId: string, kg: number, cc?: number) => {
