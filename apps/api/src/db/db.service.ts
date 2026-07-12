@@ -204,6 +204,11 @@ export class DbService implements OnModuleInit {
     ALTER TABLE animal_movements ADD COLUMN IF NOT EXISTS movement_id uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS ux_animal_movements_movement
       ON animal_movements (tenant_id, movement_id, animal_id) WHERE movement_id IS NOT NULL;
+
+    -- Deduplicación de notificaciones (P7-1): una entrega por (usuario, canal, alerta). Incluye
+    -- channel para no colisionar entre in_app y push sobre la misma alerta en el futuro.
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_notifications_alert_user
+      ON notifications (tenant_id, user_id, channel, alert_id) WHERE alert_id IS NOT NULL AND deleted_at IS NULL;
   `;
 
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
