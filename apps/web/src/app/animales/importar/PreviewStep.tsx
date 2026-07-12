@@ -17,8 +17,14 @@ interface Verdict {
   errors?: RowError[];
   reason?: string;
 }
+export interface PreviewCounts {
+  total: number;
+  valid: number;
+  invalid: number;
+  duplicate: number;
+}
 interface Preview {
-  counts: { total: number; valid: number; invalid: number; duplicate: number };
+  counts: PreviewCounts;
   sample: Verdict[];
 }
 
@@ -39,7 +45,7 @@ export function PreviewStep({
   onBack,
 }: {
   batch: ImportBatch;
-  onConfirm: () => void;
+  onConfirm: (counts: PreviewCounts) => void;
   onBack: () => void;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -134,8 +140,8 @@ export function PreviewStep({
         <Button variant="secondary" onClick={onBack}>
           Volver a mapear
         </Button>
-        <Button onClick={onConfirm} disabled={!canConfirm}>
-          Confirmar e importar
+        <Button onClick={() => onConfirm(counts)} disabled={!canConfirm}>
+          Continuar
         </Button>
         {!canConfirm && <span className="text-label text-ink-3">No hay filas válidas para importar.</span>}
       </div>

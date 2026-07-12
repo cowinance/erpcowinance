@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { UploadStep, type ImportBatch } from './UploadStep';
 import { MappingStep } from './MappingStep';
-import { PreviewStep } from './PreviewStep';
+import { PreviewStep, type PreviewCounts } from './PreviewStep';
+import { ConfirmStep } from './ConfirmStep';
+import { ResultStep } from './ResultStep';
 
 /**
  * Contenedor del asistente de importación (P2 P-e). Mantiene el paso activo y el
@@ -17,6 +19,7 @@ const STEPS = ['Subir', 'Mapear', 'Previsualizar', 'Confirmar', 'Resultado'] as 
 export function ImportWizard() {
   const [step, setStep] = useState(0);
   const [batch, setBatch] = useState<ImportBatch | null>(null);
+  const [counts, setCounts] = useState<PreviewCounts | null>(null);
 
   return (
     <div className="space-y-6">
@@ -43,19 +46,29 @@ export function ImportWizard() {
       )}
 
       {step === 2 && batch && (
-        <PreviewStep batch={batch} onConfirm={() => setStep(3)} onBack={() => setStep(1)} />
+        <PreviewStep
+          batch={batch}
+          onConfirm={(c) => {
+            setCounts(c);
+            setStep(3);
+          }}
+          onBack={() => setStep(1)}
+        />
       )}
 
-      {step > 2 && batch && (
-        <div className="rounded-[10px] border border-subtle bg-surface p-6 text-body text-ink-3 shadow-[var(--shadow-1)]">
-          <p className="font-medium text-ink">
-            Archivo cargado: <span className="font-mono">{batch.source_filename ?? '—'}</span>
-          </p>
-          <p className="mt-1">
-            {batch.total_rows} filas · previsualización confirmada.
-          </p>
-          <p className="mt-3">El paso «{STEPS[step]}» llega en la próxima entrega (P-e.4).</p>
-        </div>
+      {step === 3 && batch && counts && (
+        <ConfirmStep batch={batch} counts={counts} onCommitted={() => setStep(4)} onBack={() => setStep(2)} />
+      )}
+
+      {step === 4 && batch && (
+        <ResultStep
+          batch={batch}
+          onRestart={() => {
+            setBatch(null);
+            setCounts(null);
+            setStep(0);
+          }}
+        />
       )}
     </div>
   );
