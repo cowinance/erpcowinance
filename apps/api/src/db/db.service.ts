@@ -192,6 +192,20 @@ export class DbService implements OnModuleInit {
                   OR current_setting('app.job_scope', true) = 'import_worker');
   `;
 
+  /**
+   * M-1.a (P3): columnas aditivas de `animal_movements` para el núcleo neutral de
+   * movimientos — `origin` (procedencia: web/map/sync) y `movement_id` (clave de
+   * idempotencia por operación). El índice único PARCIAL (movement_id NOT NULL)
+   * garantiza un solo hecho por (operación, animal) ante reproceso de changeset o
+   * reintento REST, sin chocar con las filas heredadas (movement_id NULL).
+   */
+  private static readonly MOVEMENT_MIGRATION = `
+    ALTER TABLE animal_movements ADD COLUMN IF NOT EXISTS origin varchar(16);
+    ALTER TABLE animal_movements ADD COLUMN IF NOT EXISTS movement_id uuid;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_animal_movements_movement
+      ON animal_movements (tenant_id, movement_id, animal_id) WHERE movement_id IS NOT NULL;
+  `;
+
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
   private static readonly RLS_TABLES = [
     'companies',
@@ -269,6 +283,7 @@ export class DbService implements OnModuleInit {
     // política estándar (RLS_TABLES) se le aplique; import_batches trae su propia
     // política bespoke dentro de IMPORT_MIGRATION.
     await this.db.exec(DbService.IMPORT_MIGRATION);
+    await this.db.exec(DbService.MOVEMENT_MIGRATION);
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
