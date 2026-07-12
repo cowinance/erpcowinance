@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { AlertTriangle, Syringe, Heart, PawPrint, CheckSquare, ArrowRight } from 'lucide-react';
+import { TaskCompleteButton } from './TaskCompleteButton';
 
 /** Ítem de la agenda (P4), espejo del AgendaItemDto del servidor. */
 interface AgendaItem {
@@ -59,6 +60,7 @@ export function AgendaAttention({ items }: { items: AgendaItem[] }) {
               const Icon = ICON[i.action] ?? AlertTriangle;
               const warn = i.severity === 'warning' || i.severity === 'critical';
               const tappable = i.related_type === 'animal' && !!i.related_id;
+              const isTask = i.related_type === 'task' && !!i.related_id;
               const cls = `flex items-center gap-3 rounded-md border-l-[3px] ${warn ? 'border-warning' : 'border-info'} bg-sunken px-3 py-2 ${tappable ? 'hover:bg-brand-soft' : ''}`;
               const body = (
                 <>
@@ -68,6 +70,7 @@ export function AgendaAttention({ items }: { items: AgendaItem[] }) {
                     {i.message ? <span className="text-ink-3"> · {i.message}</span> : null}
                   </div>
                   {tappable ? <ArrowRight size={14} className="shrink-0 text-ink-3" /> : null}
+                  {isTask ? <TaskCompleteButton taskId={i.related_id!} /> : null}
                 </>
               );
               const key = `${i.code}:${i.related_id ?? idx}`;
