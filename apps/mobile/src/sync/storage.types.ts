@@ -1,5 +1,20 @@
 import type { SerializedDevice, SyncDevice } from '@cowinance/sync-core';
 
+/** Ítem de la agenda diaria (P4-2), espejo del AgendaItemDto del servidor. Snapshot
+ *  opaco cacheado localmente (cache-on-sync); la UI (P4-3) lo renderiza y mapea `action`. */
+export interface AgendaItem {
+  code: string;
+  category: string;
+  severity: 'info' | 'warning' | 'critical';
+  due_at: string | null;
+  title: string;
+  message: string;
+  related_type: string | null;
+  related_id: string | null;
+  tag: string | null;
+  action: 'vaccinate' | 'review_pregnancy' | 'view_animal' | 'complete_task';
+}
+
 export interface PersistedMeta {
   serverDeviceId?: string;
   farmName?: string;
@@ -8,6 +23,9 @@ export interface PersistedMeta {
   refreshToken?: string;
   userName?: string;
   userEmail?: string;
+  /** Snapshot de agenda cacheado (P4-2), refrescado en cada sync exitoso. */
+  agenda?: AgendaItem[];
+  agendaAt?: string;
   // Propiedad del store local (P1.3.6a): identidad dueña de los datos operativos
   // en este dispositivo. Se compara al iniciar sesión para no exponer/sincronizar
   // el store de un usuario/tenant bajo otra cuenta (aislamiento multi-tenant local).

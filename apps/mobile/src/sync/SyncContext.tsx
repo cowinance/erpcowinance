@@ -16,7 +16,8 @@ import {
   newbornCategoryCode,
 } from '@cowinance/domain';
 import { createStorage } from './storage';
-import type { DeviceStorage, PersistedMeta } from './storage.types';
+import type { DeviceStorage, PersistedMeta, AgendaItem } from './storage.types';
+export type { AgendaItem } from './storage.types';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
 const AUTO_SYNC_INTERVAL_MS = 60_000;
@@ -121,6 +122,9 @@ interface SyncCtx {
   products: (type?: 'vaccine' | 'other') => VetProduct[];
   bulls: () => AnimalRow[];
   lots: () => LotRow[];
+  /** Agenda diaria cacheada (P4-2), usable offline; `agendaAt` = cuándo se refrescó. */
+  agenda: () => AgendaItem[];
+  agendaAt?: string;
   openPregnancy: (animalId: string) => LocalPregnancy | null;
   captureWeighing: (animalId: string, kg: number, cc?: number) => void;
   captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
@@ -268,7 +272,20 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     pushConflictsRef.current = 0;
     try {
       const result = await d.sync(transport);
-      metaRef.current = { ...metaRef.current, lastSyncAt: new Date().toISOString() };
+      // Cache-on-sync de la agenda (P4-2), best-effort: si el fetch falla se conserva el
+      // snapshot anterior — el sync (push/pull) ya fue exitoso y la agenda es secundaria.
+      let agenda = metaRef.current.agenda;
+      let agendaAt = metaRef.current.agendaAt;
+      try {
+        const r = await authFetch('/agenda');
+        if (r.ok) {
+          agenda = (await r.json()) as AgendaItem[];
+          agendaAt = new Date().toISOString();
+        }
+      } catch {
+        /* red: se mantiene el cache previo */
+      }
+      metaRef.current = { ...metaRef.current, lastSyncAt: new Date().toISOString(), agenda, agendaAt };
       await storageRef.current.saveMeta(metaRef.current);
       const conflictNote = pushConflictsRef.current
         ? ` · ${pushConflictsRef.current} conflicto${pushConflictsRef.current === 1 ? '' : 's'} en revisión`
@@ -282,7 +299,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setSyncing(false);
     }
-  }, [transport]);
+  }, [transport, authFetch]);
 
   const scheduleSync = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -548,6 +565,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         }
         return list.sort((a, b) => a.name.localeCompare(b.name));
       },
+
+      // Agenda diaria cacheada (P4-2): snapshot del último sync exitoso, usable offline.
+      agenda: (): AgendaItem[] => metaRef.current?.agenda ?? [],
+      agendaAt: metaRef.current?.agendaAt,
 
       openPregnancy: (animalId: string) => {
         const m = store()?.rows.get('pregnancies');
