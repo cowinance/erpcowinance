@@ -44,6 +44,8 @@ export interface AnimalRow {
   status?: string;
   sex?: string;
   category?: string;
+  /** Lote actual (sincronizable). El nombre se resuelve del catálogo por este id. */
+  current_lot_id?: string | null;
   lot_name?: string;
   last_weight_kg?: number;
   last_weighed_at?: string;
@@ -142,7 +144,8 @@ export const useSync = () => {
   return ctx;
 };
 
-function rowToAnimal(id: string, fields: Record<string, unknown>): AnimalRow {
+function rowToAnimal(id: string, fields: Record<string, unknown>, lotName?: (lotId: string) => string | undefined): AnimalRow {
+  const currentLotId = (fields.current_lot_id as string) ?? null;
   return {
     id,
     tag: fields.visual_tag as string,
@@ -150,7 +153,11 @@ function rowToAnimal(id: string, fields: Record<string, unknown>): AnimalRow {
     status: fields.status as string,
     sex: fields.sex as string,
     category: fields.category as string,
-    lot_name: fields.lot_name as string,
+    current_lot_id: currentLotId,
+    // El nombre del lote SIEMPRE se resuelve del catálogo (sync.lots()) por
+    // current_lot_id: el put de un movimiento actualiza current_lot_id pero NO el
+    // lot_name denormalizado, que quedaría obsoleto.
+    lot_name: currentLotId ? lotName?.(currentLotId) : undefined,
     last_weight_kg: fields.last_weight_kg as number,
     last_weighed_at: fields.last_weighed_at as string,
   };
@@ -442,6 +449,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<SyncCtx>(() => {
     const store = () => deviceRef.current?.store;
+    // Resolución del nombre de lote desde el catálogo local (M-3.2.b), por current_lot_id.
+    const lotNameOf = (lotId: string): string | undefined => store()?.rows.get('lots')?.get(lotId)?.fields.name as string | undefined;
 
     return {
       status,
@@ -466,7 +475,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const list: AnimalRow[] = [];
         for (const [id, st] of m) {
           if (st.fields.status !== 'active') continue;
-          const a = rowToAnimal(id, st.fields);
+          const a = rowToAnimal(id, st.fields, lotNameOf);
           if (query) {
             const q = query.toLowerCase();
             if (!a.tag?.toLowerCase().includes(q) && !a.name?.toLowerCase().includes(q)) continue;
@@ -478,14 +487,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       animal: (id: string) => {
         const st = store()?.getRow('animals', id);
-        return st ? rowToAnimal(id, st.fields) : null;
+        return st ? rowToAnimal(id, st.fields, lotNameOf) : null;
       },
 
       findByTag: (tag: string) => {
         const m = store()?.rows.get('animals');
         if (!m) return null;
         for (const [id, st] of m) {
-          if (st.fields.status === 'active' && String(st.fields.visual_tag ?? '') === tag.trim()) return rowToAnimal(id, st.fields);
+          if (st.fields.status === 'active' && String(st.fields.visual_tag ?? '') === tag.trim()) return rowToAnimal(id, st.fields, lotNameOf);
         }
         return null;
       },
@@ -519,7 +528,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (!m) return [];
         const list: AnimalRow[] = [];
         for (const [id, st] of m) {
-          if (st.fields.status === 'active' && st.fields.category_code === 'toro') list.push(rowToAnimal(id, st.fields));
+          if (st.fields.status === 'active' && st.fields.category_code === 'toro') list.push(rowToAnimal(id, st.fields, lotNameOf));
         }
         return list;
       },
@@ -715,7 +724,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           category: categoryCode === 'ternero' ? 'Ternero' : 'Ternera',
           category_code: categoryCode,
           dam_id: damId,
-          lot_name: dam?.lot_name ?? null,
+          current_lot_id: dam?.current_lot_id ?? null, // hereda el lote de la madre (el nombre se resuelve del catálogo)
           last_weight_kg: null,
           last_weighed_at: null,
         });
