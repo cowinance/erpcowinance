@@ -151,6 +151,34 @@ export class TaskService {
     return { status: 'done', changed: true, syncOp };
   }
 
+  /**
+   * Cancela una tarea (P6-2, diff-aware e idempotente). `pending → canceled` permitido;
+   * `canceled → canceled` no-op; cualquier otra transición se rechaza (`done` es terminal).
+   * Versiona `status`. Emite server-origin SOLO si `ctx.emitServerOrigin`.
+   */
+  async cancelTask(q: Q, input: { taskId: string }, ctx: TaskContext): Promise<{ status: string; changed: boolean; syncOp: PutOp | null }> {
+    const t = this.db.tenant;
+    const existing = await q.one<{ id: string; status: string }>(
+      `SELECT id, status FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [input.taskId, t],
+    );
+    if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+
+    if (existing.status === 'canceled') return { status: 'canceled', changed: false, syncOp: null }; // idempotente
+    if (existing.status !== 'pending')
+      throw new BadRequestException({ code: 'task.invalid_transition', title: `Transición no permitida: ${existing.status} → canceled` });
+
+    const hlc = ctx.hlc ?? this.serverClock.tick();
+    await q.query(`UPDATE tasks SET status = 'canceled', updated_at = now() WHERE id = $1 AND tenant_id = $2`, [input.taskId, t]);
+
+    const existingV = (await this.versions.read(q, 'tasks', input.taskId)) ?? {};
+    await this.versions.write(q, 'tasks', input.taskId, { ...existingV, status: hlc });
+
+    const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { status: 'canceled' }, hlc };
+    if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:cancel:${input.taskId}`);
+    return { status: 'canceled', changed: true, syncOp };
+  }
+
   /** Lectura mínima (P6-1: verificación + preparación de la lista web de P6-2). */
   async list(status?: string): Promise<Record<string, unknown>[]> {
     const args: unknown[] = [this.db.tenant];

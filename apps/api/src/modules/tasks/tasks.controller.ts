@@ -45,6 +45,14 @@ export class TasksController {
       .then((r) => ({ id, status: r.status }));
   }
 
+  /** Cancela una tarea (server-authored → server-origin). */
+  @Post('tasks/:id/cancel')
+  cancel(@Param('id') id: string) {
+    return this.db
+      .tx((q) => this.tasks.cancelTask(q, { taskId: id }, { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user }))
+      .then((r) => ({ id, status: r.status }));
+  }
+
   /** Lista mínima (verificación + P6-2). */
   @Get('tasks')
   list(@Query('status') status?: string) {

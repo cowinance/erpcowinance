@@ -114,6 +114,33 @@ describe('TaskService · integración', () => {
     await expect(db.tx((q) => tasks.completeTask(q, { taskId: randomUUID() }, ctxRest()))).rejects.toMatchObject({ response: { code: 'task.not_found' } });
   });
 
+  it('cancelTask: pending→canceled fija status, versiona, y server-origin', async () => {
+    const { taskId } = await db.tx((q) => tasks.createTask(q, { title: 'A cancelar' }, ctxRest()));
+    const res = await db.tx((q) => tasks.cancelTask(q, { taskId }, ctxRest()));
+    expect(res).toMatchObject({ status: 'canceled', changed: true });
+    expect((await taskRow(taskId)).status).toBe('canceled');
+    const cs = await changesets(`task:cancel:${taskId}`);
+    expect(cs).toHaveLength(1);
+    expect(cs[0].operations.ops[0].fields).toMatchObject({ status: 'canceled' });
+  });
+
+  it('cancelTask idempotente: canceled→canceled es no-op (changed=false, sin re-emitir)', async () => {
+    const { taskId } = await db.tx((q) => tasks.createTask(q, { title: 'Doble cancel' }, ctxRest()));
+    await db.tx((q) => tasks.cancelTask(q, { taskId }, ctxRest()));
+    const again = await db.tx((q) => tasks.cancelTask(q, { taskId }, ctxRest()));
+    expect(again).toMatchObject({ status: 'canceled', changed: false, syncOp: null });
+  });
+
+  it('cancelTask sobre una tarea completada (done) → rechazo task.invalid_transition', async () => {
+    const { taskId } = await db.tx((q) => tasks.createTask(q, { title: 'Ya hecha' }, ctxRest()));
+    await db.tx((q) => tasks.completeTask(q, { taskId }, ctxRest()));
+    await expect(db.tx((q) => tasks.cancelTask(q, { taskId }, ctxRest()))).rejects.toMatchObject({ response: { code: 'task.invalid_transition' } });
+  });
+
+  it('cancelTask sobre id inexistente → task.not_found', async () => {
+    await expect(db.tx((q) => tasks.cancelTask(q, { taskId: randomUUID() }, ctxRest()))).rejects.toMatchObject({ response: { code: 'task.not_found' } });
+  });
+
   it('contrato sanitario preservado: PlansService.completeTask delega en la MISMA regla', async () => {
     // Una tarea de salud creada por la vía neutral (como lo hace ahora plans.apply).
     const { taskId } = await db.tx((q) =>
