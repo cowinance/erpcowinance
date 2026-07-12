@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { UploadStep, type ImportBatch } from './UploadStep';
 import { MappingStep } from './MappingStep';
@@ -21,10 +21,23 @@ export function ImportWizard() {
   const [batch, setBatch] = useState<ImportBatch | null>(null);
   const [counts, setCounts] = useState<PreviewCounts | null>(null);
 
+  // A11y: al cambiar de paso, mover el foco a la región del paso activo (SR/teclado).
+  // No se roba el foco en la carga inicial (paso 0).
+  const regionRef = useRef<HTMLElement>(null);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    regionRef.current?.focus();
+  }, [step]);
+
   return (
     <div className="space-y-6">
       <Stepper current={step} />
 
+      <section ref={regionRef} tabIndex={-1} aria-label={`Paso ${step + 1}: ${STEPS[step]}`} className="outline-none">
       {step === 0 && (
         <UploadStep
           onUploaded={(b) => {
@@ -70,6 +83,7 @@ export function ImportWizard() {
           }}
         />
       )}
+      </section>
     </div>
   );
 }
