@@ -11,6 +11,7 @@ export type SyncTable =
   | 'mortalities'
   | 'pregnancies'
   | 'weighings'
+  | 'weanings'
   | 'animal_events'
   | 'vaccinations'
   | 'treatments'

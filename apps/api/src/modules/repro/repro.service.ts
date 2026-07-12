@@ -1,11 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
+import { WeaningService } from './weaning.service';
 
 @Injectable()
 export class ReproService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly weanings: WeaningService,
+  ) {}
 
   /** Detección de celo. */
   async heat(animalId: string, body: any) {
@@ -145,28 +150,26 @@ export class ReproService {
     return { ...calving, dam_tag: dam.tag, offspring: calves };
   }
 
-  /** Destete. */
+  /**
+   * Destete — adaptador REST delgado sobre la operación neutral `WeaningService`
+   * (P5-1.c). Conserva el contrato observable (`{ id, weaning_date, weaning_weight_kg,
+   * tag }`) más la mejora deliberada de atomicidad (hecho + pesaje + timeline en una
+   * sola tx) e idempotencia. La regla vive UNA sola vez en `WeaningService`.
+   */
   async weaning(body: any) {
     if (!body?.animal_id)
       throw new BadRequestException({ code: 'weaning.missing_fields', title: 'animal_id es obligatorio' });
-    const animal = await requireAnimal(this.db, body.animal_id);
-    if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
-    const weaningDate = (body.weaning_date ?? new Date().toISOString()).slice(0, 10);
-    const damRow = await this.db.one<any>(`SELECT dam_id FROM animals WHERE id = $1`, [body.animal_id]);
-
-    const row = await this.db.one<any>(
-      `INSERT INTO weanings (tenant_id, animal_id, weaning_date, weaning_weight_kg, dam_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, weaning_date, weaning_weight_kg`,
-      [this.db.tenant, body.animal_id, weaningDate, body.weight_kg ?? null, damRow?.dam_id ?? null, this.db.user],
+    const res = await this.db.tx((q) =>
+      this.weanings.recordWeaning(q, {
+        animalId: body.animal_id,
+        weaningDate: body.weaning_date,
+        weightKg: body.weight_kg ?? null,
+        weaningId: randomUUID(),
+        actorUserId: this.db.user,
+        origin: 'rest',
+      }),
     );
-    if (body.weight_kg) {
-      await this.db.query(
-        `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, created_by) VALUES ($1,$2,$3,$4,'scale',$5)`,
-        [this.db.tenant, body.animal_id, weaningDate, body.weight_kg, this.db.user],
-      );
-    }
-    await insertAnimalEvent(this.db, body.animal_id, 'weaning', { weight_kg: body.weight_kg ?? null }, weaningDate);
-    return { ...row, tag: animal.tag };
+    return { id: res.weaningId, weaning_date: res.weaningDate, weaning_weight_kg: res.weightKg, tag: res.tag };
   }
 
   /** Próximos partos (preñeces abiertas por fecha probable). */
