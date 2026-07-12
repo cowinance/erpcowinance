@@ -17,6 +17,7 @@ import {
 } from '@cowinance/domain';
 import { createStorage } from './storage';
 import type { DeviceStorage, PersistedMeta, AgendaItem } from './storage.types';
+import { buildMortalityEmit, buildWeaningEmit, buildNoteEmit } from './capture-builders';
 export type { AgendaItem } from './storage.types';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
@@ -136,6 +137,14 @@ interface SyncCtx {
   /** Mueve un animal a un lote (o lo saca: toLotId=null). Emite SOLO el event op de
    *  animal_movements (event-only, M-3.2.a); el servidor deriva el potrero y converge. */
   captureMovement: (animalId: string, toLotId: string | null, reason?: string) => void;
+  /** Baja por muerte (P5-2): emite SOLO el event op de mortalities (event-only, Patrón B);
+   *  el servidor autora hecho + status='dead' + timeline y converge por server-origin. */
+  captureMortality: (animalId: string, notes?: string) => void;
+  /** Destete (P5-2): emite SOLO el event op de weanings; el servidor materializa
+   *  atómicamente el hecho, el pesaje determinista (si hay peso) y el timeline. */
+  captureWeaning: (animalId: string, weightKg?: number) => void;
+  /** Nota libre (P5-2): un event op sobre animal_events (event_type='note'); no emite vacías. */
+  captureNote: (animalId: string, text: string) => void;
   pendingDetail: () => PendingItem[];
   fetchConflicts: () => Promise<ServerConflict[] | { error: string }>;
   resolveConflict: (conflictId: string) => Promise<boolean>;
@@ -799,6 +808,49 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         scheduleSync();
       },
 
+      // Baja por muerte offline (P5-2, Patrón B): emite SOLO el event op de mortalities.
+      // El servidor (MortalitySyncHandler → recordMortality) escribe hecho + status='dead'
+      // + timeline y emite el server-origin put que converge el estado en todos los devices
+      // (incl. el emisor, por pull). Sin put de status ni animal_events compañero: la
+      // atomicidad de P5-1 exige que el estado y su hecho viajen juntos (accept-lag).
+      captureMortality: (animalId: string, notes?: string) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        const op = buildMortalityEmit(animalId, notes, new Date(), Crypto.randomUUID);
+        d.addEvent(op.table, op.rowId, op.row);
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      // Destete offline (P5-2, Patrón B): emite SOLO el event op de weanings. El servidor
+      // (WeaningSyncHandler → recordWeaning) materializa atómicamente el hecho, el pesaje
+      // asociado (si hay peso, con identidad determinista) y el timeline. Fact-only: sin
+      // server-origin (no toca campo autoritativo). Sin animal_events ni pesaje compañero.
+      captureWeaning: (animalId: string, weightKg?: number) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        const op = buildWeaningEmit(animalId, weightKg, new Date(), Crypto.randomUUID);
+        d.addEvent(op.table, op.rowId, op.row);
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      // Nota libre offline (P5-2): un único event op sobre animal_events (event_type='note'),
+      // cubierto por el AnimalEventSyncHandler existente. La nota aparece de inmediato en el
+      // timeline local. No se emiten notas vacías (trim en el builder).
+      captureNote: (animalId: string, text: string) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        const op = buildNoteEmit(animalId, text, new Date(), Crypto.randomUUID);
+        if (!op) return; // nota vacía tras trim → no se emite
+        d.addEvent(op.table, op.rowId, op.row);
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
       captureWeighing: (animalId: string, kg: number, cc?: number) => {
         const d = deviceRef.current;
         if (!d) return;
@@ -841,12 +893,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
               if (op.table === 'weighings') summary = `Pesaje · ${row.weight_kg} kg`;
               else if (op.table === 'vaccinations') summary = 'Vacunación';
               else if (op.table === 'treatments') summary = 'Tratamiento';
+              else if (op.table === 'mortalities') summary = 'Baja por muerte';
+              else if (op.table === 'weanings') summary = 'Destete';
               else if (op.table === 'breeding_events')
                 summary = row.type === 'heat' ? 'Celo' : String(row.type).startsWith('service') ? 'Servicio' : 'Evento reproductivo';
               else if (op.table === 'calvings') summary = 'Parto';
               else if (op.table === 'calving_offspring') continue; // detalle interno del parto
-              else if (op.table === 'animal_events') continue; // espejo del timeline, no repetir
-              else summary = op.table;
+              else if (op.table === 'animal_events') {
+                if (row.event_type === 'note') summary = 'Nota';
+                else continue; // espejo del timeline de otras capturas, no repetir
+              } else summary = op.table;
             } else {
               if (op.table === 'animals') {
                 tag = (op.fields.visual_tag as string) ?? tagOf(op.rowId);
