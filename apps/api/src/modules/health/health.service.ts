@@ -6,12 +6,14 @@ import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 import { EVENT_PUBLISHER } from '../../application/ports/event-publisher.port';
 import type { EventPublisher } from '../../application/ports/event-publisher.port';
+import { MortalityService } from './mortality.service';
 
 @Injectable()
 export class HealthService {
   constructor(
     private readonly db: DbService,
     @Inject(EVENT_PUBLISHER) private readonly events: EventPublisher,
+    private readonly mortalities: MortalityService,
   ) {}
 
   async products() {
@@ -121,28 +123,29 @@ export class HealthService {
     return { ...row, tag: animal.tag };
   }
 
-  /** Mortalidad: registra la muerte y da de baja al animal (cambio de estado por evento). */
+  /**
+   * Mortalidad — adaptador REST delgado sobre la operación neutral `MortalityService`
+   * (P5-1.a). Conserva el contrato observable (`{ id, died_at, tag }`) más las mejoras
+   * deliberadas de atomicidad (una sola tx), versión LWW de `status` y propagación al
+   * móvil (server-origin). La regla vive UNA sola vez en `MortalityService`.
+   */
   async mortality(body: any) {
     if (!body?.animal_id)
       throw new BadRequestException({ code: 'mortality.missing_fields', title: 'animal_id es obligatorio' });
-    const animal = await requireAnimal(this.db, body.animal_id);
-    if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
-    if (animal.status === 'dead')
-      throw new BadRequestException({ code: 'mortality.already_dead', title: `El animal ${animal.tag} ya está registrado como muerto` });
-    const diedAt = body.died_at ?? new Date().toISOString();
-
-    const row = await this.db.one<any>(
-      `INSERT INTO mortalities (tenant_id, animal_id, died_at, necropsy, estimated_loss, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, died_at`,
-      [this.db.tenant, body.animal_id, diedAt, body.necropsy ?? false, body.estimated_loss ?? null, body.notes ?? null, this.db.user],
+    const res = await this.db.tx((q) =>
+      this.mortalities.recordMortality(q, {
+        animalId: body.animal_id,
+        diedAt: body.died_at,
+        necropsy: body.necropsy ?? false,
+        estimatedLoss: body.estimated_loss ?? null,
+        notes: body.notes ?? null,
+        actorUserId: this.db.user,
+        origin: 'rest',
+        mortalityId: randomUUID(),
+        emitServerOrigin: true,
+      }),
     );
-    await this.db.query(`UPDATE animals SET status = 'dead', status_changed_at = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
-      body.animal_id,
-      this.db.tenant,
-      diedAt,
-    ]);
-    await insertAnimalEvent(this.db, body.animal_id, 'death', { cause: body.notes ?? null }, diedAt);
-    return { ...row, tag: animal.tag };
+    return { id: res.mortalityId, died_at: res.diedAt, tag: res.tag };
   }
 
   async withdrawals() {
