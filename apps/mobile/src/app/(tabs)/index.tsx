@@ -5,6 +5,7 @@ import { useSync } from '@/sync/SyncContext';
 import { useAccount } from '@/account/AccountContext';
 import { Button, Card, Kpi, SyncDot } from '@/components/ui';
 import { EmptyHerd } from '@/components/EmptyHerd';
+import { AgendaToday } from '@/components/AgendaToday';
 import { T } from '@/theme';
 
 export default function Home() {
@@ -70,6 +71,8 @@ export default function Home() {
             tone={sync.pendingCount ? 'warning' : 'success'}
           />
         </View>
+
+        <AgendaToday />
 
         <Card>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: T.space['1'] }}>
