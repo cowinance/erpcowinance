@@ -20,14 +20,39 @@ export interface PushMessage {
   data?: Record<string, unknown>;
 }
 
-export type PushError = 'DeviceNotRegistered' | 'MessageTooBig' | 'MessageRateExceeded' | 'ProviderError' | 'Unknown';
+/**
+ * Clasificación NEUTRAL y CERRADA del error por mensaje: no se filtra el detalle arbitrario
+ * de Expo al contrato interno. El código original del proveedor va aparte en `providerCode`
+ * (diagnóstico), sin debilitar el tipado. El `PushProcessor` solo especial-casa
+ * `DeviceNotRegistered`; el resto se decide por `transient`.
+ */
+export type PushError = 'DeviceNotRegistered' | 'MessageTooBig' | 'MismatchSenderId' | 'InvalidCredentials' | 'MessageRateExceeded' | 'ProviderError';
 
 export interface PushSendResult {
   ref: string;
   ok: boolean;
   error?: PushError;
+  /** Código original del proveedor (Expo) cuando `error='ProviderError'` o para trazabilidad. */
+  providerCode?: string;
   /** true → reintentar con backoff; false → permanente (o éxito). */
   transient: boolean;
+}
+
+/**
+ * Fallo del REQUEST COMPLETO (no de un mensaje individual): HTTP 4xx/5xx, timeout/red, JSON
+ * inválido o `errors[]` sin tickets confiables. No se fabrican resultados por posición. El
+ * `PushProcessor` (P7-3.c.2) respetará `transient`: temporal → backoff del sublote; permanente
+ * → las deliveries del sublote a `failed`.
+ */
+export class PushTransportRequestError extends Error {
+  constructor(
+    readonly code: string,
+    readonly transient: boolean,
+    message?: string,
+  ) {
+    super(message ?? code);
+    this.name = 'PushTransportRequestError';
+  }
 }
 
 export interface PushTransport {
