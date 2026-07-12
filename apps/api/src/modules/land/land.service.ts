@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { DbService } from '../../db/db.service';
-import { insertAnimalEvent } from '../../common/events';
+import { MovementService } from './movement.service';
 
 @Injectable()
 export class LandService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly movement: MovementService,
+  ) {}
 
   /** Potreros con geometría, ocupación y lotes presentes (para el mapa). */
   async paddocks() {
@@ -32,51 +36,60 @@ export class LandService {
   }
 
   /**
-   * Mover un lote completo a otro potrero: actualiza lote y animales,
-   * y registra el movimiento como hechos (animal_movements + timeline).
+   * Mover un lote completo a otro potrero. Actualiza `lots.current_paddock_id` y
+   * DELEGA el movimiento de sus animales en el núcleo neutral
+   * `MovementService.recordMovement` (M-1) — sin persistir hechos/timeline/versiones
+   * inline. Todo en UNA transacción: si el movimiento animal falla, el lote NO queda
+   * movido. Idempotencia del endpoint por atomicidad + guard `already_there` + lock
+   * de fila del lote (serializa dobles submits). Propaga por server-origin (nuevo).
+   * Contrato HTTP y respuesta preservados: `{ moved, lot, from, to }`.
    */
   async moveLot(paddockId: string, body: { lot_id?: string }) {
     if (!body?.lot_id) throw new BadRequestException({ code: 'move.missing_lot', title: 'lot_id es obligatorio' });
     const t = this.db.tenant;
 
-    const paddock = await this.db.one<any>(
-      `SELECT id, name FROM paddocks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
-      [paddockId, t],
-    );
-    if (!paddock) throw new NotFoundException({ code: 'paddock.not_found', title: 'Potrero no encontrado' });
-
-    const lot = await this.db.one<any>(
-      `SELECT l.id, l.name, l.current_paddock_id, fp.name AS from_name
-       FROM lots l LEFT JOIN paddocks fp ON fp.id = l.current_paddock_id
-       WHERE l.id = $1 AND l.tenant_id = $2 AND l.deleted_at IS NULL`,
-      [body.lot_id, t],
-    );
-    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
-    if (lot.current_paddock_id === paddockId)
-      throw new BadRequestException({ code: 'move.already_there', title: `${lot.name} ya está en ${paddock.name}` });
-
-    const animals = await this.db.query<any>(
-      `SELECT id FROM animals WHERE current_lot_id = $1 AND tenant_id = $2 AND status = 'active' AND deleted_at IS NULL`,
-      [body.lot_id, t],
-    );
-
-    await this.db.query(`UPDATE lots SET current_paddock_id = $2, updated_at = now() WHERE id = $1`, [body.lot_id, paddockId]);
-    await this.db.query(
-      `UPDATE animals SET current_paddock_id = $2, updated_at = now()
-       WHERE current_lot_id = $1 AND tenant_id = $3 AND status = 'active' AND deleted_at IS NULL`,
-      [body.lot_id, paddockId, t],
-    );
-
-    const movedAt = new Date().toISOString();
-    for (const a of animals) {
-      await this.db.query(
-        `INSERT INTO animal_movements (tenant_id, animal_id, moved_at, from_paddock_id, to_paddock_id, from_lot_id, to_lot_id, reason, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$6,'rotación',$7)`,
-        [t, a.id, movedAt, lot.current_paddock_id, paddockId, body.lot_id, this.db.user],
+    return this.db.tx(async (q) => {
+      const paddock = await q.one<any>(
+        `SELECT id, name FROM paddocks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+        [paddockId, t],
       );
-      await insertAnimalEvent(this.db, a.id, 'movement', { from: lot.from_name ?? null, to: paddock.name, lot: lot.name }, movedAt);
-    }
+      if (!paddock) throw new NotFoundException({ code: 'paddock.not_found', title: 'Potrero no encontrado' });
 
-    return { moved: animals.length, lot: lot.name, from: lot.from_name ?? null, to: paddock.name };
+      // Lock de fila del lote: serializa movimientos concurrentes del mismo lote
+      // (el segundo verá el potrero nuevo → `already_there`, sin duplicar hechos).
+      const lot = await q.one<any>(
+        `SELECT l.id, l.name, l.current_paddock_id, fp.name AS from_name
+         FROM lots l LEFT JOIN paddocks fp ON fp.id = l.current_paddock_id
+         WHERE l.id = $1 AND l.tenant_id = $2 AND l.deleted_at IS NULL
+         FOR UPDATE OF l`,
+        [body.lot_id, t],
+      );
+      if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+      if (lot.current_paddock_id === paddockId)
+        throw new BadRequestException({ code: 'move.already_there', title: `${lot.name} ya está en ${paddock.name}` });
+
+      const animals = await q.query<{ id: string }>(
+        `SELECT id FROM animals WHERE current_lot_id = $1 AND tenant_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+        [body.lot_id, t],
+      );
+
+      // 1) El lote cambia de potrero (su tabla). Debe ir ANTES de recordMovement para
+      //    que P(lote)=nuevo potrero y la intención `{paddock}` resuelva coherente.
+      await q.query(`UPDATE lots SET current_paddock_id = $2, updated_at = now() WHERE id = $1`, [body.lot_id, paddockId]);
+
+      // 2) Los animales del lote siguen su lote al nuevo potrero, vía la regla única.
+      //    recordMovement lee el potrero ANTERIOR de cada animal (aún sin tocar) como `from`.
+      await this.movement.recordMovement(q, {
+        animalIds: animals.map((a) => a.id),
+        to: { paddock: paddockId },
+        reason: 'rotación',
+        actorUserId: this.db.user,
+        origin: 'map',
+        movementId: randomUUID(),
+        emitServerOrigin: true,
+      });
+
+      return { moved: animals.length, lot: lot.name, from: lot.from_name ?? null, to: paddock.name };
+    });
   }
 }
