@@ -17,6 +17,7 @@ const EVENT_LABELS: Record<string, string> = {
   pregnancy_diagnosed: 'Diagnóstico de preñez',
   calving: 'Parto',
   weaning: 'Destete',
+  movement: 'Movimiento',
   death: 'Muerte',
   note: 'Nota',
 };

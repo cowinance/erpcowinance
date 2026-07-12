@@ -18,6 +18,7 @@ const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphM
   { tipo: 'servicio', label: 'Servicio', icon: 'git-merge-outline', href: '/captura/servicio' },
   { tipo: 'diagnostico', label: 'Diag. preñez', icon: 'pulse-outline', href: '/captura/diagnostico' },
   { tipo: 'parto', label: 'Parto', icon: 'add-circle-outline', href: '/captura/parto' },
+  { tipo: 'mover', label: 'Mover', icon: 'swap-horizontal-outline', href: '/captura/mover' },
 ];
 
 export default function CapturaMenu() {
