@@ -12,6 +12,7 @@ export type SyncTable =
   | 'pregnancies'
   | 'weighings'
   | 'weanings'
+  | 'tasks'
   | 'animal_events'
   | 'vaccinations'
   | 'treatments'

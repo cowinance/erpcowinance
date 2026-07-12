@@ -16,6 +16,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { MediaModule } from './modules/media/media.module';
 import { ImportModule } from './modules/import/import.module';
+import { TasksModule } from './modules/tasks/tasks.module';
 
 /**
  * Monolito modular (Fase 0-1 del roadmap): cada módulo se alinea 1:1 con un
@@ -23,6 +24,6 @@ import { ImportModule } from './modules/import/import.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule],
+  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule],
 })
 export class AppModule {}

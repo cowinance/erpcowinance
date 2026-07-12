@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
+import { TaskService } from '../tasks/task.service';
 
 /**
  * Planes/calendarios sanitarios reutilizables (Módulo B3 · Sanidad).
@@ -18,7 +19,10 @@ interface PlanStep {
 
 @Injectable()
 export class PlansService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly taskService: TaskService,
+  ) {}
 
   async list() {
     return this.db.query(
@@ -101,10 +105,12 @@ export class PlansService {
           skipped++;
           continue;
         }
-        await this.db.query(
-          `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, related_type, related_id, created_by)
-           VALUES ($1,$2,$3,'health',$4,'normal','pending','animal',$5,$6)`,
-          [t, farm, title, due.toISOString(), animal.id, this.db.user],
+        // Sanidad decide QUÉ tarea clínica debe existir (aquí); el CÓMO persistirla —fila,
+        // versiones LWW, server-origin— es responsabilidad única de TaskService (P6-1).
+        await this.taskService.createTask(
+          this.db,
+          { title, type: 'health', dueDate: due.toISOString(), priority: 'normal', relatedType: 'animal', relatedId: animal.id, farmId: farm },
+          { origin: 'health', emitServerOrigin: true, actorUserId: this.db.user },
         );
         created++;
       }
@@ -135,13 +141,9 @@ export class PlansService {
     );
   }
 
+  /** Completar tarea sanitaria — delega en la regla única de TaskService (server-authored). */
   async completeTask(id: string) {
-    const row = await this.db.one(
-      `UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now()
-       WHERE id = $1 AND tenant_id = $2 AND type = 'health' AND deleted_at IS NULL RETURNING id, status`,
-      [id, this.db.tenant],
-    );
-    if (!row) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
-    return row;
+    const res = await this.taskService.completeTask(this.db, { taskId: id }, { origin: 'health', emitServerOrigin: true, actorUserId: this.db.user });
+    return { id, status: res.status };
   }
 }
