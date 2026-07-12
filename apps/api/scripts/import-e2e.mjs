@@ -216,6 +216,14 @@ async function main() {
   const childFull = (await api(token, 'GET', `/animals/${childLookup.json?.id}`)).json;
   check('genealogía: el hijo tiene dam_tag = la madre', childFull?.genealogy?.dam_tag === gdam, JSON.stringify(childFull?.genealogy));
 
+  // 16. Catálogo de campos para la UI de mapeo (P-e.2)
+  const fields = (await api(token, 'GET', '/imports/animal/fields')).json;
+  check('fields: 8 campos con label+required', Array.isArray(fields) && fields.length === 8 && fields.every((f) => f.field && f.label && typeof f.required === 'boolean'), JSON.stringify(fields?.length));
+  const req = new Set(fields.filter((f) => f.required).map((f) => f.field));
+  check('fields: obligatorios = tag/sex/category_code', req.size === 3 && req.has('tag') && req.has('sex') && req.has('category_code'), [...req].join(','));
+  const badFields = await api(token, 'GET', '/imports/oveja/fields');
+  check('fields: entity_type no soportado → 400', badFields.status === 400 && badFields.json?.code === 'import.invalid_entity_type', `${badFields.status} ${badFields.json?.code}`);
+
   console.log(failures === 0 ? '\nE2E upload de importación: TODO OK ✓' : `\nE2E upload de importación: ${failures} fallas ✗`);
   process.exit(failures ? 1 : 0);
 }

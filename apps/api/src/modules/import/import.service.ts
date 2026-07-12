@@ -134,6 +134,19 @@ export class ImportService {
     });
   }
 
+  /**
+   * GET /v1/imports/:entityType/fields — catálogo de campos asignables del
+   * descriptor (label + obligatorio), fuente ÚNICA para la UI de mapeo (no se
+   * duplica en el front). Estático y sin tenant; los sinónimos NO se exponen (el
+   * matching es responsabilidad del servidor).
+   */
+  listFields(entityType: string): { field: string; label: string; required: boolean }[] {
+    if (entityType !== 'animal') {
+      throw new BadRequestException({ code: 'import.invalid_entity_type', title: "entity_type debe ser 'animal'" });
+    }
+    return ANIMAL_IMPORT_DESCRIPTOR.fields.map((f) => ({ field: f.field, label: f.label, required: f.required }));
+  }
+
   /** GET /v1/imports/:id — batch del tenant actual (404 si no existe o es ajeno). */
   async getBatch(id: string): Promise<ImportBatchDto> {
     const batch = await this.db.one<ImportBatchDto>(

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { UploadStep, type ImportBatch } from './UploadStep';
+import { MappingStep } from './MappingStep';
 
 /**
  * Contenedor del asistente de importación (P2 P-e). Mantiene el paso activo y el
@@ -29,15 +30,26 @@ export function ImportWizard() {
         />
       )}
 
-      {step > 0 && (
+      {step === 1 && batch && (
+        <MappingStep
+          batch={batch}
+          onMapped={(b) => {
+            setBatch(b);
+            setStep(2);
+          }}
+          onBack={() => setStep(0)}
+        />
+      )}
+
+      {step > 1 && batch && (
         <div className="rounded-[10px] border border-subtle bg-surface p-6 text-body text-ink-3 shadow-[var(--shadow-1)]">
           <p className="font-medium text-ink">
-            Archivo cargado: <span className="font-mono">{batch?.source_filename ?? '—'}</span>
+            Archivo cargado: <span className="font-mono">{batch.source_filename ?? '—'}</span>
           </p>
           <p className="mt-1">
-            {batch?.total_rows} filas · {batch?.headers.length} columnas detectadas.
+            {batch.total_rows} filas · {batch.headers.length} columnas · mapeo guardado.
           </p>
-          <p className="mt-3">El paso «{STEPS[step]}» llega en la próxima entrega (P-e.2).</p>
+          <p className="mt-3">El paso «{STEPS[step]}» llega en la próxima entrega (P-e.3).</p>
         </div>
       )}
     </div>

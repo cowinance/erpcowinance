@@ -48,6 +48,12 @@ export class ImportController {
     return this.imports.createFromCsv(entityType ?? '', file.originalname ?? null, content);
   }
 
+  /** Catálogo de campos del descriptor para la UI de mapeo (3 segmentos → no colisiona con `imports/:id`). */
+  @Get('imports/:entityType/fields')
+  fields(@Param('entityType') entityType: string) {
+    return this.imports.listFields(entityType);
+  }
+
   @Get('imports/:id')
   get(@Param('id') id: string) {
     return this.imports.getBatch(id);
