@@ -19,6 +19,8 @@ const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphM
   { tipo: 'diagnostico', label: 'Diag. preñez', icon: 'pulse-outline', href: '/captura/diagnostico' },
   { tipo: 'parto', label: 'Parto', icon: 'add-circle-outline', href: '/captura/parto' },
   { tipo: 'mover', label: 'Mover', icon: 'swap-horizontal-outline', href: '/captura/mover' },
+  { tipo: 'destete', label: 'Destete', icon: 'cut-outline', href: '/captura/destete' },
+  { tipo: 'nota', label: 'Nota', icon: 'create-outline', href: '/captura/nota' },
 ];
 
 export default function CapturaMenu() {

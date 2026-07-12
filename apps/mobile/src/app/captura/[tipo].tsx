@@ -20,6 +20,8 @@ const TITLES: Record<string, string> = {
   servicio: 'Registrar servicio',
   diagnostico: 'Diagnóstico de preñez',
   parto: 'Registrar parto',
+  destete: 'Destete',
+  nota: 'Nota',
 };
 
 const ROUTES = [
@@ -65,10 +67,15 @@ export default function CaptureForm() {
   const [result, setResult] = useState<'pregnant' | 'empty'>('pregnant');
   const [calfSex, setCalfSex] = useState<'F' | 'M'>('F');
   const [calfTag, setCalfTag] = useState('');
+  const [weight, setWeight] = useState('');
+  const [note, setNote] = useState('');
   const [success, setSuccess] = useState('');
   const [count, setCount] = useState(0);
 
   const onlyFemales = ['celo', 'servicio', 'diagnostico', 'parto'].includes(tipo);
+  // Destete: peso opcional, pero si se ingresa debe ser numérico y > 0.
+  const weightNum = weight.trim() === '' ? null : Number(weight);
+  const weightValid = weightNum === null || (Number.isFinite(weightNum) && weightNum > 0);
   const products = tipo === 'vacunar' ? sync.products('vaccine') : sync.products('other');
   const bulls = sync.bulls();
   const pregnancy = animal ? sync.openPregnancy(animal.id) : null;
@@ -99,6 +106,14 @@ export default function CaptureForm() {
     } else if (tipo === 'parto') {
       sync.captureCalving(animal.id, { sex: calfSex, tag: calfTag || undefined });
       msg = `Parto de ${animal.tag} guardado — cría ${calfTag || 'sin caravana'} dada de alta`;
+    } else if (tipo === 'destete') {
+      if (!weightValid) return;
+      sync.captureWeaning(animal.id, weightNum ?? undefined);
+      msg = `Destete de ${animal.tag} guardado${weightNum != null ? ` · ${weightNum} kg` : ''} · se sube al sincronizar`;
+    } else if (tipo === 'nota') {
+      if (!note.trim()) return;
+      sync.captureNote(animal.id, note);
+      msg = `Nota guardada para ${animal.tag}`;
     }
     setSuccess(msg);
     setCount((c) => c + 1);
@@ -106,12 +121,16 @@ export default function CaptureForm() {
     setDose('');
     setBatch('');
     setCalfTag('');
+    setWeight('');
+    setNote('');
   }
 
   const canSave =
     !!animal &&
     ((tipo !== 'vacunar' && tipo !== 'tratar') || !!productId) &&
-    (tipo !== 'diagnostico' || result === 'empty' || !pregnancy);
+    (tipo !== 'diagnostico' || result === 'empty' || !pregnancy) &&
+    (tipo !== 'destete' || weightValid) &&
+    (tipo !== 'nota' || note.trim().length > 0);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -248,6 +267,39 @@ export default function CaptureForm() {
               <Text style={styles.label}>Caravana de la cría</Text>
               <TextInput value={calfTag} onChangeText={setCalfTag} keyboardType="number-pad" placeholder="801" placeholderTextColor={T.ink3} style={[styles.input, { fontFamily: 'monospace' }]} />
             </View>
+          </View>
+        )}
+
+        {tipo === 'destete' && (
+          <View>
+            <Text style={styles.label}>Peso al destete (kg)</Text>
+            <TextInput
+              value={weight}
+              onChangeText={setWeight}
+              keyboardType="decimal-pad"
+              placeholder="Opcional — ej. 180"
+              placeholderTextColor={T.ink3}
+              style={styles.input}
+            />
+            {weight.trim() !== '' && !weightValid && (
+              <Text style={{ fontSize: T.type.label, color: T.warning, marginTop: T.space['1'] }}>
+                El peso debe ser un número mayor que cero.
+              </Text>
+            )}
+          </View>
+        )}
+
+        {tipo === 'nota' && (
+          <View>
+            <Text style={styles.label}>Nota *</Text>
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder="Observación de campo…"
+              placeholderTextColor={T.ink3}
+              multiline
+              style={[styles.input, { height: 96, paddingTop: T.space['2.5'], textAlignVertical: 'top' }]}
+            />
           </View>
         )}
 
