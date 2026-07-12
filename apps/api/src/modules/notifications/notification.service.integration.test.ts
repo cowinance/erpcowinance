@@ -41,8 +41,8 @@ describe('NotificationService · integración', () => {
     (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM notifications WHERE user_id = $1`, [uid]))[0].n;
 
   it('dispatch genera notificaciones in_app delivered desde alertas notificables; excluye sistema', async () => {
-    const { created } = await notifications.dispatch(userId);
-    expect(created).toBeGreaterThan(0);
+    const { inApp } = await notifications.dispatch(userId);
+    expect(inApp).toBeGreaterThan(0);
 
     const rows = await db.query<any>(`SELECT channel, status, sent_at, read_at, alert_id FROM notifications WHERE user_id = $1`, [userId]);
     expect(rows.every((r) => r.channel === 'in_app' && r.status === 'delivered' && r.sent_at === null && r.read_at === null && r.alert_id)).toBe(true);
@@ -57,8 +57,8 @@ describe('NotificationService · integración', () => {
 
   it('dedup: dos ejecuciones consecutivas no duplican (índice único)', async () => {
     const before = await countFor(userId);
-    const { created } = await notifications.dispatch(userId);
-    expect(created).toBe(0);
+    const { inApp } = await notifications.dispatch(userId);
+    expect(inApp).toBe(0);
     expect(await countFor(userId)).toBe(before);
   });
 

@@ -29,17 +29,20 @@ async function main() {
 
   const feed1 = (await api('GET', '/notifications')).json ?? [];
   check('GET /notifications genera y lista notificaciones', Array.isArray(feed1) && feed1.length > 0, `${feed1.length} ítems`);
-  check('todas in_app delivered, sin read_at', feed1.every((n) => n.status === 'delivered' && n.read_at === null));
+  // Robusto a re-ejecución (DB persistente): el feed puede tener ya algunas leídas.
+  const unread1 = feed1.filter((n) => n.status === 'delivered');
+  check('feed in_app: los no leídos son delivered sin read_at', unread1.every((n) => n.read_at === null));
 
   const count1 = (await api('GET', '/notifications/unread-count')).json?.count ?? 0;
-  check('unread-count = tamaño del feed no leído', count1 === feed1.length, `${count1}`);
+  check('unread-count coincide con los delivered del feed', count1 === unread1.length, `${count1} vs ${unread1.length}`);
+  check('hay al menos una no leída para probar', unread1.length > 0);
 
   // 2da lectura: dedup (no crea nuevas).
   const feed2 = (await api('GET', '/notifications')).json ?? [];
   check('2da lectura no duplica (dedup)', feed2.length === feed1.length, `${feed1.length} → ${feed2.length}`);
 
-  // Marcar una como leída.
-  const target = feed1[0];
+  // Marcar una NO leída como leída.
+  const target = unread1[0];
   const read = await api('POST', `/notifications/${target.id}/read`);
   check('POST /:id/read → status read', read.json?.status === 'read', JSON.stringify(read.json));
   const count2 = (await api('GET', '/notifications/unread-count')).json?.count ?? 0;

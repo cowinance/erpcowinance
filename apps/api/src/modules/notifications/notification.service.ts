@@ -44,11 +44,16 @@ export class NotificationService {
   ) {}
 
   /**
-   * Genera notificaciones `in_app` (`delivered`) desde las alertas ABIERTAS notificables del
-   * tenant para `userId`. Refresca `alerts` vía `evaluate()` (una sola fuente). Idempotente
-   * por el índice único. No modifica el lifecycle de la alerta.
+   * Produce el ledger desde las alertas ABIERTAS notificables del tenant para `userId`:
+   * - `in_app` (`delivered`) por alerta;
+   * - si el usuario tiene ≥1 dispositivo activo con token: la notificación LÓGICA `push`
+   *   (`queued`) y UNA `notification_delivery` por dispositivo (con `token_snapshot`).
+   * Sin tokens → solo `in_app` (nada de push/deliveries). Idempotente por los índices únicos.
+   * Las deliveries se crean SOLO al crear por primera vez la campaña push: un dispositivo que
+   * aparece después NO obtiene entrega retroactiva en P7-3 (política diferida). No modifica el
+   * lifecycle de la alerta.
    */
-  async dispatch(userId: string): Promise<{ created: number }> {
+  async dispatch(userId: string): Promise<{ inApp: number; push: number; deliveries: number }> {
     const t = this.db.tenant;
     await this.alerts.evaluate();
     const open = await this.db.query<{ id: string; title: string; message: string | null }>(
@@ -56,19 +61,48 @@ export class NotificationService {
        WHERE tenant_id = $1 AND status = 'open' AND category = ANY($2) AND deleted_at IS NULL`,
       [t, NOTIFIABLE_CATEGORIES],
     );
-    let created = 0;
+    const devices = await this.db.query<{ id: string; push_token: string }>(
+      `SELECT id, push_token FROM sync_devices
+       WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' AND push_token IS NOT NULL AND deleted_at IS NULL`,
+      [t, userId],
+    );
+
+    let inApp = 0;
+    let push = 0;
+    let deliveries = 0;
     for (const a of open) {
-      const inserted = await this.db.query(
+      const inAppRow = await this.db.query(
         `INSERT INTO notifications (tenant_id, user_id, channel, title, body, alert_id, status, created_by)
          VALUES ($1,$2,'in_app',$3,$4,$5,'delivered',$2)
          ON CONFLICT (tenant_id, user_id, channel, alert_id) WHERE alert_id IS NOT NULL AND deleted_at IS NULL
-         DO NOTHING
-         RETURNING id`,
+         DO NOTHING RETURNING id`,
         [t, userId, a.title, a.message, a.id],
       );
-      if (inserted.length) created++;
+      if (inAppRow.length) inApp++;
+
+      if (!devices.length) continue; // sin token → sin campaña push
+
+      const pushRow = await this.db.query<{ id: string }>(
+        `INSERT INTO notifications (tenant_id, user_id, channel, title, body, alert_id, status, created_by)
+         VALUES ($1,$2,'push',$3,$4,$5,'queued',$2)
+         ON CONFLICT (tenant_id, user_id, channel, alert_id) WHERE alert_id IS NOT NULL AND deleted_at IS NULL
+         DO NOTHING RETURNING id`,
+        [t, userId, a.title, a.message, a.id],
+      );
+      if (!pushRow.length) continue; // ya existía → no crear entregas retroactivas
+      push++;
+      const pushId = pushRow[0].id;
+      for (const d of devices) {
+        const del = await this.db.query(
+          `INSERT INTO notification_deliveries (tenant_id, notification_id, sync_device_id, token_snapshot, status)
+           VALUES ($1,$2,$3,$4,'queued')
+           ON CONFLICT (tenant_id, notification_id, sync_device_id) DO NOTHING RETURNING id`,
+          [t, pushId, d.id, d.push_token],
+        );
+        if (del.length) deliveries++;
+      }
     }
-    return { created };
+    return { inApp, push, deliveries };
   }
 
   /** Feed del usuario autenticado: orden determinista (fecha desc, id desc). */
