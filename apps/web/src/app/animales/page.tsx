@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { apiSafe } from '@/lib/server-api';
-import { fileUrl } from '@/lib/api';
-import { EmptyState, StatusBadge } from '@/components/ui';
-import { ageFrom, formatAdg, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
+import { EmptyState } from '@/components/ui';
+import { STATUS_LABELS } from '@/lib/format';
 import { Plus, Search, Upload } from 'lucide-react';
+import { AnimalsTable } from './AnimalsTable';
 
 export default async function AnimalsPage({
   searchParams,
@@ -18,9 +18,10 @@ export default async function AnimalsPage({
   qs.set('status', params.status ?? 'active');
   qs.set('limit', '100');
 
-  const [result, categories] = await Promise.all([
+  const [result, categories, lots] = await Promise.all([
     apiSafe<any>(`/animals?${qs}`),
     apiSafe<any[]>('/catalogs/categories'),
+    apiSafe<any[]>('/lots'),
   ]);
 
   if (!result) {
@@ -84,68 +85,8 @@ export default async function AnimalsPage({
           .map((c) => chip(`/animales?category=${c.code}`, `${c.name}s (${c.animal_count})`, params.category === c.code))}
       </div>
 
-      {/* Tabla maestra (doc diseño §10.4: filas 36 px, números tabulares) */}
-      <div className="overflow-hidden rounded-[10px] border border-subtle bg-surface shadow-[var(--shadow-1)]">
-        <table className="w-full text-body">
-          <thead>
-            <tr className="h-8 border-b border-subtle bg-sunken text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
-              <th className="pl-4">Caravana</th>
-              <th>Nombre</th>
-              <th>Categoría</th>
-              <th>Raza</th>
-              <th>Edad</th>
-              <th>Lote</th>
-              <th className="text-right">Último peso</th>
-              <th className="pr-2 text-right">GDP</th>
-              <th className="pr-4 text-right">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {animals.map((a: any) => (
-              <tr key={a.id} className="h-9 border-b border-subtle last:border-0 hover:bg-sunken">
-                <td className="pl-4">
-                  <Link href={`/animales/${a.id}`} className="inline-flex items-center gap-2 font-mono font-medium text-brand hover:underline">
-                    {fileUrl(a.photo) ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={fileUrl(a.photo)!} alt="" className="size-6 rounded-full border border-subtle object-cover" />
-                    ) : (
-                      <span className="size-6 rounded-full border border-dashed border-strong bg-sunken" />
-                    )}
-                    {a.tag ?? '—'}
-                  </Link>
-                </td>
-                <td className="text-ink-2">{a.name ?? '—'}</td>
-                <td>{a.category ?? '—'}</td>
-                <td className="text-ink-2">{a.breeds ?? '—'}</td>
-                <td className="tnum text-ink-2">{ageFrom(a.birth_date)}</td>
-                <td className="text-ink-2">{a.lot_name ?? '—'}</td>
-                <td className="tnum text-right font-medium">
-                  {formatKg(a.last_weight_kg)}
-                  {a.last_weighed_at && (
-                    <span className="ml-1.5 text-caption font-normal text-ink-3">{relativeTime(a.last_weighed_at)}</span>
-                  )}
-                </td>
-                <td className="tnum pr-2 text-right text-ink-2">{a.adg != null ? a.adg.toFixed(2) : '—'}</td>
-                <td className="pr-4 text-right">
-                  <StatusBadge status={a.status} label={STATUS_LABELS[a.status] ?? a.status} />
-                </td>
-              </tr>
-            ))}
-            {!animals.length && (
-              <tr>
-                <td colSpan={9}>
-                  <EmptyState
-                    title="No hay animales con ese filtro"
-                    body="Probá con otra búsqueda, o registrá tu primer animal para empezar a construir el historial del hato."
-                    actionHref="/animales/nuevo"
-                    actionLabel="Registrar animal"
-                  />
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* Tabla maestra con selección múltiple (doc diseño §10.4) — cliente para la selección */}
+      <AnimalsTable animals={animals} lots={lots ?? []} />
     </div>
   );
 }
