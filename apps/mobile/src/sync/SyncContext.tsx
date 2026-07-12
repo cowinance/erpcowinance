@@ -70,6 +70,18 @@ export interface LotRow {
   paddock_name: string | null;
 }
 
+export interface TaskRow {
+  id: string;
+  title: string;
+  description: string | null;
+  type: string;
+  status: string;
+  due_date: string | null;
+  priority: string;
+  related_type: string | null;
+  related_id: string | null;
+}
+
 export interface LocalPregnancy {
   id: string;
   animal_id: string;
@@ -123,6 +135,12 @@ interface SyncCtx {
   products: (type?: 'vaccine' | 'other') => VetProduct[];
   bulls: () => AnimalRow[];
   lots: () => LotRow[];
+  /** Tareas locales (bootstrap pendientes + completadas en sesión), 100% offline (P6-3). */
+  tasks: () => TaskRow[];
+  /** Crea una tarea offline (put sobre tasks; el servidor sanea a general/pending). */
+  captureTaskCreate: (title: string, opts?: { dueDate?: string | null; priority?: string }) => void;
+  /** Completa una tarea offline (put status='done' + completed_at del device). */
+  captureTaskComplete: (taskId: string) => void;
   /** Agenda diaria cacheada (P4-2), usable offline; `agendaAt` = cuándo se refrescó. */
   agenda: () => AgendaItem[];
   agendaAt?: string;
@@ -575,6 +593,29 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         return list.sort((a, b) => a.name.localeCompare(b.name));
       },
 
+      // Tareas hidratadas por el bootstrap (P6-1.b.2) + las completadas en la sesión (put
+      // local). Colección estable, 100% offline: lee del store local (patrón lots()).
+      tasks: (): TaskRow[] => {
+        const m = store()?.rows.get('tasks');
+        if (!m) return [];
+        const list: TaskRow[] = [];
+        for (const [id, st] of m) {
+          const f = st.fields as any;
+          list.push({
+            id,
+            title: String(f.title ?? ''),
+            description: (f.description as string) ?? null,
+            type: String(f.type ?? 'general'),
+            status: String(f.status ?? 'pending'),
+            due_date: (f.due_date as string) ?? null,
+            priority: String(f.priority ?? 'normal'),
+            related_type: (f.related_type as string) ?? null,
+            related_id: (f.related_id as string) ?? null,
+          });
+        }
+        return list;
+      },
+
       // Agenda diaria cacheada (P4-2): snapshot del último sync exitoso, usable offline.
       agenda: (): AgendaItem[] => metaRef.current?.agenda ?? [],
       agendaAt: metaRef.current?.agendaAt,
@@ -846,6 +887,42 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const op = buildNoteEmit(animalId, text, new Date(), Crypto.randomUUID);
         if (!op) return; // nota vacía tras trim → no se emite
         d.addEvent(op.table, op.rowId, op.row);
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      // Crear tarea offline (P6-3): put sobre `tasks` (entidad mutable) → optimismo local
+      // inmediato + push. El servidor (TaskSyncHandler) sanea (fuerza general/pending); se
+      // envían esos valores para dejar el row local completo. type='health'/related_* son
+      // reservados del servidor y no se envían.
+      captureTaskCreate: (title: string, opts?: { dueDate?: string | null; priority?: string }) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        const t = title.trim();
+        if (!t) return;
+        d.setFields('tasks', Crypto.randomUUID(), {
+          title: t,
+          type: 'general',
+          status: 'pending',
+          due_date: opts?.dueDate ?? null,
+          priority: opts?.priority ?? 'normal',
+          description: null,
+          related_type: null,
+          related_id: null,
+          completed_at: null,
+        });
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      // Completar tarea offline (P6-3): put status='done' + completed_at del device (D2).
+      // El row local pasa a done al instante; el handler aplica pending→done (done→done no-op).
+      captureTaskComplete: (taskId: string) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        d.setFields('tasks', taskId, { status: 'done', completed_at: new Date().toISOString() });
         d.commit();
         bump();
         scheduleSync();
