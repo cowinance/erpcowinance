@@ -60,13 +60,14 @@ describe('ImportProcessor · integración', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   const MAPPING = { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoria' };
+  const MAPPING_GEN = { ...MAPPING, dam_tag: 'Madre', sire_tag: 'Padre' };
 
-  async function seedBatch(rawRows: Record<string, string>[], status = 'queued'): Promise<string> {
+  async function seedBatch(rawRows: Record<string, string>[], status = 'queued', mapping = MAPPING): Promise<string> {
     const batch = (
       await db.query<{ id: string }>(
         `INSERT INTO import_batches (tenant_id, entity_type, mapping, status, total_rows, created_by)
          VALUES ($1,'animal',$2,$3,$4,$5) RETURNING id`,
-        [tenantId, JSON.stringify(MAPPING), status, rawRows.length, userId],
+        [tenantId, JSON.stringify(mapping), status, rawRows.length, userId],
       )
     )[0];
     for (let i = 0; i < rawRows.length; i++) {
@@ -83,7 +84,9 @@ describe('ImportProcessor · integración', () => {
   const getRows = async (id: string) =>
     db.query<any>(`SELECT row_number, status, resulting_entity_id FROM import_rows WHERE batch_id = $1 ORDER BY row_number`, [id]);
   const serverChangesets = async (id: string) =>
-    db.query<any>(`SELECT operations FROM sync_changesets WHERE source = 'server' AND origin_ref LIKE $1`, [`import:${id}:%`]);
+    db.query<any>(`SELECT operations FROM sync_changesets WHERE source = 'server' AND origin_ref LIKE $1`, [`import:${id}:create:%`]);
+  const linkChangesets = async (id: string) =>
+    db.query<any>(`SELECT operations FROM sync_changesets WHERE source = 'server' AND origin_ref LIKE $1`, [`import:${id}:link:%`]);
 
   it('procesa válidas/inválidas/duplicadas: contadores por delta, un changeset con las creadas, timeline y cero conflictos', async () => {
     const t1 = uniqTag('A');
@@ -172,5 +175,44 @@ describe('ImportProcessor · integración', () => {
     expect(claimed?.id).toBe(batchId);
     await processor.processBatch(batchId, tenantId);
     expect((await getBatch(batchId)).status).toBe('completed');
+  });
+
+  it('link-pass: vincula dam intra-import, warnings de not_found/sex_incompatible, changeset de link e idempotencia', async () => {
+    const dam = uniqTag('DAM');
+    const child = uniqTag('CHILD');
+    const noref = uniqTag('NOREF');
+    const badsire = uniqTag('BADSIRE');
+    const batchId = await seedBatch(
+      [
+        { Caravana: dam, Sexo: 'F', Categoria: 'vaca', Madre: '', Padre: '' }, // será la madre
+        { Caravana: child, Sexo: 'F', Categoria: 'vaca', Madre: dam, Padre: '' }, // dam = intra-import
+        { Caravana: noref, Sexo: 'F', Categoria: 'vaca', Madre: 'NO-EXISTE-XYZ', Padre: '' }, // dam not_found
+        { Caravana: badsire, Sexo: 'F', Categoria: 'vaca', Madre: '', Padre: dam }, // sire = hembra → sex_incompatible
+      ],
+      'queued',
+      MAPPING_GEN,
+    );
+    await claims.claimNext();
+    await processor.processBatch(batchId, tenantId);
+
+    const rows = await getRows(batchId);
+    const damId = rows[0].resulting_entity_id;
+    const childId = rows[1].resulting_entity_id;
+    // vínculo dam escrito
+    const childAnimal = (await db.query<{ dam_id: string | null }>(`SELECT dam_id FROM animals WHERE id = $1`, [childId]))[0];
+    expect(childAnimal.dam_id).toBe(damId);
+    // warnings SOLO no-exitosos
+    const warns = await db.query<any>(`SELECT row_number, warnings FROM import_rows WHERE batch_id = $1 ORDER BY row_number`, [batchId]);
+    expect(warns[0].warnings).toBeNull(); // la madre: sin refs
+    expect(warns[1].warnings).toBeNull(); // el hijo: vinculado OK → sin warning
+    expect(warns[2].warnings).toEqual([{ field: 'dam', outcome: 'not_found' }]);
+    expect(warns[3].warnings).toEqual([{ field: 'sire', outcome: 'sex_incompatible' }]);
+    // un changeset de link con la op del vínculo
+    const lcs = await linkChangesets(batchId);
+    expect(lcs).toHaveLength(1);
+    expect(lcs[0].operations.ops.some((op: any) => op.rowId === childId && op.fields.dam_id === damId)).toBe(true);
+    // idempotencia: reproceso no re-emite (diff-aware → sin cambios)
+    await processor.processBatch(batchId, tenantId);
+    expect(await linkChangesets(batchId)).toHaveLength(1);
   });
 });

@@ -76,6 +76,17 @@ export class ImportProcessor implements OnModuleInit, OnModuleDestroy {
       await this.processChunk(batchId, tenantId, meta.created_by, mapping, lo, hi);
     }
 
+    // Link-pass (P-d.2): 2ª pasada de genealogía, solo si el mapping la referencia.
+    if (mapping.dam_tag || mapping.sire_tag) {
+      await this.withTenant(tenantId, meta.created_by, (q) =>
+        q.query(`UPDATE import_batches SET phase = 'link', heartbeat_at = now() WHERE id = $1 AND tenant_id = $2`, [batchId, tenantId]),
+      );
+      for (let lo = 0; lo < meta.total_rows; lo += CHUNK_SIZE) {
+        const hi = Math.min(lo + CHUNK_SIZE, meta.total_rows);
+        await this.processLinkChunk(batchId, tenantId, meta.created_by, mapping, lo, hi);
+      }
+    }
+
     // Finalizar: solo se llega aquí si ningún chunk lanzó (todas las filas terminal).
     await this.withTenant(tenantId, meta.created_by, async (q) => {
       const c = await q.one<{ invalid_count: number; error_count: number }>(
@@ -154,6 +165,66 @@ export class ImportProcessor implements OnModuleInit, OnModuleDestroy {
          WHERE id = $1 AND tenant_id = $2`,
         [batchId, tenantId, created, skipped, invalid],
       );
+    });
+  }
+
+  /**
+   * Link-pass de un chunk (P-d.2): vincula dam/sire de las filas `created` del rango,
+   * en UNA tx. Resolución y detección de ciclos en LOTE (no N+1). Persiste solo los
+   * warnings NO exitosos (el éxito lo representan dam_id/sire_id + el changeset) y
+   * emite UN changeset server-origin del chunk SOLO si hubo cambios.
+   */
+  private async processLinkChunk(batchId: string, tenantId: string, createdBy: string | null, mapping: Mapping, lo: number, hi: number): Promise<void> {
+    await this.withTenant(tenantId, createdBy, async (q) => {
+      const rows = await q.query<{ id: string; raw: Record<string, string>; resulting_entity_id: string }>(
+        `SELECT id, raw, resulting_entity_id FROM import_rows
+         WHERE tenant_id = $1 AND batch_id = $2 AND row_number > $3 AND row_number <= $4 AND status = 'created' AND resulting_entity_id IS NOT NULL
+         ORDER BY row_number`,
+        [tenantId, batchId, lo, hi],
+      );
+      const damHeader = mapping.dam_tag;
+      const sireHeader = mapping.sire_tag;
+      const withRefs = rows
+        .map((r) => ({
+          row: r,
+          damTag: damHeader ? r.raw[damHeader] : undefined,
+          sireTag: sireHeader ? r.raw[sireHeader] : undefined,
+        }))
+        .filter((x) => (x.damTag && x.damTag !== '') || (x.sireTag && x.sireTag !== ''));
+
+      if (!withRefs.length) {
+        await q.query(`UPDATE import_batches SET heartbeat_at = now() WHERE id = $1 AND tenant_id = $2`, [batchId, tenantId]);
+        return;
+      }
+
+      const allTags = withRefs.flatMap((x) => [x.damTag, x.sireTag]).filter((t): t is string => !!t);
+      const genCtx = await this.animalWrite.loadGenealogyContext(q, allTags);
+
+      // Candidatos para la detección de ciclos batch: solo resueltos + sexo-ok + no-self.
+      const pairs: { childId: string; parentId: string }[] = [];
+      for (const x of withRefs) {
+        const child = x.row.resulting_entity_id;
+        for (const [tag, expectSex] of [[x.damTag, 'F'], [x.sireTag, 'M']] as const) {
+          if (!tag) continue;
+          const res = genCtx.get(tag);
+          if (res && res.sex === expectSex && res.animalId !== child) pairs.push({ childId: child, parentId: res.animalId });
+        }
+      }
+      const cycles = await this.animalWrite.detectCycles(q, pairs);
+
+      const syncOps: Op[] = [];
+      for (const x of withRefs) {
+        const { outcomes, damId, sireId } = this.animalWrite.evaluateLink(x.row.resulting_entity_id, { damTag: x.damTag, sireTag: x.sireTag }, genCtx, cycles);
+        const { syncOp } = await this.animalWrite.applyGenealogyLink(q, x.row.resulting_entity_id, damId, sireId);
+        if (syncOp) syncOps.push(syncOp);
+        const warnings = outcomes.filter((o) => o.outcome !== 'linked');
+        if (warnings.length) {
+          await q.query(`UPDATE import_rows SET warnings = $3, processed_at = now() WHERE id = $1 AND tenant_id = $2`, [x.row.id, tenantId, JSON.stringify(warnings)]);
+        }
+      }
+
+      if (syncOps.length) await this.animalWrite.emitServerOrigin(q, syncOps, `import:${batchId}:link:${lo}`);
+      await q.query(`UPDATE import_batches SET heartbeat_at = now() WHERE id = $1 AND tenant_id = $2`, [batchId, tenantId]);
     });
   }
 

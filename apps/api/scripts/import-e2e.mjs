@@ -194,6 +194,28 @@ async function main() {
   const crecommit = await api(token, 'POST', `/imports/${ccid}/commit`);
   check('commit-flow: re-commit rechazado (no previewed) → 400', crecommit.status === 400 && crecommit.json?.code === 'import.not_previewed', `${crecommit.status} ${crecommit.json?.code}`);
 
+  // 15. Genealogía end-to-end (P-d.2): CSV con Madre → vínculo dam intra-import
+  const gts = Date.now();
+  const gdam = `GDAM-${gts}`;
+  const gchild = `GCHILD-${gts}`;
+  const gcsv = ['Caravana,Sexo,Categoría,Madre', `${gdam},F,vaca,`, `${gchild},F,vaca,${gdam}`].join('\n');
+  const gup = await upload(token, { csv: gcsv, filename: 'genealogy.csv' });
+  check('genealogía: mapping sugiere dam_tag=Madre', gup.json?.mapping?.dam_tag === 'Madre', JSON.stringify(gup.json?.mapping));
+  const gcid = gup.json?.id;
+  await api(token, 'POST', `/imports/${gcid}/preview`);
+  await api(token, 'POST', `/imports/${gcid}/commit`);
+  let gfinal = null;
+  for (let i = 0; i < 40; i++) {
+    await sleep(500);
+    const g = (await api(token, 'GET', `/imports/${gcid}`)).json;
+    if (['completed', 'completed_with_errors', 'failed'].includes(g?.status)) { gfinal = g; break; }
+  }
+  check('genealogía: procesado (created 2)', gfinal?.status === 'completed' && gfinal?.created_count === 2, `${gfinal?.status} created=${gfinal?.created_count}`);
+  // el hijo quedó vinculado a la madre
+  const childLookup = await api(token, 'POST', '/animals/lookup', { identifier: gchild });
+  const childFull = (await api(token, 'GET', `/animals/${childLookup.json?.id}`)).json;
+  check('genealogía: el hijo tiene dam_tag = la madre', childFull?.genealogy?.dam_tag === gdam, JSON.stringify(childFull?.genealogy));
+
   console.log(failures === 0 ? '\nE2E upload de importación: TODO OK ✓' : `\nE2E upload de importación: ${failures} fallas ✗`);
   process.exit(failures ? 1 : 0);
 }

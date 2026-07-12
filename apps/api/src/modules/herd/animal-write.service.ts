@@ -381,13 +381,19 @@ export class AnimalWriteService {
    * syncOp (evita changeset vacío). Se invoca dentro de la tx del chunk (P-d.2).
    */
   async applyGenealogyLink(q: Q, childId: string, damId?: string, sireId?: string): Promise<{ syncOp?: PutOp }> {
+    const t = this.db.tenant;
+    // Diff-aware: solo se escribe/versiona/propaga lo que REALMENTE cambia (idempotente
+    // ante reproceso; nunca un changeset por un vínculo ya presente).
+    const current = await q.one<{ dam_id: string | null; sire_id: string | null }>(
+      `SELECT dam_id, sire_id FROM animals WHERE id = $1 AND tenant_id = $2`,
+      [childId, t],
+    );
     const fields: Record<string, unknown> = {};
-    if (damId) fields.dam_id = damId;
-    if (sireId) fields.sire_id = sireId;
+    if (damId && current?.dam_id !== damId) fields.dam_id = damId;
+    if (sireId && current?.sire_id !== sireId) fields.sire_id = sireId;
     const cols = Object.keys(fields);
     if (!cols.length) return {};
 
-    const t = this.db.tenant;
     const sets = cols.map((c, i) => `"${c}" = $${i + 3}`).join(', ');
     await q.query(`UPDATE animals SET ${sets}, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [
       childId,
