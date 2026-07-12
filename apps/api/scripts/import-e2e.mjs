@@ -39,6 +39,7 @@ const check = (name, cond, extra = '') => {
   console.log(`${cond ? '  ✓' : '  ✗'} ${name}${extra ? ` — ${extra}` : ''}`);
   if (!cond) failures++;
 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   console.log('── E2E upload de importación (POST /v1/imports) ──');
@@ -158,6 +159,40 @@ async function main() {
   check('preview no escribe: filas siguen pending', (pvRows.json?.data ?? []).every((r) => r.status === 'pending'));
   const mPrev = await api(mToken, 'POST', `/imports/${pvId}/preview`);
   check('María preview en batch de Jose → 404', mPrev.status === 404, `status=${mPrev.status}`);
+
+  // 14. Commit + procesamiento end-to-end (P-c.3): upload → preview → commit → poller → animales → pull
+  const cts = Date.now();
+  const cdup = `IMPDUP-${cts}`;
+  await api(token, 'POST', '/animals', { tag: cdup, sex: 'F', category_code: 'vaca' }); // animal existente → skipped
+  const cdev = (await api(token, 'POST', '/sync/devices', { platform: 'web', device_name: 'commit-e2e' })).json;
+  const cBase = (await api(token, 'GET', '/sync/state')).json.server_cursor; // cursor tras crear el dup
+  const ccsv = ['Caravana,Sexo,Categoría', `IMPNEW-${cts},F,vaca`, `${cdup},F,vaca`, `IMPBAD-${cts},X,vaca`].join('\n');
+  const cup = await upload(token, { csv: ccsv, filename: 'commit.csv' });
+  check('commit-flow: upload → 201', cup.status === 201, `status=${cup.status}`);
+  const ccid = cup.json?.id;
+  const cprev = await api(token, 'POST', `/imports/${ccid}/preview`);
+  check('commit-flow: preview ok', cprev.status === 200 || cprev.status === 201, `status=${cprev.status}`);
+  const ccommit = await api(token, 'POST', `/imports/${ccid}/commit`);
+  check('commit → queued', (ccommit.status === 200 || ccommit.status === 201) && ccommit.json?.status === 'queued', `${ccommit.status} ${ccommit.json?.status}`);
+
+  let cfinal = null;
+  for (let i = 0; i < 40; i++) {
+    await sleep(500);
+    const g = (await api(token, 'GET', `/imports/${ccid}`)).json;
+    if (['completed', 'completed_with_errors', 'failed'].includes(g?.status)) { cfinal = g; break; }
+  }
+  check('commit-flow: procesado a estado terminal', !!cfinal, cfinal?.status);
+  check('commit-flow: counts created 1 / skipped 1 / invalid 1',
+    cfinal?.created_count === 1 && cfinal?.skipped_count === 1 && cfinal?.invalid_count === 1,
+    JSON.stringify({ c: cfinal?.created_count, s: cfinal?.skipped_count, i: cfinal?.invalid_count }));
+  check('commit-flow: status completed_with_errors', cfinal?.status === 'completed_with_errors', cfinal?.status);
+
+  const cpull = (await api(token, 'GET', `/sync/pull?device_id=${cdev.id}&cursor=${cBase}`)).json;
+  const cgot = (cpull.changesets ?? []).some((c) => c.device_id === null && (c.ops ?? []).some((op) => op.table === 'animals' && op.fields?.visual_tag === `IMPNEW-${cts}`));
+  check('commit-flow: device pull recibe el animal importado (server-origin)', cgot);
+
+  const crecommit = await api(token, 'POST', `/imports/${ccid}/commit`);
+  check('commit-flow: re-commit rechazado (no previewed) → 400', crecommit.status === 400 && crecommit.json?.code === 'import.not_previewed', `${crecommit.status} ${crecommit.json?.code}`);
 
   console.log(failures === 0 ? '\nE2E upload de importación: TODO OK ✓' : `\nE2E upload de importación: ${failures} fallas ✗`);
   process.exit(failures ? 1 : 0);

@@ -67,4 +67,9 @@ export class ImportController {
   preview(@Param('id') id: string) {
     return this.imports.preview(id);
   }
+
+  @Post('imports/:id/commit')
+  commit(@Param('id') id: string) {
+    return this.imports.commit(id);
+  }
 }

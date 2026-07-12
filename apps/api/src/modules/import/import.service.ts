@@ -269,4 +269,35 @@ export class ImportService {
     await this.db.query(`UPDATE import_batches SET status = 'previewed', updated_at = now() WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
     return { counts, sample };
   }
+
+  /**
+   * POST /v1/imports/:id/commit (P-c.3) — confirma un batch `previewed`: valida
+   * obligatorios y reconcile_mode, lo transiciona a `queued` y responde de
+   * inmediato. El procesador (poller, P-c.2) lo toma y crea los animales fuera del
+   * request. No procesa aquí.
+   */
+  async commit(id: string): Promise<ImportBatchDto> {
+    const batch = await this.getBatch(id);
+    if (batch.status !== 'previewed') {
+      throw new BadRequestException({ code: 'import.not_previewed', title: `El import debe estar en 'previewed' para confirmar (está '${batch.status}')` });
+    }
+    const mapping = (batch.mapping ?? {}) as Partial<Record<AnimalImportField, string>>;
+    const missing = REQUIRED_ANIMAL_IMPORT_FIELDS.filter((f) => !mapping[f]);
+    if (missing.length) {
+      throw new BadRequestException({ code: 'import.mapping_missing_required', title: `Faltan campos obligatorios en el mapping: ${missing.join(', ')}` });
+    }
+    if (batch.reconcile_mode !== 'create_skip_duplicates') {
+      throw new BadRequestException({ code: 'import.invalid_reconcile_mode', title: `reconcile_mode no soportado: ${batch.reconcile_mode}` });
+    }
+    // Guard status='previewed' → transición atómica (evita doble commit por carrera).
+    const updated = await this.db.one<ImportBatchDto>(
+      `UPDATE import_batches SET status = 'queued', updated_at = now()
+       WHERE id = $1 AND tenant_id = $2 AND status = 'previewed'
+       RETURNING id, entity_type, status, source_filename, total_rows, created_count, skipped_count,
+                 invalid_count, error_count, reconcile_mode, mapping, created_at, updated_at`,
+      [id, this.db.tenant],
+    );
+    if (!updated) throw new NotFoundException({ code: 'import.batch_not_found', title: 'Import no encontrado' });
+    return updated;
+  }
 }
