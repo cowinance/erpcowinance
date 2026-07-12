@@ -16,6 +16,7 @@ function Gate() {
       <Stack.Screen name="captura/[tipo]" options={{ presentation: 'card' }} />
       <Stack.Screen name="animal/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="sincronizacion" options={{ presentation: 'card' }} />
+      <Stack.Screen name="tareas" options={{ presentation: 'card' }} />
     </Stack>
   );
 }

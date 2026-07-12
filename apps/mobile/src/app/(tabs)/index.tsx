@@ -36,6 +36,7 @@ export default function Home() {
   }
 
   const animals = sync.animals();
+  const pendingTasks = sync.tasks().filter((t) => t.status === 'pending').length;
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Buen día' : hour < 19 ? 'Buenas tardes' : 'Buenas noches';
 
@@ -73,6 +74,19 @@ export default function Home() {
         </View>
 
         <AgendaToday />
+
+        <Card>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: T.space['1'] }}>
+            <Text style={styles.cardTitle}>Tareas</Text>
+            <Text style={{ fontSize: T.type.label, color: T.brand700, fontWeight: '600' }} onPress={() => router.push('/tareas')}>
+              Ver todas →
+            </Text>
+          </View>
+          <Text style={{ fontSize: T.type.label, color: T.ink3, marginBottom: T.space['3'] }}>
+            {pendingTasks === 0 ? 'Sin tareas pendientes de la finca.' : `${pendingTasks} tarea${pendingTasks === 1 ? '' : 's'} pendiente${pendingTasks === 1 ? '' : 's'} de la finca.`}
+          </Text>
+          <Button label="Abrir tareas" onPress={() => router.push('/tareas')} />
+        </Card>
 
         <Card>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: T.space['1'] }}>
