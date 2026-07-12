@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { DbService, Q } from '../../db/db.service';
 import { requestContext } from '../../common/request-context';
 import { PushDeliveryClaimRepository, type ClaimedDelivery } from './push-delivery-claim.repository';
-import { PUSH_TRANSPORT, type PushSendResult, type PushTransport } from './push-transport.port';
+import { PUSH_TRANSPORT, PushTransportRequestError, type PushSendResult, type PushTransport } from './push-transport.port';
+import { PUSH_RUNTIME_CONFIG, type PushRuntimeConfig } from './push-runtime-config';
 
 const CLAIM_BATCH = 50;
 const MAX_ATTEMPTS = 5;
@@ -58,13 +59,16 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PushProcessor.name);
   private timer?: ReturnType<typeof setInterval>;
   private draining = false;
-  private readonly enabled = process.env.PUSH_ENABLED === 'true';
+  private readonly enabled: boolean;
 
   constructor(
     private readonly db: DbService,
     private readonly claims: PushDeliveryClaimRepository,
     @Inject(PUSH_TRANSPORT) private readonly transport: PushTransport,
-  ) {}
+    @Inject(PUSH_RUNTIME_CONFIG) config: PushRuntimeConfig,
+  ) {
+    this.enabled = config.enabled; // decisión explícita del wiring (no lee process.env)
+  }
 
   onModuleInit(): void {
     if (this.enabled) this.timer = setInterval(() => void this.processTick(), POLL_INTERVAL_MS);
@@ -149,18 +153,28 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
 
     // Fase 3: envío FUERA de transacción.
     let results: PushSendResult[] | null = null;
-    let sendThrew = false;
+    let sendError: unknown = null;
     try {
       results = await this.transport.send(prep.sendable.map((s) => ({ ref: s.deliveryId, token: s.token, title: s.title, body: s.body, data: { notificationId: s.notificationId } })));
     } catch (e) {
-      sendThrew = true;
-      this.logger.warn(`push send falló (lote liberado con backoff): ${String((e as Error).message)}`);
+      sendError = e;
+      // Logging SEGURO: solo el código normalizado, nunca el error crudo/token/secreto.
+      const code = e instanceof PushTransportRequestError ? e.code : 'push_transport_error';
+      this.logger.warn(`push send lanzó (${code}); ${prep.sendable.length} entregas del sublote`);
     }
 
     // Fase 4: persistencia tenant-scoped de resultados + resumen.
     await this.withTenant(tenantId, async (q) => {
-      if (sendThrew || !results) {
-        for (const s of prep.sendable) await this.releaseTransient(q, tenantId, s, 'provider_send_exception');
+      if (sendError) {
+        // Excepción COMPLETA del transporte (defensivo: otros adapters / un transporte que lance directo).
+        if (sendError instanceof PushTransportRequestError && !sendError.transient) {
+          for (const s of prep.sendable) await this.markPermanentFailed(q, tenantId, s, sendError.code, false); // permanente de request → failed; sin limpieza de token
+        } else {
+          const code = sendError instanceof PushTransportRequestError ? sendError.code : 'push_transport_error';
+          for (const s of prep.sendable) await this.releaseTransient(q, tenantId, s, code); // temporal / desconocido → backoff
+        }
+      } else if (!results) {
+        for (const s of prep.sendable) await this.releaseTransient(q, tenantId, s, 'push_transport_error');
       } else {
         const counts = new Map<string, number>();
         const byRef = new Map<string, PushSendResult>();
@@ -181,9 +195,10 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
           } else if (r.ok) {
             await this.markSent(q, tenantId, s);
           } else if (r.transient) {
-            await this.releaseTransient(q, tenantId, s, r.error ?? 'transient');
+            await this.releaseTransient(q, tenantId, s, r.providerCode ?? r.error ?? 'transient');
           } else {
-            await this.markPermanentFailed(q, tenantId, s, r.error ?? 'permanent');
+            // Permanente: preserva providerCode; limpieza de token SOLO si es DeviceNotRegistered.
+            await this.markPermanentFailed(q, tenantId, s, r.providerCode ?? r.error ?? 'permanent', r.error === 'DeviceNotRegistered');
           }
         }
       }
@@ -228,14 +243,14 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async markPermanentFailed(q: Q, tenantId: string, s: Sendable, error: string): Promise<void> {
+  private async markPermanentFailed(q: Q, tenantId: string, s: Sendable, lastError: string, cleanupToken: boolean): Promise<void> {
     await q.query(
       `UPDATE notification_deliveries SET status='failed', attempt_count=attempt_count+1, processing_at=NULL, last_error=$3, updated_at=now()
        WHERE id=$1 AND tenant_id=$2`,
-      [s.deliveryId, tenantId, error],
+      [s.deliveryId, tenantId, lastError],
     );
-    if (error === 'DeviceNotRegistered') {
-      // Limpieza CONDICIONAL: nunca borra un token de reemplazo (solo si aún coincide con el snapshot).
+    if (cleanupToken) {
+      // Limpieza CONDICIONAL (solo DeviceNotRegistered): nunca borra un token de reemplazo (solo si aún coincide con el snapshot).
       await q.query(`UPDATE sync_devices SET push_token=NULL, updated_at=now() WHERE id=$1 AND tenant_id=$2 AND push_token=$3`, [s.deviceId, tenantId, s.token]);
     }
   }

@@ -57,25 +57,32 @@ describe('ExpoPushTransport', () => {
     expect((await t.send([msg('d1')]))[0]).toMatchObject({ ok: false, error: 'ProviderError', providerCode: 'SomethingNew', transient: true });
   });
 
-  it('7. HTTP 429 → PushTransportRequestError(transient=true)', async () => {
+  it('7. HTTP 429 → resultados individuales temporales (normalizado por sublote)', async () => {
     const t = new ExpoPushTransport({ fetchImpl: vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) }) as any) });
-    await expect(t.send([msg('d1')])).rejects.toMatchObject({ name: 'PushTransportRequestError', code: 'http_429', transient: true });
+    expect(await t.send([msg('d1'), msg('d2')])).toEqual([
+      { ref: 'd1', ok: false, error: 'ProviderError', providerCode: 'http_429', transient: true },
+      { ref: 'd2', ok: false, error: 'ProviderError', providerCode: 'http_429', transient: true },
+    ]);
   });
 
-  it('8. HTTP 500 → temporal', async () => {
+  it('8. HTTP 500 → temporal individual', async () => {
     const t = new ExpoPushTransport({ fetchImpl: vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }) as any) });
-    await expect(t.send([msg('d1')])).rejects.toMatchObject({ transient: true, code: 'http_500' });
+    expect((await t.send([msg('d1')]))[0]).toMatchObject({ ok: false, providerCode: 'http_500', transient: true });
   });
 
-  it('9. HTTP 400 → PushTransportRequestError(transient=false), sin resultados fabricados', async () => {
+  it('9. HTTP 400 → permanente individual (sin reintento), sin resultados fabricados por posición', async () => {
     const t = new ExpoPushTransport({ fetchImpl: vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ errors: [{ code: 'INVALID' }] }) }) as any) });
-    await expect(t.send([msg('d1'), msg('d2')])).rejects.toMatchObject({ name: 'PushTransportRequestError', code: 'http_400', transient: false });
+    const r = await t.send([msg('d1'), msg('d2')]);
+    expect(r).toEqual([
+      { ref: 'd1', ok: false, error: 'ProviderError', providerCode: 'http_400', transient: false },
+      { ref: 'd2', ok: false, error: 'ProviderError', providerCode: 'http_400', transient: false },
+    ]);
   });
 
-  it('10. timeout/abort → temporal', async () => {
+  it('10. timeout/abort → temporal individual', async () => {
     const fetchHang = vi.fn((_url: string, init: any) => new Promise((_res, rej) => init.signal.addEventListener('abort', () => rej(new Error('aborted')))) as any);
     const t = new ExpoPushTransport({ fetchImpl: fetchHang as any, timeoutMs: 10 });
-    await expect(t.send([msg('d1')])).rejects.toMatchObject({ name: 'PushTransportRequestError', code: 'network_or_timeout', transient: true });
+    expect((await t.send([msg('d1')]))[0]).toMatchObject({ ok: false, providerCode: 'network_or_timeout', transient: true });
   });
 
   it('11. menos tickets → temporal explícito por cada mensaje faltante', async () => {
@@ -91,9 +98,26 @@ describe('ExpoPushTransport', () => {
     expect(r).toEqual([{ ref: 'a', ok: true, transient: false }]);
   });
 
-  it('13. JSON inválido → temporal', async () => {
+  it('13. JSON inválido → temporal individual', async () => {
     const t = new ExpoPushTransport({ fetchImpl: vi.fn(async () => ({ ok: true, status: 200, json: async () => { throw new Error('bad json'); } }) as any) });
-    await expect(t.send([msg('d1')])).rejects.toMatchObject({ code: 'invalid_json', transient: true });
+    expect((await t.send([msg('d1')]))[0]).toMatchObject({ ok: false, providerCode: 'invalid_json', transient: true });
+  });
+
+  it('19. multi-sublote: 1º ok + 2º HTTP 400 → éxitos del 1º conservados, sintéticos solo en el 2º', async () => {
+    let call = 0;
+    const fetchImpl = vi.fn(async (_url: string, init: any) => {
+      call++;
+      const body = JSON.parse(init.body);
+      if (call === 1) return { ok: true, status: 200, json: async () => ({ data: body.map(() => ({ status: 'ok' })) }) } as any;
+      return { ok: false, status: 400, json: async () => ({}) } as any; // 2º sublote rechazado
+    });
+    const t = new ExpoPushTransport({ fetchImpl });
+    const many = Array.from({ length: 150 }, (_, i) => msg(`m${i}`));
+    const r = await t.send(many);
+    expect(r).toHaveLength(150); // exactamente un resultado por mensaje
+    expect(r.slice(0, 100).every((x) => x.ok)).toBe(true); // 1º sublote preservado
+    expect(r.slice(100).every((x) => !x.ok && x.providerCode === 'http_400' && x.transient === false)).toBe(true);
+    expect(r[149].ref).toBe('m149');
   });
 
   it('14. access token presente → header Authorization', async () => {

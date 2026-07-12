@@ -34,7 +34,7 @@ describe('PushProcessor · integración', () => {
     await db.onModuleInit();
     claims = new PushDeliveryClaimRepository(db);
     fake = new FakePushTransport();
-    proc = new PushProcessor(db, claims, fake);
+    proc = new PushProcessor(db, claims, fake, { enabled: true });
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
   }, 120_000);
@@ -128,7 +128,7 @@ describe('PushProcessor · integración', () => {
   });
 
   it('send lanza (transporte deshabilitado) → entrega liberada con backoff (no perdida)', async () => {
-    const disabledProc = new PushProcessor(db, claims, new DisabledPushTransport());
+    const disabledProc = new PushProcessor(db, claims, new DisabledPushTransport(), { enabled: true });
     const dev = await addDevice('tokTHROW');
     const n = await addPushNotif();
     const d = await addDelivery(n, dev, 'tokTHROW');
@@ -136,7 +136,7 @@ describe('PushProcessor · integración', () => {
     const r = await delivery(d);
     expect(r.status).toBe('queued');
     expect(r.attempt_count).toBe(1);
-    expect(r.last_error).toBe('provider_send_exception');
+    expect(r.last_error).toBe('push_transport_error'); // excepción no normalizada → temporal conservador
     expect(new Date(r.next_attempt_at).getTime()).toBeGreaterThan(Date.now());
   });
 

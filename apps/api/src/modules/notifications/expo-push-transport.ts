@@ -73,9 +73,20 @@ export class ExpoPushTransport implements PushTransport {
       if (pre) results.push(pre);
       else toSend.push(m);
     }
-    // Sublotes secuenciales ≤100 (sin concurrencia).
+    // Sublotes secuenciales ≤100 (sin concurrencia). Cada sublote AÍSLA su resultado: un fallo
+    // de request (HTTP/timeout/red/JSON) se normaliza a resultados individuales SOLO de ese
+    // sublote — nunca pierde éxitos de otros sublotes ni cambia de semántica por posición.
     for (let i = 0; i < toSend.length; i += MAX_BATCH) {
-      results.push(...(await this.sendBatch(toSend.slice(i, i + MAX_BATCH))));
+      const batch = toSend.slice(i, i + MAX_BATCH);
+      try {
+        results.push(...(await this.sendBatch(batch)));
+      } catch (e) {
+        if (e instanceof PushTransportRequestError) {
+          for (const m of batch) results.push({ ref: m.ref, ok: false, error: 'ProviderError', providerCode: e.code, transient: e.transient });
+        } else {
+          throw e; // fallo inesperado no normalizado (excepción interna): sin resultados confiables
+        }
+      }
     }
     return results;
   }
