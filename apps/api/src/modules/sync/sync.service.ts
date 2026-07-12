@@ -55,6 +55,31 @@ export class SyncService {
     );
   }
 
+  /**
+   * Registra el push token de un device del usuario (P7-2.a). Idempotente; aislado por
+   * tenant + usuario (no toca el device de otro). Un token pertenece a UN device: al
+   * registrarlo se limpia de otras filas del mismo usuario (una reinstalación lo mueve). El
+   * transporte push (fase posterior) lee `sync_devices.push_token` de los devices activos.
+   */
+  async setPushToken(deviceId: string, pushToken: string) {
+    const t = this.db.tenant;
+    if (!pushToken || typeof pushToken !== 'string')
+      throw new BadRequestException({ code: 'sync.missing_push_token', title: 'push_token es obligatorio' });
+    const device = await this.db.one<{ id: string }>(
+      `SELECT id FROM sync_devices WHERE id = $1 AND tenant_id = $2 AND user_id = $3 AND deleted_at IS NULL`,
+      [deviceId, t, this.db.user],
+    );
+    if (!device) throw new NotFoundException({ code: 'sync.device_not_found', title: 'Dispositivo no encontrado' });
+    // Un token, un device: lo despega de cualquier otra fila del usuario antes de asignarlo.
+    await this.db.query(
+      `UPDATE sync_devices SET push_token = NULL, updated_at = now()
+       WHERE tenant_id = $1 AND user_id = $2 AND push_token = $3 AND id <> $4`,
+      [t, this.db.user, pushToken, deviceId],
+    );
+    await this.db.query(`UPDATE sync_devices SET push_token = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3`, [pushToken, deviceId, t]);
+    return { id: deviceId, push_token_registered: true };
+  }
+
   async push(body: { device_id: string; changesets: Changeset[] }) {
     const device = await this.assertDevice(body?.device_id);
     if (!Array.isArray(body.changesets) || !body.changesets.length)

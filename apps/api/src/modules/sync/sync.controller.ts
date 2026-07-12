@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { SyncService } from './sync.service';
 
 /** API de sincronización (doc APIs §7). En prod: Protobuf+zstd sobre HTTP/2; v0: JSON. */
@@ -9,6 +9,11 @@ export class SyncController {
   @Post('devices')
   register(@Body() body: any) {
     return this.sync.registerDevice(body);
+  }
+
+  @Post('devices/:id/push-token')
+  setPushToken(@Param('id') id: string, @Body() body: any) {
+    return this.sync.setPushToken(id, body?.push_token);
   }
 
   @Post('push')
