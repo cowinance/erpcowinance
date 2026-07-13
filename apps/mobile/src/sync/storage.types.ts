@@ -1,4 +1,5 @@
 import type { SerializedDevice, SyncDevice } from '@cowinance/sync-core';
+import type { CachedNotification } from './notification-cache';
 
 /** Ítem de la agenda diaria (P4-2), espejo del AgendaItemDto del servidor. Snapshot
  *  opaco cacheado localmente (cache-on-sync); la UI (P4-3) lo renderiza y mapea `action`. */
@@ -26,6 +27,11 @@ export interface PersistedMeta {
   /** Snapshot de agenda cacheado (P4-2), refrescado en cada sync exitoso. */
   agenda?: AgendaItem[];
   agendaAt?: string;
+  /** Feed in_app cacheado (P7-4.c) + read-set pendiente reconciliado offline. Solo campos
+   *  del feed (nunca deliveries/tokens/canal push); serializable (arreglo, no Set). */
+  notifications?: CachedNotification[];
+  notificationsAt?: string;
+  notificationReadPending?: string[];
   // Propiedad del store local (P1.3.6a): identidad dueña de los datos operativos
   // en este dispositivo. Se compara al iniciar sesión para no exponer/sincronizar
   // el store de un usuario/tenant bajo otra cuenta (aislamiento multi-tenant local).

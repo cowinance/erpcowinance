@@ -18,7 +18,20 @@ import {
 import { createStorage } from './storage';
 import type { DeviceStorage, PersistedMeta, AgendaItem } from './storage.types';
 import { buildMortalityEmit, buildWeaningEmit, buildNoteEmit } from './capture-builders';
+import {
+  type CachedNotification,
+  type NotificationCacheState,
+  addReadPending,
+  classifyReadPost,
+  countUnread,
+  hydrateCachedNotifications,
+  normalizeReadPending,
+  prunePending,
+  reconcileView,
+  reduceRefresh,
+} from './notification-cache';
 export type { AgendaItem } from './storage.types';
+export type { CachedNotification } from './notification-cache';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
 const AUTO_SYNC_INTERVAL_MS = 60_000;
@@ -144,6 +157,16 @@ interface SyncCtx {
   /** Agenda diaria cacheada (P4-2), usable offline; `agendaAt` = cuándo se refrescó. */
   agenda: () => AgendaItem[];
   agendaAt?: string;
+  /** Feed in_app cacheado (P7-4.c), vista reconciliada (snapshot + read-set), usable offline. */
+  notifications: () => CachedNotification[];
+  /** Conteo de no leídas sobre la vista reconciliada (misma fuente que `notifications()`). */
+  unreadNotifications: () => number;
+  /** Cuándo se refrescó el snapshot del feed in_app. */
+  notificationsAt?: string;
+  /** Marca leída (optimista + persistente) y hace POST /read best-effort; no navega. */
+  markNotificationRead: (id: string) => Promise<void>;
+  /** Refresca el feed in_app (flush de reads pendientes + GET), reutilizable al enfocar la pantalla. */
+  refreshNotifications: () => Promise<void>;
   openPregnancy: (animalId: string) => LocalPregnancy | null;
   captureWeighing: (animalId: string, kg: number, cc?: number) => void;
   captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
@@ -250,6 +273,86 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     return res;
   }, []);
 
+  /**
+   * Única función de mutación/persistencia de meta (D8): el mutator parte SIEMPRE del valor
+   * más reciente de metaRef, evitando el read-modify-write sobre snapshots obsoletos cuando
+   * syncNow, la pantalla y taps rápidos concurren. No hay store nuevo.
+   */
+  const persistMeta = useCallback(async (mutate: (prev: PersistedMeta) => PersistedMeta) => {
+    if (!metaRef.current) return;
+    metaRef.current = mutate(metaRef.current);
+    await storageRef.current.saveMeta(metaRef.current);
+  }, []);
+
+  /**
+   * Cache-on-sync del feed in_app (P7-4.c), best-effort e independiente del sync CRDT. Orden (D4):
+   * 1) flush de POST /read pendientes; 2) GET /notifications; 3) reduce + persist. Un fallo de red
+   * conserva snapshot, timestamp y read-set previos; nunca sustituye el cache por []. Reutilizable
+   * por syncNow y por la pantalla al enfocarse.
+   */
+  const refreshNotifications = useCallback(async () => {
+    if (!metaRef.current) return;
+    try {
+      const pending = normalizeReadPending(metaRef.current.notificationReadPending);
+      const resolved: string[] = [];
+      for (const id of pending) {
+        try {
+          const r = await authFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
+          const c = classifyReadPost(r.status);
+          if (c === 'confirmed' || c === 'gone') resolved.push(id); // 404 → ya inaccesible, no reintentar
+        } catch {
+          /* red/timeout: se conserva el pendiente, se reconcilia en el próximo sync */
+        }
+      }
+      let snapshot: CachedNotification[] | null = null;
+      try {
+        const r = await authFetch('/notifications');
+        if (r.ok) snapshot = hydrateCachedNotifications(await r.json());
+      } catch {
+        /* red: se mantiene el snapshot previo */
+      }
+      const nowIso = new Date().toISOString();
+      await persistMeta((prev) => {
+        const prevState: NotificationCacheState = {
+          notifications: prev.notifications ?? [],
+          notificationsAt: prev.notificationsAt,
+          notificationReadPending: normalizeReadPending(prev.notificationReadPending),
+        };
+        const next = reduceRefresh(prevState, { postedResolved: resolved, snapshot, nowIso });
+        return { ...prev, notifications: next.notifications, notificationsAt: next.notificationsAt, notificationReadPending: next.notificationReadPending };
+      });
+      bump();
+    } catch {
+      /* el cache es best-effort: ningún fallo aquí aborta ni ensucia el sync principal */
+    }
+  }, [authFetch, persistMeta]);
+
+  /**
+   * Marca una notificación como leída (P7-4.c): 1) read-set local + persist inmediatos (badge baja
+   * al instante); 2) POST /read best-effort; si confirma o 404, poda el pendiente. NO navega (eso
+   * es la pantalla, c.2) ni bloquea por estar offline: la intención queda en la cola local.
+   */
+  const markNotificationRead = useCallback(
+    async (id: string) => {
+      if (!id) return;
+      await persistMeta((prev) => ({ ...prev, notificationReadPending: addReadPending(prev.notificationReadPending, id) }));
+      bump();
+      try {
+        const r = await authFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
+        const c = classifyReadPost(r.status);
+        if (c === 'confirmed' || c === 'gone') {
+          await persistMeta((prev) => ({
+            ...prev,
+            notificationReadPending: prunePending({ pending: prev.notificationReadPending, resolved: [id], snapshot: prev.notifications ?? [] }),
+          }));
+        }
+      } catch {
+        /* red: se conserva el pendiente para el próximo refresh */
+      }
+    },
+    [authFetch, persistMeta],
+  );
+
   const transport = useMemo(
     () => ({
       push: async (changesets: Changeset[]): Promise<PushResult> => {
@@ -312,8 +415,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       } catch {
         /* red: se mantiene el cache previo */
       }
-      metaRef.current = { ...metaRef.current, lastSyncAt: new Date().toISOString(), agenda, agendaAt };
-      await storageRef.current.saveMeta(metaRef.current);
+      await persistMeta((prev) => ({ ...prev, lastSyncAt: new Date().toISOString(), agenda, agendaAt }));
+      // Cache-on-sync del feed in_app (P7-4.c), best-effort e independiente: su fallo no
+      // afecta el push/pull ya exitoso. refreshNotifications encapsula su propio try/catch.
+      await refreshNotifications();
       const conflictNote = pushConflictsRef.current
         ? ` · ${pushConflictsRef.current} conflicto${pushConflictsRef.current === 1 ? '' : 's'} en revisión`
         : '';
@@ -326,7 +431,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setSyncing(false);
     }
-  }, [transport, authFetch]);
+  }, [transport, authFetch, persistMeta, refreshNotifications]);
 
   const scheduleSync = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -619,6 +724,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       // Agenda diaria cacheada (P4-2): snapshot del último sync exitoso, usable offline.
       agenda: (): AgendaItem[] => metaRef.current?.agenda ?? [],
       agendaAt: metaRef.current?.agendaAt,
+
+      // Feed in_app cacheado (P7-4.c): vista reconciliada (snapshot + read-set), fuente única
+      // para pantalla y badge; usable offline.
+      notifications: (): CachedNotification[] => reconcileView(metaRef.current?.notifications, metaRef.current?.notificationReadPending),
+      unreadNotifications: (): number => countUnread(reconcileView(metaRef.current?.notifications, metaRef.current?.notificationReadPending)),
+      notificationsAt: metaRef.current?.notificationsAt,
+      markNotificationRead,
+      refreshNotifications,
 
       openPregnancy: (animalId: string) => {
         const m = store()?.rows.get('pregnancies');
