@@ -83,3 +83,60 @@ export async function activatePush(bridge: PushSyncBridge): Promise<PushRegistra
   logPush('activate', status);
   return status;
 }
+
+/**
+ * Reconciliación (boot / rotación): permiso CHECK-ONLY (sin prompt) + re-obtención y sync del token
+ * Expo si cambió. Reutiliza la orquestación pura; no molesta al usuario si nunca activó el permiso.
+ */
+export async function reconcilePush(bridge: PushSyncBridge): Promise<PushRegistrationStatus> {
+  const status = await registerPushToken(deps(bridge, checkPermission));
+  logPush('reconcile', status);
+  return status;
+}
+
+type Subscription = { remove: () => void };
+
+/** Handler de foreground (una sola vez): banner + lista, sin sonido ni badge del SO. */
+let handlerConfigured = false;
+export function configureForegroundHandler(): void {
+  if (handlerConfigured) return;
+  handlerConfigured = true;
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
+/** Notificación recibida en foreground → señal para refrescar el feed (el caller la debouncea). */
+export function addReceivedListener(cb: () => void): Subscription {
+  return Notifications.addNotificationReceivedListener(() => cb());
+}
+
+/** Respuesta (tap) → entrega el `data` crudo + identificador (para deduplicar con el cold start). */
+export function addResponseListener(cb: (data: unknown, id: string) => void): Subscription {
+  return Notifications.addNotificationResponseReceivedListener((res) =>
+    cb(res.notification.request.content.data, res.notification.request.identifier),
+  );
+}
+
+/** Respuesta que abrió la app en frío (o null). Mismo shape que el listener para reusar el handler. */
+export async function getInitialResponse(): Promise<{ data: unknown; id: string } | null> {
+  const res = await Notifications.getLastNotificationResponseAsync();
+  if (!res) return null;
+  return { data: res.notification.request.content.data, id: res.notification.request.identifier };
+}
+
+/**
+ * Rotación del token (corrección D2): addPushTokenListener entrega el token NATIVO (APNs/FCM), NO
+ * el Expo. Se usa solo como SEÑAL para re-ejecutar getExpoPushTokenAsync y sincronizar el token
+ * Expo (vía reconcilePush). El caller debe desmontar la suscripción en su cleanup.
+ */
+export function subscribeTokenRotation(bridge: PushSyncBridge): Subscription {
+  return Notifications.addPushTokenListener(() => {
+    void reconcilePush(bridge);
+  });
+}

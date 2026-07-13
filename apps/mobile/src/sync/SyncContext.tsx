@@ -173,6 +173,8 @@ interface SyncCtx {
   pushLastToken?: string;
   /** Sincroniza el token Expo con el servidor (POST push-token + persiste lastPushToken). */
   syncPushToken: (token: string) => Promise<void>;
+  /** Refresca el feed in_app con anti-ráfaga (debounce trailing); para pushes en foreground. */
+  scheduleNotificationsRefresh: () => void;
   openPregnancy: (animalId: string) => LocalPregnancy | null;
   captureWeighing: (animalId: string, kg: number, cc?: number) => void;
   captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
@@ -232,6 +234,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const metaRef = useRef<PersistedMeta | null>(null);
   const offlineRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [status, setStatus] = useState<'boot' | 'login' | 'ready' | 'error'>('boot');
   const [errorMsg, setErrorMsg] = useState<string>();
@@ -462,6 +465,18 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (!offlineRef.current) syncNow();
     }, POST_CAPTURE_DEBOUNCE_MS);
   }, [syncNow]);
+
+  /**
+   * Refresh del feed in_app con anti-ráfaga (P7 F2.b): coalesce una ráfaga de pushes en un solo
+   * refresh (debounce trailing, mismo patrón que scheduleSync), en vez de disparar N refrescos.
+   * No fuerza un sync CRDT completo.
+   */
+  const scheduleNotificationsRefresh = useCallback(() => {
+    if (notifRefreshDebounceRef.current) clearTimeout(notifRefreshDebounceRef.current);
+    notifRefreshDebounceRef.current = setTimeout(() => {
+      if (!offlineRef.current) refreshNotifications();
+    }, POST_CAPTURE_DEBOUNCE_MS);
+  }, [refreshNotifications]);
 
   const init = useCallback(async () => {
     try {
@@ -761,6 +776,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       serverDeviceId: metaRef.current?.serverDeviceId,
       pushLastToken: metaRef.current?.lastPushToken,
       syncPushToken,
+      scheduleNotificationsRefresh,
 
       openPregnancy: (animalId: string) => {
         const m = store()?.rows.get('pregnancies');

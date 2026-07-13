@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SyncProvider, useSync } from '@/sync/SyncContext';
 import { AccountProvider } from '@/account/AccountContext';
 import { LoginScreen } from '@/components/LoginScreen';
+import { PushBridge } from '@/push/PushBridge';
 import { T } from '@/theme';
 
 function Gate() {
@@ -27,6 +28,7 @@ export default function RootLayout() {
     <SyncProvider>
       <AccountProvider>
         <StatusBar style="dark" />
+        <PushBridge />
         <Gate />
       </AccountProvider>
     </SyncProvider>
