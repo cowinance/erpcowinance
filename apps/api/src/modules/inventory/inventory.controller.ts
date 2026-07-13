@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 
 @Controller('inventory')
@@ -47,6 +47,19 @@ export class InventoryController {
   @Get('warehouses')
   warehouses() {
     return this.inv.listWarehouses();
+  }
+
+  @Post('movements')
+  recordMovement(@Body() body: any) {
+    return this.inv.recordMovement(body);
+  }
+  @Get('movements')
+  movements(@Query('item_id') itemId?: string, @Query('warehouse_id') warehouseId?: string) {
+    return this.inv.listMovements(itemId, warehouseId);
+  }
+  @Get('stock')
+  stock(@Query('warehouse_id') warehouseId?: string, @Query('item_id') itemId?: string) {
+    return this.inv.listStock(warehouseId, itemId);
   }
   @Post('warehouses')
   createWarehouse(@Body() body: any) {

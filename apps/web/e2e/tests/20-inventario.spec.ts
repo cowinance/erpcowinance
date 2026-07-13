@@ -22,10 +22,10 @@ test('inventario: crear categoría, ítem y depósito', async ({ page }) => {
   await page.getByLabel('Nombre del ítem').fill('Antibiótico X');
   await page.getByLabel('Categoría del ítem').selectOption({ label: 'Sanitarios' });
   await page.getByRole('button', { name: 'Agregar ítem' }).click();
-  await expect(page.getByText('Antibiótico X')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Antibiótico X' })).toBeVisible();
 
   // Depósito.
   await page.getByLabel('Nombre del depósito').fill('Galpón central');
   await page.getByRole('button', { name: 'Agregar depósito' }).click();
-  await expect(page.getByText('Galpón central')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Galpón central' })).toBeVisible();
 });

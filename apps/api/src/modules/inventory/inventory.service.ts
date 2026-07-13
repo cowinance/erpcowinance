@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 
 const CATEGORY_KINDS = ['feed', 'veterinary', 'agrochemical', 'seed', 'fuel', 'spare_part', 'supply', 'product'];
@@ -153,6 +153,104 @@ export class InventoryService {
 
   async deleteWarehouse(id: string) {
     return this.softDelete('warehouses', id);
+  }
+
+  // ── Movimientos + existencias (kardex, INV-2a) ──────────────────────────────
+  /**
+   * Registra un movimiento y actualiza el saldo (`stock_levels`) en la MISMA tx (regla única).
+   * `quantity` SIGNADA (+ entra, − sale). avg_cost ponderado solo en entradas con `unit_cost`; no
+   * hay stock negativo. Upsert por (item, warehouse, batch) con `IS NOT DISTINCT FROM` (batch NULL).
+   */
+  async recordMovement(body: any) {
+    const t = this.db.tenant;
+    const TYPES = ['in', 'out', 'adjustment', 'consumption'];
+    const itemId = body?.item_id;
+    const whId = body?.warehouse_id;
+    const type = body?.movement_type;
+    const qty = Number(body?.quantity);
+    if (!itemId || !whId) throw new BadRequestException({ code: 'inventory.missing_fields', title: 'item_id y warehouse_id son obligatorios' });
+    if (!TYPES.includes(type)) throw new BadRequestException({ code: 'inventory.invalid_movement_type', title: `movement_type inválido (${TYPES.join('|')})` });
+    if (!Number.isFinite(qty) || qty === 0) throw new BadRequestException({ code: 'inventory.invalid_quantity', title: 'quantity debe ser un número distinto de 0' });
+    if (type === 'in' && qty <= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: "'in' requiere cantidad positiva" });
+    if ((type === 'out' || type === 'consumption') && qty >= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: `'${type}' requiere cantidad negativa` });
+    const unitCost = body?.unit_cost != null ? Number(body.unit_cost) : null;
+    const batchId = body?.batch_id ?? null;
+    const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    const item = await this.db.one<{ id: string }>(`SELECT id FROM inventory_items WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [itemId, t]);
+    if (!item) throw new NotFoundException({ code: 'inventory.item_not_found', title: 'Ítem no encontrado' });
+    const wh = await this.db.one<{ id: string }>(`SELECT id FROM warehouses WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [whId, t]);
+    if (!wh) throw new NotFoundException({ code: 'inventory.warehouse_not_found', title: 'Depósito no encontrado' });
+
+    return this.db.tx(async (q) => {
+      const level = await q.one<{ id: string; quantity: number; avg_cost: number | null }>(
+        `SELECT id, quantity::float AS quantity, avg_cost::float AS avg_cost FROM stock_levels
+         WHERE tenant_id=$1 AND item_id=$2 AND warehouse_id=$3 AND batch_id IS NOT DISTINCT FROM $4 FOR UPDATE`,
+        [t, itemId, whId, batchId],
+      );
+      const oldQty = level?.quantity ?? 0;
+      const newQty = +(oldQty + qty).toFixed(3);
+      if (newQty < 0) throw new ForbiddenException({ code: 'inventory.insufficient_stock', title: `Stock insuficiente: hay ${oldQty}, se intenta retirar ${-qty}.` });
+      let newAvg = level?.avg_cost ?? null;
+      if (qty > 0 && unitCost != null) {
+        newAvg = newQty > 0 ? +(((oldQty * (level?.avg_cost ?? unitCost)) + qty * unitCost) / newQty).toFixed(4) : unitCost;
+      }
+      const mov = await q.one(
+        `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, batch_id, movement_type, quantity, unit_cost, occurred_at, reference_type, reference_id, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         RETURNING id, movement_type, quantity::float AS quantity, occurred_at`,
+        [t, itemId, whId, batchId, type, qty, unitCost, occurredAt, body?.reference_type ?? null, body?.reference_id ?? null, this.db.user],
+      );
+      if (level) {
+        await q.query(`UPDATE stock_levels SET quantity=$1, avg_cost=$2, updated_at=now() WHERE id=$3`, [newQty, newAvg, level.id]);
+      } else {
+        await q.query(`INSERT INTO stock_levels (tenant_id, item_id, warehouse_id, batch_id, quantity, avg_cost) VALUES ($1,$2,$3,$4,$5,$6)`, [t, itemId, whId, batchId, newQty, newAvg]);
+      }
+      return { movement: mov, level: { quantity: newQty, avg_cost: newAvg } };
+    });
+  }
+
+  /** Existencias por (ítem, depósito): saldo materializado. */
+  async listStock(warehouseId?: string, itemId?: string) {
+    const params: unknown[] = [this.db.tenant];
+    let filter = '';
+    if (warehouseId) {
+      params.push(warehouseId);
+      filter += ` AND sl.warehouse_id = $${params.length}`;
+    }
+    if (itemId) {
+      params.push(itemId);
+      filter += ` AND sl.item_id = $${params.length}`;
+    }
+    return this.db.query(
+      `SELECT sl.item_id, i.name AS item_name, i.unit, sl.warehouse_id, w.name AS warehouse_name, sl.batch_id,
+              sl.quantity::float AS quantity, sl.avg_cost::float AS avg_cost
+       FROM stock_levels sl JOIN inventory_items i ON i.id = sl.item_id JOIN warehouses w ON w.id = sl.warehouse_id
+       WHERE sl.tenant_id = $1 AND sl.deleted_at IS NULL${filter}
+       ORDER BY i.name, w.name`,
+      params,
+    );
+  }
+
+  /** Kardex: historial de movimientos (más recientes primero). */
+  async listMovements(itemId?: string, warehouseId?: string) {
+    const params: unknown[] = [this.db.tenant];
+    let filter = '';
+    if (itemId) {
+      params.push(itemId);
+      filter += ` AND m.item_id = $${params.length}`;
+    }
+    if (warehouseId) {
+      params.push(warehouseId);
+      filter += ` AND m.warehouse_id = $${params.length}`;
+    }
+    return this.db.query(
+      `SELECT m.id, m.movement_type, m.quantity::float AS quantity, m.unit_cost::float AS unit_cost, m.occurred_at,
+              i.name AS item_name, i.unit, w.name AS warehouse_name
+       FROM stock_movements m JOIN inventory_items i ON i.id = m.item_id JOIN warehouses w ON w.id = m.warehouse_id
+       WHERE m.tenant_id = $1 AND m.deleted_at IS NULL${filter}
+       ORDER BY m.occurred_at DESC, m.created_at DESC LIMIT 100`,
+      params,
+    );
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
