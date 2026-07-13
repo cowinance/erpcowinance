@@ -113,6 +113,15 @@ export async function bootstrapCatalogs(db: PGlite) {
      (NULL,'veterinarian','Veterinario',true), (NULL,'foreman','Capataz',true),
      (NULL,'worker','Operario',true), (NULL,'accountant','Contador',true)`,
   );
+
+  // ── Planes SaaS (catálogo global; precios en USD, límites por plan) ─────
+  await q(
+    `INSERT INTO plans (code, name, monthly_price_usd, max_animals, max_users, max_devices) VALUES
+     ('trial','Prueba',0,1000,5,5),
+     ('basico','Básico',29,500,3,3),
+     ('pro','Pro',79,5000,10,10)
+     ON CONFLICT (code) DO NOTHING`,
+  );
 }
 
 /**
