@@ -352,6 +352,8 @@ export class DbService implements OnModuleInit {
     'journal_lines',
     // F-2: mapa de cuentas de posteo (k/v por company).
     'system_settings',
+    // F-3a: facturas (documento fiscal ligado a venta/compra).
+    'invoices',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -440,6 +442,8 @@ export class DbService implements OnModuleInit {
     }
     // F-2: misma policy dispersa en system_settings (mapa de cuentas de posteo).
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_system_settings ON "system_settings";');
+    // F-3a: misma policy dispersa en invoices.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_invoices ON "invoices";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

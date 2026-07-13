@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { FinanceController } from './finance.controller';
 import { LedgerController } from './ledger.controller';
 import { PostingController } from './posting.controller';
+import { InvoicesController } from './invoices.controller';
 import { AccountsService } from './accounts.service';
 import { LedgerService } from './ledger.service';
 import { PostingService } from './posting.service';
+import { InvoicesService } from './invoices.service';
 import { CommerceModule } from '../commerce/commerce.module';
 
 /**
@@ -14,8 +16,8 @@ import { CommerceModule } from '../commerce/commerce.module';
  */
 @Module({
   imports: [CommerceModule],
-  controllers: [FinanceController, LedgerController, PostingController],
-  providers: [AccountsService, LedgerService, PostingService],
+  controllers: [FinanceController, LedgerController, PostingController, InvoicesController],
+  providers: [AccountsService, LedgerService, PostingService, InvoicesService],
   exports: [AccountsService, LedgerService],
 })
 export class FinanceModule {}
