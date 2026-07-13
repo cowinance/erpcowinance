@@ -65,6 +65,31 @@ export class BillingService {
     };
   }
 
+  /**
+   * Enforcement de límites del plan (B-2): lanza 403 `plan.limit_reached` si crear un recurso más
+   * superaría el límite del plan. `null` = sin límite. Regla única, invocada por los create-paths
+   * (animales, dispositivos). La importación masiva se difiere (flujo propio).
+   */
+  async assertWithinLimit(resource: 'animals' | 'devices'): Promise<void> {
+    await this.ensureSubscription();
+    const t = this.db.tenant;
+    const plan = await this.db.one<{ max_animals: number | null; max_devices: number | null }>(
+      `SELECT p.max_animals, p.max_devices FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+       WHERE s.tenant_id = $1 AND s.deleted_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
+      [t],
+    );
+    const limit = resource === 'animals' ? plan?.max_animals : plan?.max_devices;
+    if (limit == null) return; // sin límite → no bloquea
+    const count =
+      resource === 'animals'
+        ? (await this.db.one<{ n: number }>(`SELECT count(*)::int AS n FROM animals WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL`, [t]))?.n ?? 0
+        : (await this.db.one<{ n: number }>(`SELECT count(*)::int AS n FROM sync_devices WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL`, [t]))?.n ?? 0;
+    if (count >= limit) {
+      const noun = resource === 'animals' ? 'animales' : 'dispositivos';
+      throw new ForbiddenException({ code: 'plan.limit_reached', title: `Alcanzaste el límite de ${limit} ${noun} de tu plan. Cambiá de plan para agregar más.` });
+    }
+  }
+
   /** Cambio ADMINISTRATIVO de plan (NO cobra). Gated a owner/admin. No altera el estado del cobro. */
   async changePlan(body: any) {
     const role = requestContext.getStore()?.role ?? '';

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { Changeset, Op } from '@cowinance/sync-core';
 import { DbService } from '../../db/db.service';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
+import { BillingService } from '../billing/billing.service';
 
 /**
  * Resultado remoto de una fila de pull (contrato con el cliente). Un changeset de
@@ -43,11 +44,13 @@ export class SyncService {
   constructor(
     private readonly db: DbService,
     private readonly handlers: SyncHandlerRegistry,
+    private readonly billing: BillingService,
   ) {}
 
   async registerDevice(body: { platform: string; device_name?: string; app_version?: string }) {
     if (!['ios', 'android', 'web'].includes(body?.platform))
       throw new BadRequestException({ code: 'sync.invalid_platform', title: 'platform debe ser ios|android|web' });
+    await this.billing.assertWithinLimit('devices'); // B-2: límite de dispositivos del plan
     return this.db.one(
       `INSERT INTO sync_devices (tenant_id, user_id, platform, device_name, app_version)
        VALUES ($1,$2,$3,$4,$5) RETURNING id, platform, device_name, app_version, sync_cursor, status, created_at`,

@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { DbService } from '../../db/db.service';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
 import { SyncService } from './sync.service';
+import { BillingService } from '../billing/billing.service';
 
 /**
  * Integración del registro de push token (P7-2.a): setPushToken persiste el token en
@@ -28,7 +29,7 @@ describe('SyncService.setPushToken · integración', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    sync = new SyncService(db, new SyncHandlerRegistry());
+    sync = new SyncService(db, new SyncHandlerRegistry(), new BillingService(db));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
     otherUserId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'maria@elombu.com'`))[0].id;

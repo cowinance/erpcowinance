@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DbService } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
+import { BillingService } from '../billing/billing.service';
 
 /** Referencia de foto (id + token firmado) para renderizar desde el navegador. */
 function photoRef(db: DbService, fileId?: string | null, mime?: string | null) {
@@ -23,6 +24,7 @@ export class HerdService {
   constructor(
     private readonly db: DbService,
     private readonly writer: AnimalWriteService,
+    private readonly billing: BillingService,
   ) {}
 
   async listAnimals(params: ListAnimalsParams) {
@@ -251,6 +253,7 @@ export class HerdService {
     birth_date?: string;
     lot_id?: string;
   }) {
+    await this.billing.assertWithinLimit('animals'); // B-2: límite del plan (create REST; el import se difiere)
     const nv = this.writer.normalizeAndValidate(body);
     if (!nv.ok) {
       // Contrato REST preservado: cualquier campo obligatorio ausente → animal.missing_fields.

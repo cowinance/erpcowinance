@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { AnimalWriteService } from './animal-write.service';
 import { HerdService } from './herd.service';
+import { BillingService } from '../billing/billing.service';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { ReportsService } from '../reports/reports.service';
 
@@ -30,7 +31,7 @@ describe('GDP derivado desde v_weighings', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    herd = new HerdService(db, {} as AnimalWriteService);
+    herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
     dashboard = new DashboardService(db);
     reports = new ReportsService(db);
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
