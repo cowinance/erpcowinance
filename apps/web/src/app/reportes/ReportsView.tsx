@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { API_URL, authHeaders } from '@/lib/api';
+import { downloadCsv } from '@/lib/csv';
 import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -19,22 +20,6 @@ const REPORTS: { key: ReportKey; label: string }[] = [
 
 const today = () => new Date().toISOString().slice(0, 10);
 const monthsAgo = (n: number) => new Date(Date.now() - n * 30.44 * 86400000).toISOString().slice(0, 10);
-
-function toCsv(rows: (string | number | null)[][]): string {
-  return rows
-    .map((r) => r.map((c) => (c == null ? '' : /[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : String(c))).join(','))
-    .join('\n');
-}
-
-function download(name: string, csv: string) {
-  const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 
@@ -134,9 +119,15 @@ export function ReportsView() {
         ['Muertes', data.mortalidad.n],
         ['Pérdida estimada', data.mortalidad.perdida_estimada],
         ['Tasa mortalidad (%)', data.mortalidad.tasa_pct ?? ''],
+        [],
+        ['Vacunas por producto', ''],
+        ...(data.vacunaciones.por_producto ?? []).map((r: any) => [r.producto, r.n]),
+        [],
+        ['Tratamientos por vía', ''],
+        ...(data.tratamientos.por_via ?? []).map((r: any) => [r.via, r.n]),
       ];
     }
-    download(name, toCsv(rows));
+    downloadCsv(name, rows);
   }
 
   return (
