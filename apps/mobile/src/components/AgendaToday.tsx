@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from './ui';
 import { useSync, type AgendaItem } from '@/sync/SyncContext';
+import { relativeTime } from '@/lib/relative-time';
 import { T } from '@/theme';
 
 const GROUPS: { key: 'overdue' | 'today' | 'upcoming'; label: string }[] = [
@@ -31,15 +32,6 @@ function urgency(item: AgendaItem, todayStr: string): 'overdue' | 'today' | 'upc
   if (d < todayStr) return 'overdue';
   if (d === todayStr) return 'today';
   return 'upcoming';
-}
-
-function relTime(iso: string): string {
-  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
-  if (mins < 1) return 'recién';
-  if (mins < 60) return `hace ${mins} min`;
-  const h = Math.round(mins / 60);
-  if (h < 24) return `hace ${h} h`;
-  return `hace ${Math.round(h / 24)} d`;
 }
 
 export function AgendaToday() {
@@ -79,7 +71,7 @@ export function AgendaToday() {
   if (items.length === 0) {
     return (
       <Card>
-        {header(`actualizado ${relTime(agendaAt)}`)}
+        {header(`actualizado ${relativeTime(agendaAt)}`)}
         <Text style={styles.empty}>Sin pendientes hoy ✓</Text>
       </Card>
     );
@@ -93,7 +85,7 @@ export function AgendaToday() {
 
   return (
     <Card>
-      {header(`actualizado ${relTime(agendaAt)}`)}
+      {header(`actualizado ${relativeTime(agendaAt)}`)}
       {grouped.map((g) => (
         <View key={g.key} style={{ marginTop: T.space['2'] }}>
           <Text style={styles.group}>

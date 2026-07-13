@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useSync, API_URL } from '@/sync/SyncContext';
 import { useAccount } from '@/account/AccountContext';
 import { Button, Card } from '@/components/ui';
@@ -9,6 +11,7 @@ import { T } from '@/theme';
 export default function Menu() {
   const sync = useSync();
   const account = useAccount();
+  const unread = sync.unreadNotifications(); // misma fuente única que el badge de la tab
   const [confirmReset, setConfirmReset] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
@@ -31,6 +34,27 @@ export default function Menu() {
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
         <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Menú</Text>
+
+        {/* Acceso al feed in_app (P7-4.c.2): abre /notificaciones; muestra el contador real o
+            «Sin novedades». El badge de la tab y este contador salen de la misma fuente única. */}
+        <Pressable
+          onPress={() => router.push('/notificaciones')}
+          accessibilityRole="button"
+          accessibilityLabel={unread === 0 ? 'Notificaciones. Sin novedades' : `Notificaciones. ${unread} sin leer`}
+          accessibilityHint="Abre el feed de notificaciones"
+          style={({ pressed }) => [styles.notifRow, pressed && { backgroundColor: T.sunken }]}
+        >
+          <Ionicons name="notifications-outline" size={20} color={T.ink2} />
+          <Text style={styles.notifLabel}>Notificaciones</Text>
+          {unread === 0 ? (
+            <Text style={styles.notifEmpty}>Sin novedades</Text>
+          ) : (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>{unread > 99 ? '99+' : unread}</Text>
+            </View>
+          )}
+          <Ionicons name="chevron-forward" size={18} color={T.ink3} />
+        </Pressable>
 
         <Card>
           <Text style={styles.title}>Usuario</Text>
@@ -135,4 +159,19 @@ const styles = StyleSheet.create({
   title: { fontSize: T.type.body, fontWeight: '600', color: T.ink },
   value: { fontSize: 14, color: T.ink2, marginTop: T.space['0.5'] },
   mono: { fontFamily: 'monospace', fontSize: T.type.label, color: T.ink2, marginTop: T.space['0.5'] },
+  notifRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: T.space['2.5'],
+    minHeight: 48,
+    paddingHorizontal: T.space['3'],
+    backgroundColor: T.surface,
+    borderRadius: T.radiusMd,
+    borderWidth: 1,
+    borderColor: T.borderSubtle,
+  },
+  notifLabel: { flex: 1, fontSize: T.type.body, fontWeight: '600', color: T.ink },
+  notifEmpty: { fontSize: T.type.label, color: T.ink3 },
+  notifBadge: { minWidth: 20, paddingHorizontal: 6, height: 20, borderRadius: 10, backgroundColor: T.warning, alignItems: 'center', justifyContent: 'center' },
+  notifBadgeText: { fontSize: T.type.caption, fontWeight: '700', color: '#fff' },
 });

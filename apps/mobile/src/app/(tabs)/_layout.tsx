@@ -5,6 +5,7 @@
 import { Tabs, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSync } from '@/sync/SyncContext';
 import { T } from '@/theme';
 
 function CaptureButton() {
@@ -20,6 +21,7 @@ function CaptureButton() {
 }
 
 export default function TabsLayout() {
+  const unread = useSync().unreadNotifications(); // fuente única del contador (P7-4.c)
   return (
     <Tabs
       screenOptions={{
@@ -55,7 +57,15 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="menu"
-        options={{ title: 'Menú', tabBarIcon: ({ color, size }) => <Ionicons name="menu-outline" size={size} color={color} /> }}
+        options={{
+          title: 'Menú',
+          tabBarIcon: ({ color, size }) => <Ionicons name="menu-outline" size={size} color={color} />,
+          // Badge de no leídas (P7-4.c.2): tabBarBadge admite string|number (RN bottom-tabs, SDK 57).
+          // El visual satura en '99+'; el label accesible comunica SIEMPRE la cantidad real.
+          tabBarBadge: unread === 0 ? undefined : unread > 99 ? '99+' : unread,
+          tabBarBadgeStyle: { backgroundColor: T.warning, color: '#fff' },
+          tabBarAccessibilityLabel: unread === 0 ? 'Menú' : `Menú, ${unread} notificaciones no leídas`,
+        }}
       />
     </Tabs>
   );
