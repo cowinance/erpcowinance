@@ -195,7 +195,7 @@ export function DocumentForm({
                 <Input type="number" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: e.target.value })} placeholder="Precio" aria-label={`Precio línea ${i + 1}`} />
                 <Input type="number" value={l.tax_rate} onChange={(e) => setLine(i, { tax_rate: e.target.value })} placeholder="IVA" aria-label={`Alícuota línea ${i + 1}`} />
                 {lines.length > 1 && (
-                  <Button secondary size="sm" onClick={() => removeLine(i)} aria-label={`Quitar línea ${i + 1}`}>
+                  <Button variant="secondary" size="sm" onClick={() => removeLine(i)} aria-label={`Quitar línea ${i + 1}`}>
                     ✕
                   </Button>
                 )}
@@ -203,11 +203,11 @@ export function DocumentForm({
             </div>
           ))}
           <div className="flex gap-2">
-            <Button secondary size="sm" onClick={() => addLine('item')}>
+            <Button variant="secondary" size="sm" onClick={() => addLine('item')}>
               + Ítem
             </Button>
             {isSale && (
-              <Button secondary size="sm" onClick={() => addLine('animal')}>
+              <Button variant="secondary" size="sm" onClick={() => addLine('animal')}>
                 + Animal
               </Button>
             )}

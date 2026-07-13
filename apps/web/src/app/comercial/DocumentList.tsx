@@ -93,7 +93,7 @@ export function DocumentList({ kind, docs }: { kind: 'purchase' | 'sale'; docs: 
               <div className="flex items-center gap-2">
                 <span className="rounded-full bg-subtle px-2 py-0.5 text-caption font-medium text-ink-2">{STATUS_LABEL[d.status] ?? d.status}</span>
                 {(ACTIONS[kind][d.status] ?? []).map(([to, label]) => (
-                  <Button key={to} secondary size="sm" loading={busy === d.id + to} disabled={!!busy} onClick={() => transition(d.id, to)}>
+                  <Button key={to} variant="secondary" size="sm" loading={busy === d.id + to} disabled={!!busy} onClick={() => transition(d.id, to)}>
                     {label}
                   </Button>
                 ))}
