@@ -3,15 +3,17 @@ import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, EmptyState, KpiCard, TagMono } from '@/components/ui';
 import { formatDate } from '@/lib/format';
 import { ReproCapture } from './ReproCapture';
+import { HerdStatus } from './HerdStatus';
 import { Baby } from 'lucide-react';
 
 const DIAG_METHOD: Record<string, string> = { ultrasound: 'Ecografía', palpation: 'Palpación', blood: 'Sangre', visual: 'Visual' };
 
 export default async function ReproPage() {
-  const [kpis, upcoming, bullsRes] = await Promise.all([
+  const [kpis, upcoming, bullsRes, lots] = await Promise.all([
     apiSafe<any>('/reproduction/kpis'),
     apiSafe<any[]>('/reproduction/upcoming-calvings?days=400'),
     apiSafe<any>('/animals?category=toro&limit=50'),
+    apiSafe<any[]>('/lots'),
   ]);
   if (!kpis) return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
 
@@ -85,6 +87,10 @@ export default async function ReproPage() {
           <CardTitle>Captura rápida</CardTitle>
           <ReproCapture bulls={bullsRes?.data ?? []} />
         </Card>
+      </div>
+
+      <div className="mt-4">
+        <HerdStatus lots={lots ?? []} />
       </div>
     </div>
   );

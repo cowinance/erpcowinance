@@ -240,6 +240,63 @@ export class ReproService {
     };
   }
 
+  /**
+   * Estado reproductivo del rodeo (R-1): cada vientre ACTIVO (vaca/vaquillona) con su estado
+   * snapshot. Orden estricto: preñada > (último servicio vs último diagnóstico negativo) > sin
+   * actividad. Vientre = mismo criterio que `kpis()`. Snapshot (dueño repro), no período.
+   */
+  async herdStatus(lotId?: string) {
+    const params: unknown[] = [this.db.tenant];
+    let lotFilter = '';
+    if (lotId) {
+      params.push(lotId);
+      lotFilter = ` AND a.current_lot_id = $${params.length}`;
+    }
+    const rows = await this.db.query<any>(
+      `SELECT a.id AS animal_id, ai.value AS tag, a.name, l.name AS lot,
+              p.expected_due_date,
+              (p.expected_due_date - CURRENT_DATE)::int AS days_until,
+              s.last_service, neg.last_neg,
+              (p.preg IS NOT NULL) AS pregnant
+       FROM animals a
+       JOIN animal_categories c ON c.id = a.category_id AND c.code IN ('vaca', 'vaquillona')
+       LEFT JOIN lots l ON l.id = a.current_lot_id
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type = 'visual' ORDER BY x.created_at DESC LIMIT 1) ai ON true
+       LEFT JOIN LATERAL (SELECT 1 AS preg, expected_due_date FROM pregnancies WHERE animal_id = a.id AND status = 'open' AND deleted_at IS NULL ORDER BY diagnosis_date DESC LIMIT 1) p ON true
+       LEFT JOIN LATERAL (SELECT max(occurred_at) AS last_service FROM breeding_events WHERE animal_id = a.id AND type IN ('service_natural', 'service_ai', 'embryo_transfer') AND deleted_at IS NULL) s ON true
+       LEFT JOIN LATERAL (SELECT max(occurred_at) AS last_neg FROM animal_events WHERE animal_id = a.id AND event_type = 'pregnancy_negative' AND deleted_at IS NULL) neg ON true
+       WHERE a.tenant_id = $1 AND a.status = 'active' AND a.deleted_at IS NULL${lotFilter}
+       ORDER BY ai.value NULLS LAST`,
+      params,
+    );
+
+    const statusOf = (r: any): 'pregnant' | 'served' | 'empty' | 'idle' => {
+      if (r.pregnant) return 'pregnant';
+      const svc = r.last_service ? new Date(r.last_service).getTime() : null;
+      const neg = r.last_neg ? new Date(r.last_neg).getTime() : null;
+      if (svc == null && neg == null) return 'idle';
+      if (svc != null && (neg == null || svc > neg)) return 'served';
+      return 'empty';
+    };
+
+    const counts = { pregnant: 0, served: 0, empty: 0, idle: 0, total: rows.length };
+    const out = rows.map((r) => {
+      const status = statusOf(r);
+      counts[status]++;
+      return {
+        animal_id: r.animal_id,
+        tag: r.tag ?? null,
+        name: r.name ?? null,
+        lot: r.lot ?? null,
+        status,
+        expected_due_date: status === 'pregnant' ? r.expected_due_date : null,
+        days_until: status === 'pregnant' ? r.days_until : null,
+        last_service_date: r.last_service ?? null,
+      };
+    });
+    return { lot_id: lotId ?? null, counts, rows: out };
+  }
+
   private async requireFemale(animalId: string) {
     const animal = await requireAnimal(this.db, animalId);
     if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });

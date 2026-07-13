@@ -44,4 +44,9 @@ export class ReproController {
   kpis() {
     return this.repro.kpis();
   }
+
+  @Get('reproduction/herd-status')
+  herdStatus(@Query('lot_id') lotId?: string) {
+    return this.repro.herdStatus(lotId);
+  }
 }
