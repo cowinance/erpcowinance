@@ -1,5 +1,6 @@
 import { apiSafe } from '@/lib/server-api';
 import { EmptyState } from '@/components/ui';
+import { CommerceNav } from './CommerceNav';
 import { PartnersManager } from './PartnersManager';
 
 /**
@@ -15,8 +16,9 @@ export default async function CommercialPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold">Comercial</h1>
-        <p className="mt-0.5 text-body text-ink-3">Maestro de socios: clientes, proveedores y contactos. Compras y ventas próximamente.</p>
+        <p className="mt-0.5 text-body text-ink-3">Maestro de socios: clientes, proveedores y contactos.</p>
       </div>
+      <CommerceNav />
       <PartnersManager partners={partners ?? []} />
     </div>
   );
