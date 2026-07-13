@@ -4,6 +4,7 @@ import { requestContext } from '../../common/request-context';
 import { PushDeliveryClaimRepository, type ClaimedDelivery } from './push-delivery-claim.repository';
 import { PUSH_TRANSPORT, PushTransportRequestError, type PushSendResult, type PushTransport } from './push-transport.port';
 import { PUSH_RUNTIME_CONFIG, type PushRuntimeConfig } from './push-runtime-config';
+import { buildPushMessageData } from './push-message.contract';
 
 const CLAIM_BATCH = 50;
 const MAX_ATTEMPTS = 5;
@@ -26,6 +27,8 @@ interface PrepRow {
   notif_user: string | null;
   title: string;
   body: string | null;
+  related_type: string | null;
+  related_id: string | null;
   device_id: string | null;
   device_user: string | null;
   device_token: string | null;
@@ -38,6 +41,8 @@ interface Sendable {
   body: string | null;
   attemptCount: number;
   notificationId: string;
+  relatedType: string | null;
+  relatedId: string | null;
 }
 
 /**
@@ -115,9 +120,11 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
         const r = await q.one<PrepRow>(
           `SELECT d.status, d.token_snapshot, d.sync_device_id, d.attempt_count,
                   n.id AS notif_id, n.channel, n.user_id AS notif_user, n.title, n.body,
+                  a.related_type, a.related_id,
                   sd.id AS device_id, sd.user_id AS device_user, sd.push_token AS device_token
            FROM notification_deliveries d
            LEFT JOIN notifications n ON n.id = d.notification_id AND n.tenant_id = d.tenant_id
+           LEFT JOIN alerts a ON a.id = n.alert_id AND a.tenant_id = d.tenant_id
            LEFT JOIN sync_devices sd ON sd.id = d.sync_device_id AND sd.tenant_id = d.tenant_id AND sd.deleted_at IS NULL
            WHERE d.id = $1 AND d.tenant_id = $2`,
           [c.deliveryId, tenantId],
@@ -141,6 +148,8 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
           body: r.body,
           attemptCount: r.attempt_count,
           notificationId: c.notificationId,
+          relatedType: r.related_type,
+          relatedId: r.related_id,
         });
       }
       return { sendable, affected: [...affected] };
@@ -155,7 +164,15 @@ export class PushProcessor implements OnModuleInit, OnModuleDestroy {
     let results: PushSendResult[] | null = null;
     let sendError: unknown = null;
     try {
-      results = await this.transport.send(prep.sendable.map((s) => ({ ref: s.deliveryId, token: s.token, title: s.title, body: s.body, data: { notificationId: s.notificationId } })));
+      results = await this.transport.send(
+        prep.sendable.map((s) => ({
+          ref: s.deliveryId,
+          token: s.token,
+          title: s.title,
+          body: s.body,
+          data: buildPushMessageData({ id: s.notificationId, related_type: s.relatedType, related_id: s.relatedId }),
+        })),
+      );
     } catch (e) {
       sendError = e;
       // Logging SEGURO: solo el código normalizado, nunca el error crudo/token/secreto.
