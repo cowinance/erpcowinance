@@ -312,6 +312,21 @@ export class HerdService {
     throw new BadRequestException({ code: 'event.unsupported_type', title: `Tipo de evento no soportado aún: ${body.type}` });
   }
 
+  /** Crea un lote (rodeo/grupo de manejo) del tenant. `purpose` opcional (validado). */
+  async createLot(body: any) {
+    const name = String(body?.name ?? '').trim();
+    if (!name) throw new BadRequestException({ code: 'lot.missing_name', title: 'name es obligatorio' });
+    const PURPOSES = ['breeding', 'fattening', 'dairy', 'weaning', 'quarantine', 'hospital'];
+    const purpose = body?.purpose && PURPOSES.includes(body.purpose) ? body.purpose : null;
+    const t = this.db.tenant;
+    const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
+    if (!farm) throw new BadRequestException({ code: 'lot.no_farm', title: 'No hay finca para asociar el lote' });
+    return this.db.one<any>(
+      `INSERT INTO lots (tenant_id, farm_id, name, purpose) VALUES ($1,$2,$3,$4) RETURNING id, name, purpose, is_active`,
+      [t, farm, name, purpose],
+    );
+  }
+
   async lots() {
     return this.db.query(
       `SELECT l.id, l.name, l.purpose, p.name AS paddock_name,

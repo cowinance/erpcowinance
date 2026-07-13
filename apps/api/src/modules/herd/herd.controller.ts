@@ -42,6 +42,11 @@ export class HerdController {
     return this.herd.registerEvent(id, body);
   }
 
+  @Post('lots')
+  createLot(@Body() body: any) {
+    return this.herd.createLot(body);
+  }
+
   @Get('lots')
   lots() {
     return this.herd.lots();

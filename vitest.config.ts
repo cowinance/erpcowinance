@@ -15,6 +15,9 @@ export default defineConfig({
       'apps/api/src/**/*.{test,spec}.ts',
       'apps/api/test/**/*.{test,spec}.ts',
       'apps/mobile/src/**/*.{test,spec}.ts',
+      // Solo helpers PUROS `.ts` de la web (no .tsx/React); habilita testear utilidades como
+      // lib/protocol-calendar en el gate (R-2.b.2). apps/web sigue verificándose por Playwright.
+      'apps/web/src/**/*.{test,spec}.ts',
     ],
     exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/.data/**'],
     coverage: {
