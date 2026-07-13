@@ -334,6 +334,16 @@ export class DbService implements OnModuleInit {
     'stock_movements',
     'stock_levels',
     'inventory_batches',
+    // Comercial (C-1): maestro de socios + compras/ventas (tablas dormidas activadas).
+    'business_partners',
+    'suppliers',
+    'customers',
+    'contacts',
+    'price_lists',
+    'purchases',
+    'purchase_lines',
+    'sales',
+    'sale_lines',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -412,6 +422,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_stock_movements ON "stock_movements";');
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_stock_levels ON "stock_levels";');
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_inventory_batches ON "inventory_batches";');
+    // C-1: mismas policies dispersas (app.current_tenant) en las 9 tablas comerciales activadas.
+    for (const t of ['business_partners', 'suppliers', 'customers', 'contacts', 'price_lists', 'purchases', 'purchase_lines', 'sales', 'sale_lines']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
