@@ -16,9 +16,10 @@ export class NotificationsController {
     return this.notifications.feed(this.db.user);
   }
 
+  /** Contador para el badge. Read-through (genera el ledger si falta) → correcto en cualquier página. */
   @Get('notifications/unread-count')
   unreadCount() {
-    return this.notifications.unreadCount(this.db.user);
+    return this.notifications.refreshUnreadCount(this.db.user);
   }
 
   @Post('notifications/:id/read')

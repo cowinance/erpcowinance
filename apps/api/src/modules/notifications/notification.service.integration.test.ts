@@ -91,6 +91,23 @@ describe('NotificationService · integración', () => {
     expect(again.status).toBe('read');
   });
 
+  it('refreshUnreadCount: crea el ledger read-through (sin abrir el feed) y es idempotente', async () => {
+    // Usuario FRESCO (nunca consultó /notifications): no tiene notificaciones aún.
+    const fresh = (
+      await db.query<{ id: string }>(`INSERT INTO users (email, full_name) VALUES ($1,'Fresh User') RETURNING id`, [`fresh-${Date.now()}@t.com`])
+    )[0].id;
+    expect(await countFor(fresh)).toBe(0);
+
+    const r1 = await notifications.refreshUnreadCount(fresh);
+    expect(r1.count).toBeGreaterThan(0); // el contador creó las filas in_app desde las alertas abiertas
+    const created = await countFor(fresh);
+    expect(created).toBe(r1.count);
+
+    const r2 = await notifications.refreshUnreadCount(fresh);
+    expect(await countFor(fresh)).toBe(created); // repetir no duplica notificaciones ni deliveries
+    expect(r2.count).toBe(r1.count);
+  });
+
   it('aislamiento: marcar la notificación de otro usuario → not_found (no la toca)', async () => {
     const someId = (await notifications.feed(userId))[0].id;
     await expect(notifications.markRead(someId, randomUUID())).rejects.toMatchObject({ response: { code: 'notification.not_found' } });

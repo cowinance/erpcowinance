@@ -142,6 +142,16 @@ export class NotificationService {
     return { id, status: existing.status };
   }
 
+  /**
+   * Contador read-through (P7-4.b): refresca el ledger (`dispatch`, idempotente) ANTES de
+   * contar, para que el badge sea correcto en cualquier página sin descargar el feed y sin
+   * carrera entre requests. Reutiliza el mismo `dispatch` de P7-1/P7-3 (no duplica reglas).
+   */
+  async refreshUnreadCount(userId: string): Promise<{ count: number }> {
+    await this.dispatch(userId);
+    return this.unreadCount(userId);
+  }
+
   /** Cuenta las `in_app` entregadas y no leídas del usuario. */
   async unreadCount(userId: string): Promise<{ count: number }> {
     const t = this.db.tenant;

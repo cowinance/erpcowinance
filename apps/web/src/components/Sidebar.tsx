@@ -19,6 +19,7 @@ import {
   Store,
   BarChart3,
   Bell,
+  Inbox,
   GraduationCap,
   Settings,
   ChevronsUpDown,
@@ -63,6 +64,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
 ];
 
 const FOOTER_ITEMS = [
+  { href: '/notificaciones', label: 'Notificaciones', icon: Inbox },
   { href: '/alertas', label: 'Alertas', icon: Bell },
   { href: '/modulo/academia', label: 'Academia', icon: GraduationCap },
   { href: '/modulo/configuracion', label: 'Configuración', icon: Settings },
@@ -74,12 +76,15 @@ function NavItem({
   icon: Icon,
   badge,
   badgeTone,
+  badgeAriaLabel,
 }: {
   href: string;
   label: string;
   icon: any;
   badge?: number;
   badgeTone?: 'danger' | 'warning';
+  /** Sustantivo para el aria-label del badge (p. ej. «notificaciones no leídas»); el número real siempre se anuncia aunque el visual sea 99+. */
+  badgeAriaLabel?: string;
 }) {
   const pathname = usePathname();
   const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -94,11 +99,13 @@ function NavItem({
       <span className="flex-1">{label}</span>
       {badge != null && badge > 0 && (
         <span
+          aria-live="polite"
+          aria-label={badgeAriaLabel ? `${badge} ${badgeAriaLabel}` : undefined}
           className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-compat-10 font-semibold text-white ${
             badgeTone === 'danger' ? 'bg-danger' : 'bg-warning'
           }`}
         >
-          {badge}
+          {badge > 99 ? '99+' : badge}
         </span>
       )}
     </Link>
@@ -111,12 +118,14 @@ export function Sidebar({
   userName,
   openAlerts = 0,
   criticalAlerts = 0,
+  unreadNotifications = 0,
 }: {
   orgName?: string;
   farmName?: string;
   userName?: string;
   openAlerts?: number;
   criticalAlerts?: number;
+  unreadNotifications?: number;
 }) {
   const farm = farmName ?? 'Cowinance';
   const initials = farm
@@ -165,14 +174,18 @@ export function Sidebar({
       </nav>
 
       <div className="space-y-0.5 border-t border-subtle pt-3">
-        {FOOTER_ITEMS.map((it) => (
-          <NavItem
-            key={it.href}
-            {...it}
-            badge={it.href === '/alertas' ? openAlerts : undefined}
-            badgeTone={it.href === '/alertas' && criticalAlerts > 0 ? 'danger' : 'warning'}
-          />
-        ))}
+        {FOOTER_ITEMS.map((it) =>
+          it.href === '/notificaciones' ? (
+            <NavItem key={it.href} {...it} badge={unreadNotifications} badgeTone="warning" badgeAriaLabel="notificaciones no leídas" />
+          ) : (
+            <NavItem
+              key={it.href}
+              {...it}
+              badge={it.href === '/alertas' ? openAlerts : undefined}
+              badgeTone={it.href === '/alertas' && criticalAlerts > 0 ? 'danger' : 'warning'}
+            />
+          ),
+        )}
         <button
           onClick={() => {
             const refresh = document.cookie.match(new RegExp(`(?:^|; )${REFRESH_COOKIE}=([^;]*)`))?.[1];
