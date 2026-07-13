@@ -46,7 +46,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
     items: [
       { href: '/reproduccion', label: 'Reproducción', icon: Heart },
       { href: '/sanidad', label: 'Sanidad', icon: Stethoscope },
-      { href: '/modulo/produccion', label: 'Producción', icon: Weight },
+      { href: '/produccion', label: 'Producción', icon: Weight },
       { href: '/modulo/nutricion', label: 'Nutrición', icon: Wheat },
       { href: '/modulo/inventario', label: 'Inventario', icon: Package },
       { href: '/modulo/maquinaria', label: 'Maquinaria', icon: Tractor },
