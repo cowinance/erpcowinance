@@ -20,6 +20,16 @@ export class ReportsController {
     return this.reports.production(from, to);
   }
 
+  @Get('production-weight-series')
+  productionWeightSeries(@Query('from') from?: string, @Query('to') to?: string, @Query('lot_id') lotId?: string) {
+    return this.reports.productionWeightSeries(from, to, lotId);
+  }
+
+  @Get('condition-distribution')
+  conditionDistribution(@Query('at') at?: string, @Query('lot_id') lotId?: string) {
+    return this.reports.conditionDistribution(at, lotId);
+  }
+
   @Get('reproduction')
   reproduction(@Query('from') from?: string, @Query('to') to?: string) {
     return this.reports.reproduction(from, to);

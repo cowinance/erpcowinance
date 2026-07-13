@@ -120,6 +120,73 @@ export class ReportsService {
     return { from, to, total_pesajes: totalWeighings, rows: rows.map((r) => ({ ...r, gdp_promedio: r.gdp_promedio != null ? Number(r.gdp_promedio) : null })) };
   }
 
+  /**
+   * Curva de peso: promedio de peso por mes en el período (default 12 meses), opcionalmente
+   * filtrada por lote actual del animal. Lee de `v_weighings` (fuente única P8-1) — incluye los
+   * pesajes capturados offline por el móvil.
+   */
+  async productionWeightSeries(fromRaw?: string, toRaw?: string, lotId?: string) {
+    const to = isoDate(toRaw);
+    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
+    const params: unknown[] = [this.db.tenant, from, to];
+    let lotFilter = '';
+    if (lotId) {
+      params.push(lotId);
+      lotFilter = ` AND a.current_lot_id = $${params.length}`;
+    }
+    const rows = await this.db.query<{ month: string; avg_kg: number; n: number }>(
+      `SELECT to_char(date_trunc('month', w.weighed_at), 'YYYY-MM') AS month,
+              round(avg(w.weight_kg))::int AS avg_kg, count(*)::int AS n
+       FROM v_weighings w JOIN animals a ON a.id = w.animal_id
+       WHERE w.tenant_id = $1 AND w.deleted_at IS NULL
+         AND w.weighed_at::date BETWEEN $2::date AND $3::date${lotFilter}
+       GROUP BY 1 ORDER BY 1`,
+      params,
+    );
+    return { from, to, lot_id: lotId ?? null, rows };
+  }
+
+  /**
+   * Distribución de condición corporal: la ÚLTIMA CC por animal ACTIVO a la fecha (default hoy),
+   * agrupada en rangos accionables (Flaca <2.5 · Óptima 2.5–3.5 · Gorda >3.5). Reutiliza el
+   * predicado de "animal presente a fecha" del inventario. Animales sin CC no cuentan.
+   */
+  async conditionDistribution(atRaw?: string, lotId?: string) {
+    const at = isoDate(atRaw);
+    const params: unknown[] = [this.db.tenant, at];
+    let lotFilter = '';
+    if (lotId) {
+      params.push(lotId);
+      lotFilter = ` AND a.current_lot_id = $${params.length}`;
+    }
+    const rows = await this.db.query<{ cc: number }>(
+      `SELECT latest.body_condition::float AS cc
+       FROM (
+         SELECT DISTINCT ON (w.animal_id) w.animal_id, w.body_condition
+         FROM v_weighings w
+         WHERE w.tenant_id = $1 AND w.deleted_at IS NULL
+           AND w.body_condition IS NOT NULL AND w.weighed_at::date <= $2::date
+         ORDER BY w.animal_id, w.weighed_at DESC, w.created_at DESC, w.id DESC
+       ) latest
+       JOIN animals a ON a.id = latest.animal_id
+       WHERE a.tenant_id = $1 AND a.deleted_at IS NULL
+         AND COALESCE(a.birth_date, a.acquisition_date, a.created_at::date) <= $2::date
+         AND (a.status = 'active' OR a.status_changed_at IS NULL OR a.status_changed_at::date > $2::date)${lotFilter}`,
+      params,
+    );
+    const buckets = [
+      { label: 'Flaca', min: null as number | null, max: 2.5, n: 0 },
+      { label: 'Óptima', min: 2.5, max: 3.5, n: 0 },
+      { label: 'Gorda', min: 3.5, max: null as number | null, n: 0 },
+    ];
+    for (const r of rows) {
+      if (r.cc < 2.5) buckets[0].n++;
+      else if (r.cc <= 3.5) buckets[1].n++;
+      else buckets[2].n++;
+    }
+    return { at, lot_id: lotId ?? null, total: rows.length, buckets };
+  }
+
   /** Reproducción del período: eventos del ciclo. */
   async reproduction(fromRaw?: string, toRaw?: string) {
     const to = isoDate(toRaw);
