@@ -333,6 +333,7 @@ export class DbService implements OnModuleInit {
     'warehouses',
     'stock_movements',
     'stock_levels',
+    'inventory_batches',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -410,6 +411,7 @@ export class DbService implements OnModuleInit {
     // INV-2a: mismas policies dispersas en las tablas de kardex/existencias.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_stock_movements ON "stock_movements";');
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_stock_levels ON "stock_levels";');
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_inventory_batches ON "inventory_batches";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

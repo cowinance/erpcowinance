@@ -73,4 +73,22 @@ export class InventoryController {
   deleteWarehouse(@Param('id') id: string) {
     return this.inv.deleteWarehouse(id);
   }
+
+  @Post('transfers')
+  transfer(@Body() body: any) {
+    return this.inv.recordTransfer(body);
+  }
+
+  @Get('batches')
+  batches(@Query('item_id') itemId?: string) {
+    return this.inv.listBatches(itemId);
+  }
+  @Post('batches')
+  createBatch(@Body() body: any) {
+    return this.inv.createBatch(body);
+  }
+  @Delete('batches/:id')
+  deleteBatch(@Param('id') id: string) {
+    return this.inv.deleteBatch(id);
+  }
 }

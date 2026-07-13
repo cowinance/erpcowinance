@@ -8,13 +8,14 @@ import { StockPanel } from './StockPanel';
  * las altas/bajas viven en InventoryManager. Sin movimientos/existencias (INV-2).
  */
 export default async function InventoryPage() {
-  const [units, categories, items, warehouses, stock, movements] = await Promise.all([
+  const [units, categories, items, warehouses, stock, movements, batches] = await Promise.all([
     apiSafe<any[]>('/inventory/units'),
     apiSafe<any[]>('/inventory/categories'),
     apiSafe<any[]>('/inventory/items'),
     apiSafe<any[]>('/inventory/warehouses'),
     apiSafe<any[]>('/inventory/stock'),
     apiSafe<any[]>('/inventory/movements'),
+    apiSafe<any[]>('/inventory/batches'),
   ]);
   if (items === null) {
     return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
@@ -33,7 +34,7 @@ export default async function InventoryPage() {
 
       <section>
         <h2 className="mb-3 text-body font-semibold">Movimientos y existencias</h2>
-        <StockPanel items={items ?? []} warehouses={warehouses ?? []} stock={stock ?? []} movements={movements ?? []} />
+        <StockPanel items={items ?? []} warehouses={warehouses ?? []} stock={stock ?? []} movements={movements ?? []} batches={batches ?? []} />
       </section>
     </div>
   );

@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DbService } from '../../db/db.service';
+import { randomUUID } from 'crypto';
+import { DbService, Q } from '../../db/db.service';
 
 const CATEGORY_KINDS = ['feed', 'veterinary', 'agrochemical', 'seed', 'fuel', 'spare_part', 'supply', 'product'];
 
@@ -174,39 +175,89 @@ export class InventoryService {
     if (type === 'in' && qty <= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: "'in' requiere cantidad positiva" });
     if ((type === 'out' || type === 'consumption') && qty >= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: `'${type}' requiere cantidad negativa` });
     const unitCost = body?.unit_cost != null ? Number(body.unit_cost) : null;
-    const batchId = body?.batch_id ?? null;
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
-    const item = await this.db.one<{ id: string }>(`SELECT id FROM inventory_items WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [itemId, t]);
-    if (!item) throw new NotFoundException({ code: 'inventory.item_not_found', title: 'Ítem no encontrado' });
-    const wh = await this.db.one<{ id: string }>(`SELECT id FROM warehouses WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [whId, t]);
-    if (!wh) throw new NotFoundException({ code: 'inventory.warehouse_not_found', title: 'Depósito no encontrado' });
+    const item = await this.requireItem(itemId);
+    await this.requireWarehouse(whId);
+    const batchId = await this.resolveBatch(item, body?.batch_id);
 
     return this.db.tx(async (q) => {
-      const level = await q.one<{ id: string; quantity: number; avg_cost: number | null }>(
-        `SELECT id, quantity::float AS quantity, avg_cost::float AS avg_cost FROM stock_levels
-         WHERE tenant_id=$1 AND item_id=$2 AND warehouse_id=$3 AND batch_id IS NOT DISTINCT FROM $4 FOR UPDATE`,
-        [t, itemId, whId, batchId],
-      );
-      const oldQty = level?.quantity ?? 0;
-      const newQty = +(oldQty + qty).toFixed(3);
-      if (newQty < 0) throw new ForbiddenException({ code: 'inventory.insufficient_stock', title: `Stock insuficiente: hay ${oldQty}, se intenta retirar ${-qty}.` });
-      let newAvg = level?.avg_cost ?? null;
-      if (qty > 0 && unitCost != null) {
-        newAvg = newQty > 0 ? +(((oldQty * (level?.avg_cost ?? unitCost)) + qty * unitCost) / newQty).toFixed(4) : unitCost;
-      }
       const mov = await q.one(
         `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, batch_id, movement_type, quantity, unit_cost, occurred_at, reference_type, reference_id, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          RETURNING id, movement_type, quantity::float AS quantity, occurred_at`,
         [t, itemId, whId, batchId, type, qty, unitCost, occurredAt, body?.reference_type ?? null, body?.reference_id ?? null, this.db.user],
       );
-      if (level) {
-        await q.query(`UPDATE stock_levels SET quantity=$1, avg_cost=$2, updated_at=now() WHERE id=$3`, [newQty, newAvg, level.id]);
-      } else {
-        await q.query(`INSERT INTO stock_levels (tenant_id, item_id, warehouse_id, batch_id, quantity, avg_cost) VALUES ($1,$2,$3,$4,$5,$6)`, [t, itemId, whId, batchId, newQty, newAvg]);
-      }
-      return { movement: mov, level: { quantity: newQty, avg_cost: newAvg } };
+      const level = await this.applyToLevel(q, itemId, whId, batchId, qty, unitCost);
+      return { movement: mov, level };
     });
+  }
+
+  /**
+   * Transferencia entre depósitos (INV-2b): par de movimientos `transfer` (−q origen, +q destino)
+   * atómico; el costo VIAJA (el destino pondera con el avg_cost del origen); bloquea si el origen no
+   * alcanza. Comparten `reference_id`.
+   */
+  async recordTransfer(body: any) {
+    const t = this.db.tenant;
+    const itemId = body?.item_id;
+    const fromId = body?.from_warehouse_id;
+    const toId = body?.to_warehouse_id;
+    const qty = Number(body?.quantity);
+    if (!itemId || !fromId || !toId) throw new BadRequestException({ code: 'inventory.missing_fields', title: 'item_id, from_warehouse_id y to_warehouse_id son obligatorios' });
+    if (fromId === toId) throw new BadRequestException({ code: 'inventory.same_warehouse', title: 'El origen y el destino deben ser distintos' });
+    if (!Number.isFinite(qty) || qty <= 0) throw new BadRequestException({ code: 'inventory.invalid_quantity', title: 'quantity debe ser positiva' });
+    const item = await this.requireItem(itemId);
+    await this.requireWarehouse(fromId);
+    await this.requireWarehouse(toId);
+    const batchId = await this.resolveBatch(item, body?.batch_id);
+    const occurredAt = body?.occurred_at ?? new Date().toISOString();
+
+    return this.db.tx(async (q) => {
+      const fromLevel = await q.one<{ avg_cost: number | null }>(
+        `SELECT avg_cost::float AS avg_cost FROM stock_levels WHERE tenant_id=$1 AND item_id=$2 AND warehouse_id=$3 AND batch_id IS NOT DISTINCT FROM $4`,
+        [t, itemId, fromId, batchId],
+      );
+      const cost = fromLevel?.avg_cost ?? null;
+      const ref = randomUUID();
+      const insMov = (whId: string, delta: number) =>
+        q.query(
+          `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, batch_id, movement_type, quantity, unit_cost, occurred_at, reference_type, reference_id, created_by)
+           VALUES ($1,$2,$3,$4,'transfer',$5,$6,$7,'transfer',$8,$9)`,
+          [t, itemId, whId, batchId, delta, cost, occurredAt, ref, this.db.user],
+        );
+      await insMov(fromId, -qty);
+      const from = await this.applyToLevel(q, itemId, fromId, batchId, -qty, null); // valida no-negativo (rollback si insuficiente)
+      await insMov(toId, qty);
+      const to = await this.applyToLevel(q, itemId, toId, batchId, qty, cost); // el costo viaja
+      return { from: { warehouse_id: fromId, ...from }, to: { warehouse_id: toId, ...to }, quantity: qty };
+    });
+  }
+
+  // ── Lotes (batches, INV-2b) ─────────────────────────────────────────────────
+  async listBatches(itemId?: string) {
+    const params: unknown[] = [this.db.tenant];
+    let filter = '';
+    if (itemId) {
+      params.push(itemId);
+      filter = ` AND item_id = $${params.length}`;
+    }
+    return this.db.query(`SELECT id, item_id, batch_number, expiry_date, supplier_id FROM inventory_batches WHERE tenant_id=$1 AND deleted_at IS NULL${filter} ORDER BY batch_number`, params);
+  }
+
+  async createBatch(body: any) {
+    const itemId = body?.item_id;
+    const num = String(body?.batch_number ?? '').trim();
+    if (!itemId || !num) throw new BadRequestException({ code: 'inventory.missing_fields', title: 'item_id y batch_number son obligatorios' });
+    await this.requireItem(itemId);
+    return this.db.one(
+      `INSERT INTO inventory_batches (tenant_id, item_id, batch_number, expiry_date, supplier_id, created_by) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, item_id, batch_number, expiry_date, supplier_id`,
+      [this.db.tenant, itemId, num, body?.expiry_date ?? null, body?.supplier_id ?? null, this.db.user],
+    );
+  }
+
+  async deleteBatch(id: string) {
+    return this.softDelete('inventory_batches', id);
   }
 
   /** Existencias por (ítem, depósito): saldo materializado. */
@@ -254,6 +305,47 @@ export class InventoryService {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  private async requireItem(id: string): Promise<{ id: string; track_batches: boolean }> {
+    const item = await this.db.one<{ id: string; track_batches: boolean }>(`SELECT id, track_batches FROM inventory_items WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
+    if (!item) throw new NotFoundException({ code: 'inventory.item_not_found', title: 'Ítem no encontrado' });
+    return item;
+  }
+
+  private async requireWarehouse(id: string): Promise<void> {
+    const wh = await this.db.one<{ id: string }>(`SELECT id FROM warehouses WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
+    if (!wh) throw new NotFoundException({ code: 'inventory.warehouse_not_found', title: 'Depósito no encontrado' });
+  }
+
+  /** Resuelve el lote: obligatorio si el ítem controla lotes (y debe pertenecerle); null si no. */
+  private async resolveBatch(item: { id: string; track_batches: boolean }, batchId?: string | null): Promise<string | null> {
+    if (!item.track_batches) return null;
+    if (!batchId) throw new BadRequestException({ code: 'inventory.batch_required', title: 'Este ítem controla lotes: batch_id es obligatorio' });
+    const b = await this.db.one<{ id: string }>(`SELECT id FROM inventory_batches WHERE id=$1 AND item_id=$2 AND tenant_id=$3 AND deleted_at IS NULL`, [batchId, item.id, this.db.tenant]);
+    if (!b) throw new NotFoundException({ code: 'inventory.batch_not_found', title: 'Lote no encontrado para el ítem' });
+    return batchId;
+  }
+
+  /** Aplica un delta al saldo (upsert por item/warehouse/batch con IS NOT DISTINCT FROM); recalcula
+   *  avg_cost solo al ENTRAR con unit_cost; bloquea si el saldo resultante < 0. Regla única. */
+  private async applyToLevel(q: Q, itemId: string, whId: string, batchId: string | null, delta: number, unitCost: number | null): Promise<{ quantity: number; avg_cost: number | null }> {
+    const t = this.db.tenant;
+    const level = await q.one<{ id: string; quantity: number; avg_cost: number | null }>(
+      `SELECT id, quantity::float AS quantity, avg_cost::float AS avg_cost FROM stock_levels
+       WHERE tenant_id=$1 AND item_id=$2 AND warehouse_id=$3 AND batch_id IS NOT DISTINCT FROM $4 FOR UPDATE`,
+      [t, itemId, whId, batchId],
+    );
+    const oldQty = level?.quantity ?? 0;
+    const newQty = +(oldQty + delta).toFixed(3);
+    if (newQty < 0) throw new ForbiddenException({ code: 'inventory.insufficient_stock', title: `Stock insuficiente: hay ${oldQty}, se intenta retirar ${-delta}.` });
+    let newAvg = level?.avg_cost ?? null;
+    if (delta > 0 && unitCost != null) {
+      newAvg = newQty > 0 ? +(((oldQty * (level?.avg_cost ?? unitCost)) + delta * unitCost) / newQty).toFixed(4) : unitCost;
+    }
+    if (level) await q.query(`UPDATE stock_levels SET quantity=$1, avg_cost=$2, updated_at=now() WHERE id=$3`, [newQty, newAvg, level.id]);
+    else await q.query(`INSERT INTO stock_levels (tenant_id, item_id, warehouse_id, batch_id, quantity, avg_cost) VALUES ($1,$2,$3,$4,$5,$6)`, [t, itemId, whId, batchId, newQty, newAvg]);
+    return { quantity: newQty, avg_cost: newAvg };
+  }
+
   private async softUpdate(table: string, id: string, sets: string[], params: unknown[], returning: string) {
     params.push(id);
     const idIdx = params.length;
