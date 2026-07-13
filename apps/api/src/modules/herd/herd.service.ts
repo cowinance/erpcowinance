@@ -76,9 +76,9 @@ export class HerdService {
          WHERE ai.animal_id = a.id AND ai.type = 'visual' AND ai.deleted_at IS NULL
          ORDER BY ai.created_at DESC LIMIT 1) t ON true
        LEFT JOIN LATERAL (
-         SELECT weight_kg, adg_since_last, weighed_at FROM weighings w
+         SELECT weight_kg, adg_since_last, weighed_at FROM v_weighings w
          WHERE w.animal_id = a.id AND w.deleted_at IS NULL
-         ORDER BY w.weighed_at DESC LIMIT 1) w ON true
+         ORDER BY w.weighed_at DESC, w.created_at DESC, w.id DESC LIMIT 1) w ON true
        LEFT JOIN LATERAL (
          SELECT string_agg(b.name, ' × ') AS breeds
          FROM animal_breeds ab JOIN breeds b ON b.id = ab.breed_id
@@ -131,7 +131,7 @@ export class HerdService {
       ),
       this.db.one<any>(
         `SELECT weight_kg::float, adg_since_last::float AS adg, body_condition::float, weighed_at
-         FROM weighings WHERE animal_id = $1 AND deleted_at IS NULL ORDER BY weighed_at DESC LIMIT 1`,
+         FROM v_weighings WHERE animal_id = $1 AND deleted_at IS NULL ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1`,
         [id],
       ),
       this.db.query(
@@ -199,8 +199,8 @@ export class HerdService {
          SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL
          ORDER BY x.created_at DESC LIMIT 1) ai ON true
        LEFT JOIN LATERAL (
-         SELECT weight_kg, weighed_at FROM weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL
-         ORDER BY weighed_at DESC LIMIT 1) w ON true
+         SELECT weight_kg, weighed_at FROM v_weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL
+         ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) w ON true
        WHERE i.tenant_id = $1 AND i.value = $2 AND i.deleted_at IS NULL
        ORDER BY (a.status = 'active') DESC, i.created_at DESC LIMIT 1`,
       [this.db.tenant, body.identifier.trim()],
@@ -213,9 +213,25 @@ export class HerdService {
   async timeline(id: string) {
     await this.assertAnimal(id);
     return this.db.query(
-      `SELECT id, event_type, payload, occurred_at, recorded_at, source
-       FROM animal_events WHERE animal_id = $1 AND tenant_id = $2
-       ORDER BY occurred_at DESC LIMIT 300`,
+      `SELECT e.id,
+              e.event_type,
+              CASE
+                WHEN e.event_type = 'weighing' THEN e.payload || jsonb_build_object('adg_since_last', w.adg_since_last)
+                ELSE e.payload
+              END AS payload,
+              e.occurred_at,
+              e.recorded_at,
+              e.source
+       FROM animal_events e
+       LEFT JOIN LATERAL (
+         SELECT adg_since_last
+         FROM v_weighings w
+         WHERE w.animal_id = e.animal_id AND w.weighed_at = e.occurred_at
+         ORDER BY w.created_at, w.id
+         LIMIT 1
+       ) w ON e.event_type = 'weighing'
+       WHERE e.animal_id = $1 AND e.tenant_id = $2
+       ORDER BY e.occurred_at DESC LIMIT 300`,
       [id, this.db.tenant],
     );
   }
@@ -276,21 +292,17 @@ export class HerdService {
       const kg = Number(body.weight_kg);
       if (!kg || kg <= 0)
         throw new BadRequestException({ code: 'weighing.invalid_weight', title: 'weight_kg debe ser positivo' });
-      const prev = await this.db.one<any>(
-        `SELECT weight_kg::float AS kg, weighed_at FROM weighings
-         WHERE animal_id = $1 AND deleted_at IS NULL AND weighed_at < $2 ORDER BY weighed_at DESC LIMIT 1`,
-        [id, occurredAt],
+      const inserted = await this.db.one<{ id: string }>(
+        `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, body_condition)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [this.db.tenant, id, occurredAt, kg, body.method ?? 'scale', body.body_condition ?? null],
       );
-      const adg = prev
-        ? +(((kg - prev.kg) / Math.max(1, (new Date(occurredAt).getTime() - new Date(prev.weighed_at).getTime()) / 86400000))).toFixed(3)
-        : null;
-      await this.db.query(
-        `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, adg_since_last, body_condition)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [this.db.tenant, id, occurredAt, kg, body.method ?? 'scale', adg, body.body_condition ?? null],
+      const derived = await this.db.one<{ adg_since_last: number | null }>(
+        `SELECT adg_since_last::float FROM v_weighings WHERE id = $1`,
+        [inserted?.id],
       );
-      const ev = await this.insertEvent(id, 'weighing', { weight_kg: kg, adg_since_last: adg }, occurredAt);
-      return { ...ev, adg_since_last: adg };
+      const ev = await this.insertEvent(id, 'weighing', { weight_kg: kg }, occurredAt);
+      return { ...ev, adg_since_last: derived?.adg_since_last ?? null };
     }
 
     if (body.type === 'note') {

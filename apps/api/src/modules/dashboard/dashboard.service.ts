@@ -35,7 +35,7 @@ export class DashboardService {
       ),
       this.db.one<any>(
         `SELECT avg(adg_since_last)::float AS adg
-         FROM weighings WHERE tenant_id = $1 AND adg_since_last IS NOT NULL AND adg_since_last > 0
+         FROM v_weighings WHERE tenant_id = $1 AND adg_since_last IS NOT NULL AND adg_since_last > 0
            AND weighed_at >= now() - interval '120 days'`,
         [t],
       ),

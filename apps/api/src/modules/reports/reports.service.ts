@@ -109,7 +109,7 @@ export class ReportsService {
               count(DISTINCT w.animal_id)::int AS animales,
               round(avg(w.weight_kg))::int AS peso_promedio,
               round(avg(w.adg_since_last) FILTER (WHERE w.adg_since_last > 0), 3) AS gdp_promedio
-       FROM weighings w
+       FROM v_weighings w
        JOIN animals a ON a.id = w.animal_id
        LEFT JOIN lots l ON l.id = a.current_lot_id
        WHERE w.tenant_id = $1 AND w.deleted_at IS NULL AND w.weighed_at::date BETWEEN $2::date AND $3::date

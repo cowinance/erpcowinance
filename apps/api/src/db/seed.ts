@@ -282,19 +282,16 @@ export async function seedDemo(db: PGlite) {
       // Serie de pesajes: crecimiento hacia el peso actual con ruido
       const targetKg = between(d.kg[0], d.kg[1]);
       const nWeighings = 4 + Math.floor(rand() * 5);
-      let prev: { kg: number; at: Date } | null = null;
       for (let w = 0; w < nWeighings; w++) {
         const frac = (w + 1) / nWeighings;
         const at = daysAgo((1 - frac) * Math.min(ageMonths * 30.4 * 0.7, 420) + between(0, 10));
         const kg = Math.round(targetKg * (0.45 + 0.55 * frac) + between(-8, 8));
-        const adg = prev ? +(((kg - prev.kg) / Math.max(1, (at.getTime() - prev.at.getTime()) / 86400000)) as number).toFixed(3) : null;
         await q(
-          `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, adg_since_last, body_condition, created_by)
-           VALUES ($1,$2,$3,$4,'scale',$5,$6,$7)`,
-          [org, id, at.toISOString(), kg, adg, +between(2.5, 4).toFixed(1), userId],
+          `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, body_condition, created_by)
+           VALUES ($1,$2,$3,$4,'scale',$5,$6)`,
+          [org, id, at.toISOString(), kg, +between(2.5, 4).toFixed(1), userId],
         );
-        events.push({ animal: id, type: 'weighing', payload: { weight_kg: kg, adg_since_last: adg }, at });
-        prev = { kg, at };
+        events.push({ animal: id, type: 'weighing', payload: { weight_kg: kg }, at });
       }
 
       // Sanidad: vacuna aftosa a todos, antiparasitario a la mayoría

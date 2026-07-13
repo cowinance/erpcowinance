@@ -247,6 +247,46 @@ export class DbService implements OnModuleInit {
                   OR current_setting('app.job_scope', true) = 'push_worker');
   `;
 
+  private static readonly WEIGHING_PROJECTION_MIGRATION = `
+    CREATE INDEX IF NOT EXISTS ix_weighings_tenant_animal_weighed_at
+      ON weighings (tenant_id, animal_id, weighed_at);
+    DROP VIEW IF EXISTS v_weighings;
+    CREATE VIEW v_weighings AS
+      SELECT ranked.id,
+             ranked.tenant_id,
+             ranked.animal_id,
+             ranked.weighed_at,
+             ranked.weight_kg,
+             ranked.method,
+             ranked.device_id,
+             CASE
+               WHEN ranked.prev_weight_kg IS NULL THEN NULL
+               ELSE ROUND(
+                 (ranked.weight_kg - ranked.prev_weight_kg)
+                 / GREATEST(1::numeric, EXTRACT(EPOCH FROM (ranked.weighed_at - ranked.prev_weighed_at))::numeric / 86400),
+                 3
+               )::numeric(14,3)
+             END AS adg_since_last,
+             ranked.body_condition,
+             ranked.created_at,
+             ranked.updated_at,
+             ranked.created_by,
+             ranked.deleted_at
+      FROM (
+        SELECT w.*,
+               LAG(w.weight_kg) OVER (
+                 PARTITION BY w.tenant_id, w.animal_id
+                 ORDER BY w.weighed_at, w.created_at, w.id
+               ) AS prev_weight_kg,
+               LAG(w.weighed_at) OVER (
+                 PARTITION BY w.tenant_id, w.animal_id
+                 ORDER BY w.weighed_at, w.created_at, w.id
+               ) AS prev_weighed_at
+        FROM weighings w
+        WHERE w.deleted_at IS NULL
+      ) ranked;
+  `;
+
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
   private static readonly RLS_TABLES = [
     'companies',
@@ -327,6 +367,7 @@ export class DbService implements OnModuleInit {
     // política bespoke dentro de IMPORT_MIGRATION.
     await this.db.exec(DbService.IMPORT_MIGRATION);
     await this.db.exec(DbService.MOVEMENT_MIGRATION);
+    await this.db.exec(DbService.WEIGHING_PROJECTION_MIGRATION);
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
