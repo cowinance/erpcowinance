@@ -187,21 +187,46 @@ export class ReportsService {
     return { at, lot_id: lotId ?? null, total: rows.length, buckets };
   }
 
-  /** Reproducción del período: eventos del ciclo. */
+  /**
+   * Reproducción: conteos del ciclo + ÍNDICES ACOTADOS AL PERÍODO (P9-1). El snapshot operativo
+   * «% vientres preñados» NO vive acá: es propiedad de `repro.kpis()` (semántica a-fecha), para no
+   * duplicar la regla ni mezclar snapshot con análisis histórico. Todo lo de este bloque es
+   * período-scoped [from, to].
+   *
+   * Fórmulas y semántica de `null` (null = no calculable por falta de denominador/muestra, NUNCA 0):
+   * - `prenez_pct` = positivos / (positivos + negativos) × 100. Positivos = diagnósticos + del
+   *   período (filas en `pregnancies`); negativos = eventos `animal_events`='pregnancy_negative' del
+   *   período. **null** si no hubo diagnósticos (positivos + negativos = 0).
+   * - `iep_dias` = promedio de días entre partos consecutivos del MISMO vientre (LAG por `dam_id`),
+   *   contando solo intervalos cuyo parto POSTERIOR cae en el período. Un animal con un solo parto
+   *   no aporta intervalo. **null** si no hay al menos un intervalo válido.
+   * - `servicios_por_prenez` = servicios del período / positivos del período. **null** si no hubo
+   *   preñeces (evita división por cero).
+   *
+   * Todas las consultas excluyen `deleted_at IS NOT NULL` y acotan por fecha, de modo que eventos
+   * eliminados, fechas fuera de rango o datos importados sin historial completo quedan fuera.
+   */
   async reproduction(fromRaw?: string, toRaw?: string) {
     const to = isoDate(toRaw);
     const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
     const t = this.db.tenant;
-    const [services, diagnoses, calvings, weanings] = await Promise.all([
+    const [services, diagnoses, negatives, calvings, weanings, iep] = await Promise.all([
       this.db.one<any>(
         `SELECT count(*) FILTER (WHERE type='service_ai')::int AS ia,
-                count(*) FILTER (WHERE type='service_natural')::int AS monta
+                count(*) FILTER (WHERE type='service_natural')::int AS monta,
+                count(*) FILTER (WHERE type='embryo_transfer')::int AS te
          FROM breeding_events WHERE tenant_id = $1 AND deleted_at IS NULL AND occurred_at::date BETWEEN $2::date AND $3::date`,
         [t, from, to],
       ),
       this.db.one<any>(
         `SELECT count(*)::int AS n FROM pregnancies
          WHERE tenant_id = $1 AND deleted_at IS NULL AND diagnosis_date BETWEEN $2::date AND $3::date`,
+        [t, from, to],
+      ),
+      this.db.one<any>(
+        `SELECT count(*)::int AS n FROM animal_events
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND event_type = 'pregnancy_negative'
+           AND occurred_at::date BETWEEN $2::date AND $3::date`,
         [t, from, to],
       ),
       this.db.one<any>(
@@ -214,15 +239,35 @@ export class ReportsService {
          FROM weanings WHERE tenant_id = $1 AND deleted_at IS NULL AND weaning_date BETWEEN $2::date AND $3::date`,
         [t, from, to],
       ),
+      // IEP: días promedio entre partos consecutivos por vientre; intervalos cuyo parto POSTERIOR
+      // cae en el período (LAG por dam_id, orden por fecha con desempate estable por id).
+      this.db.one<any>(
+        `SELECT round(avg(gap))::int AS dias FROM (
+           SELECT (calving_date - LAG(calving_date) OVER (PARTITION BY dam_id ORDER BY calving_date, id)) AS gap, calving_date
+           FROM calvings WHERE tenant_id = $1 AND deleted_at IS NULL
+         ) g WHERE g.gap IS NOT NULL AND g.calving_date BETWEEN $2::date AND $3::date`,
+        [t, from, to],
+      ),
     ]);
+
+    const positivos = diagnoses?.n ?? 0;
+    const negativos = negatives?.n ?? 0;
+    const totalDiag = positivos + negativos;
+    const serviciosTotal = (services?.ia ?? 0) + (services?.monta ?? 0) + (services?.te ?? 0);
+
     return {
       from,
       to,
-      servicios: { ia: services?.ia ?? 0, monta: services?.monta ?? 0, total: (services?.ia ?? 0) + (services?.monta ?? 0) },
-      diagnosticos: diagnoses?.n ?? 0,
+      servicios: { ia: services?.ia ?? 0, monta: services?.monta ?? 0, te: services?.te ?? 0, total: serviciosTotal },
+      diagnosticos: { positivos, negativos, total: totalDiag },
       partos: calvings?.partos ?? 0,
       crias_nacidas: calvings?.crias ?? 0,
       destetes: { n: weanings?.n ?? 0, peso_promedio: weanings?.peso_promedio ?? null },
+      indices: {
+        prenez_pct: totalDiag > 0 ? +((positivos / totalDiag) * 100).toFixed(1) : null,
+        iep_dias: iep?.dias ?? null,
+        servicios_por_prenez: positivos > 0 ? +(serviciosTotal / positivos).toFixed(2) : null,
+      },
     };
   }
 }

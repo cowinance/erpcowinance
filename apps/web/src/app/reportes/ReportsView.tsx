@@ -307,30 +307,64 @@ function ProductionReport({ data }: { data: any }) {
 }
 
 function ReproductionReport({ data }: { data: any }) {
+  const ix = data.indices ?? {};
+  const pct = (v: number | null | undefined) => (v == null ? '—' : `${v}%`);
+  const diag = data.diagnosticos ?? { positivos: 0, negativos: 0, total: 0 };
   return (
-    <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
-      <div className={cardCls}>
-        <div className="mb-2 text-body font-semibold">Servicios</div>
-        <div className="tnum text-compat-26 font-semibold">{data.servicios.total}</div>
-        <div className="mt-1 text-label text-ink-3">
-          {data.servicios.ia} IA · {data.servicios.monta} monta
+    <div className="space-y-4">
+      {/* Índices del período (P9-1). El «% vientres preñados» (snapshot a-fecha) vive en la
+          página de Reproducción, no acá. */}
+      <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1">
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">% Preñez</div>
+          <div className="tnum text-compat-26 font-semibold">{pct(ix.prenez_pct)}</div>
+          <div className="mt-1 text-label text-ink-3">
+            {diag.positivos}/{diag.total} diagnósticos del período
+          </div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">IEP</div>
+          <div className="tnum text-compat-26 font-semibold">
+            {ix.iep_dias != null ? ix.iep_dias : '—'}
+            <span className="text-label text-ink-3"> días</span>
+          </div>
+          <div className="mt-1 text-label text-ink-3">intervalo entre partos</div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Servicios / preñez</div>
+          <div className="tnum text-compat-26 font-semibold">{ix.servicios_por_prenez != null ? ix.servicios_por_prenez : '—'}</div>
+          <div className="mt-1 text-label text-ink-3">eficiencia del período</div>
         </div>
       </div>
-      <div className={cardCls}>
-        <div className="mb-2 text-body font-semibold">Diagnósticos</div>
-        <div className="tnum text-compat-26 font-semibold">{data.diagnosticos}</div>
-        <div className="mt-1 text-label text-ink-3">de gestación</div>
-      </div>
-      <div className={cardCls}>
-        <div className="mb-2 text-body font-semibold">Partos</div>
-        <div className="tnum text-compat-26 font-semibold">{data.partos}</div>
-        <div className="mt-1 text-label text-ink-3">{data.crias_nacidas} crías nacidas</div>
-      </div>
-      <div className={cardCls}>
-        <div className="mb-2 text-body font-semibold">Destetes</div>
-        <div className="tnum text-compat-26 font-semibold">{data.destetes.n}</div>
-        <div className="mt-1 text-label text-ink-3">
-          {data.destetes.peso_promedio ? `${data.destetes.peso_promedio} kg prom.` : 'sin peso'}
+      <p className="text-label text-ink-3">Indicadores calculados sobre el período filtrado.</p>
+
+      {/* Conteos del ciclo */}
+      <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Servicios</div>
+          <div className="tnum text-compat-26 font-semibold">{data.servicios.total}</div>
+          <div className="mt-1 text-label text-ink-3">
+            {data.servicios.ia} IA · {data.servicios.monta} monta{data.servicios.te ? ` · ${data.servicios.te} TE` : ''}
+          </div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Diagnósticos</div>
+          <div className="tnum text-compat-26 font-semibold">{diag.total}</div>
+          <div className="mt-1 text-label text-ink-3">
+            {diag.positivos} preñadas · {diag.negativos} vacías
+          </div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Partos</div>
+          <div className="tnum text-compat-26 font-semibold">{data.partos}</div>
+          <div className="mt-1 text-label text-ink-3">{data.crias_nacidas} crías nacidas</div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Destetes</div>
+          <div className="tnum text-compat-26 font-semibold">{data.destetes.n}</div>
+          <div className="mt-1 text-label text-ink-3">
+            {data.destetes.peso_promedio ? `${data.destetes.peso_promedio} kg prom.` : 'sin peso'}
+          </div>
         </div>
       </div>
     </div>
