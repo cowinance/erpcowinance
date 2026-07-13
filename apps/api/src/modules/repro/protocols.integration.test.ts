@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
 import type { WeaningService } from './weaning.service';
+import type { TaskService } from '../tasks/task.service';
 
 /**
  * Integración del CRUD de protocolos reproductivos (R-2.a): alta con validación de dominio,
@@ -23,7 +24,7 @@ describe('repro protocolos — CRUD', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService);
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService);
   }, 120_000);
 
   afterAll(() => {

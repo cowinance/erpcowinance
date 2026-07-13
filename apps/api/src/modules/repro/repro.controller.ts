@@ -69,4 +69,19 @@ export class ReproController {
   deleteProtocol(@Param('id') id: string) {
     return this.repro.deleteProtocol(id);
   }
+
+  @Get('reproduction/protocol-assignments')
+  listAssignments() {
+    return this.repro.listAssignments();
+  }
+
+  @Post('reproduction/protocol-assignments')
+  assignProtocol(@Body() body: any) {
+    return this.repro.assignProtocol(body);
+  }
+
+  @Post('reproduction/protocol-assignments/:id/cancel')
+  cancelAssignment(@Param('id') id: string) {
+    return this.repro.cancelAssignment(id);
+  }
 }

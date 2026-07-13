@@ -4,12 +4,14 @@ import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis,
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 import { WeaningService } from './weaning.service';
+import { TaskService } from '../tasks/task.service';
 
 @Injectable()
 export class ReproService {
   constructor(
     private readonly db: DbService,
     private readonly weanings: WeaningService,
+    private readonly tasks: TaskService,
   ) {}
 
   /** Detección de celo. */
@@ -371,6 +373,90 @@ export class ReproService {
     );
     if (!row) throw new NotFoundException({ code: 'protocol.not_found', title: 'Protocolo no encontrado' });
     return { id, deleted: true };
+  }
+
+  // ── Asignación de protocolos a un lote (R-2.b.1) ─────────────────────────────
+  /**
+   * Asigna un protocolo a los vientres activos de un lote desde `start_date`; genera UNA tarea por
+   * paso (nivel grupo) vía TaskService (server-authored → sincroniza + agenda). Atómico (db.tx).
+   */
+  async assignProtocol(body: any) {
+    const startDate = String(body?.start_date ?? '').slice(0, 10);
+    if (!body?.protocol_id || !body?.lot_id || !startDate) {
+      throw new BadRequestException({ code: 'assignment.missing_fields', title: 'protocol_id, lot_id y start_date son obligatorios' });
+    }
+    if (Number.isNaN(new Date(`${startDate}T00:00:00.000Z`).getTime())) {
+      throw new BadRequestException({ code: 'assignment.invalid_date', title: `start_date inválida: ${startDate}` });
+    }
+    const t = this.db.tenant;
+    const protocol = await this.db.one<any>(`SELECT id, name, steps FROM repro_protocols WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [body.protocol_id, t]);
+    if (!protocol) throw new NotFoundException({ code: 'protocol.not_found', title: 'Protocolo no encontrado' });
+    const lot = await this.db.one<{ id: string; name: string }>(`SELECT id, name FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [body.lot_id, t]);
+    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+    const grp = await this.db.one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM animals a JOIN animal_categories c ON c.id=a.category_id AND c.code IN ('vaca','vaquillona')
+       WHERE a.tenant_id=$1 AND a.status='active' AND a.deleted_at IS NULL AND a.current_lot_id=$2`,
+      [t, lot.id],
+    );
+    const count = grp?.n ?? 0;
+    const steps: any[] = Array.isArray(protocol.steps) ? protocol.steps : [];
+
+    return this.db.tx(async (q) => {
+      const assignment = await q.one<any>(
+        `INSERT INTO repro_protocol_assignments (tenant_id, protocol_id, lot_id, start_date, animal_count, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, protocol_id, lot_id, start_date, animal_count, status, created_at`,
+        [t, protocol.id, lot.id, startDate, count, this.db.user],
+      );
+      const farm = (await q.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`, [t]))?.id ?? null;
+      let created = 0;
+      for (const s of steps) {
+        const due = new Date(new Date(`${startDate}T00:00:00.000Z`).getTime() + Number(s.day) * 86400000).toISOString();
+        await this.tasks.createTask(
+          q,
+          { title: `${s.action} — ${lot.name} (${count} vientres)`, type: 'breeding', dueDate: due, priority: 'normal', relatedType: 'protocol_assignment', relatedId: assignment.id, farmId: farm },
+          { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user },
+        );
+        created++;
+      }
+      return { assignment, tasks_created: created };
+    });
+  }
+
+  /** Cancela una asignación activa y sus tareas `pending` (server-authored). Atómico. */
+  async cancelAssignment(id: string) {
+    const t = this.db.tenant;
+    return this.db.tx(async (q) => {
+      const row = await q.one<{ id: string }>(
+        `UPDATE repro_protocol_assignments SET status='canceled', updated_at=now()
+         WHERE id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL RETURNING id`,
+        [id, t],
+      );
+      if (!row) throw new NotFoundException({ code: 'assignment.not_found', title: 'Asignación no encontrada o ya cancelada' });
+      const pending = await q.query<{ id: string }>(
+        `SELECT id FROM tasks WHERE tenant_id=$1 AND related_type='protocol_assignment' AND related_id=$2 AND status='pending' AND deleted_at IS NULL`,
+        [t, id],
+      );
+      let canceled = 0;
+      for (const task of pending) {
+        const res = await this.tasks.cancelTask(q, { taskId: task.id }, { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user });
+        if (res.changed) canceled++;
+      }
+      return { id, canceled_tasks: canceled };
+    });
+  }
+
+  /** Lista asignaciones (no eliminadas) con protocolo y lote. */
+  async listAssignments() {
+    return this.db.query(
+      `SELECT pa.id, pa.protocol_id, p.name AS protocol_name, pa.lot_id, l.name AS lot_name,
+              pa.start_date, pa.animal_count, pa.status, pa.created_at
+       FROM repro_protocol_assignments pa
+       LEFT JOIN repro_protocols p ON p.id = pa.protocol_id
+       LEFT JOIN lots l ON l.id = pa.lot_id
+       WHERE pa.tenant_id = $1 AND pa.deleted_at IS NULL
+       ORDER BY pa.status, pa.start_date DESC`,
+      [this.db.tenant],
+    );
   }
 
   private async requireFemale(animalId: string) {

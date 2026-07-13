@@ -287,6 +287,25 @@ export class DbService implements OnModuleInit {
       ) ranked;
   `;
 
+  /** Asignaciones de protocolo reproductivo a un lote (R-2.b): materializan un protocolo IATF en
+   *  tareas (P6). Tabla nueva; RLS estándar vía RLS_TABLES. */
+  private static readonly REPRO_ASSIGNMENTS_MIGRATION = `
+    CREATE TABLE IF NOT EXISTS repro_protocol_assignments (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+      protocol_id uuid NOT NULL REFERENCES repro_protocols(id) ON DELETE RESTRICT,
+      lot_id uuid REFERENCES lots(id) ON DELETE SET NULL,
+      start_date date NOT NULL,
+      animal_count int NOT NULL DEFAULT 0,
+      status varchar(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active','canceled')),
+      created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      deleted_at timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS ix_repro_assignments_tenant ON repro_protocol_assignments (tenant_id, status);
+  `;
+
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
   private static readonly RLS_TABLES = [
     'companies',
@@ -307,6 +326,7 @@ export class DbService implements OnModuleInit {
     'calving_offspring',
     'weanings',
     'repro_protocols',
+    'repro_protocol_assignments',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -369,6 +389,7 @@ export class DbService implements OnModuleInit {
     await this.db.exec(DbService.IMPORT_MIGRATION);
     await this.db.exec(DbService.MOVEMENT_MIGRATION);
     await this.db.exec(DbService.WEIGHING_PROJECTION_MIGRATION);
+    await this.db.exec(DbService.REPRO_ASSIGNMENTS_MIGRATION);
     // R-2.a: el esquema canónico traía una policy dispersa sobre `app.current_tenant` (que la app
     // NUNCA setea → denegaba en prod). Se elimina; `repro_protocols` ya está en RLS_TABLES y recibe
     // la policy estándar `tenant_isolation` sobre `app.tenant_id` en rlsMigration.

@@ -23,7 +23,7 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
  * publica funcionalidad sin consumidor (`in_progress`/`canceled` llegan con su ola).
  */
 
-export type TaskOrigin = 'rest' | 'health' | 'sync';
+export type TaskOrigin = 'rest' | 'health' | 'sync' | 'repro';
 export type TaskType = 'health' | 'breeding' | 'feeding' | 'maintenance' | 'crop' | 'general';
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
