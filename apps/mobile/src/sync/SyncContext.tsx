@@ -167,6 +167,12 @@ interface SyncCtx {
   markNotificationRead: (id: string) => Promise<void>;
   /** Refresca el feed in_app (flush de reads pendientes + GET), reutilizable al enfocar la pantalla. */
   refreshNotifications: () => Promise<void>;
+  /** Id del device registrado en el servidor (para asociar el token de push). */
+  serverDeviceId?: string;
+  /** Último token Expo confirmado con el servidor (optimización local de idempotencia). */
+  pushLastToken?: string;
+  /** Sincroniza el token Expo con el servidor (POST push-token + persiste lastPushToken). */
+  syncPushToken: (token: string) => Promise<void>;
   openPregnancy: (animalId: string) => LocalPregnancy | null;
   captureWeighing: (animalId: string, kg: number, cc?: number) => void;
   captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
@@ -326,6 +332,23 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       /* el cache es best-effort: ningún fallo aquí aborta ni ensucia el sync principal */
     }
   }, [authFetch, persistMeta]);
+
+  /**
+   * Sincroniza el token Expo con el servidor (P7 F2.a): POST /sync/devices/:id/push-token +
+   * persiste `lastPushToken` (optimización local de idempotencia). No prompta permisos ni toca
+   * el SO — eso vive en la capa nativa; acá solo la parte autenticada/persistente.
+   */
+  const syncPushToken = useCallback(
+    async (token: string) => {
+      const deviceId = metaRef.current?.serverDeviceId;
+      if (!deviceId || !token) return;
+      const res = await authFetch(`/sync/devices/${deviceId}/push-token`, { method: 'POST', body: JSON.stringify({ push_token: token }) });
+      if (!res.ok) throw new Error(`push-token → ${res.status}`);
+      await persistMeta((prev) => ({ ...prev, lastPushToken: token }));
+      bump();
+    },
+    [authFetch, persistMeta],
+  );
 
   /**
    * Marca una notificación como leída (P7-4.c): 1) read-set local + persist inmediatos (badge baja
@@ -732,6 +755,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       notificationsAt: metaRef.current?.notificationsAt,
       markNotificationRead,
       refreshNotifications,
+
+      // Registro de push (P7 F2.a): identidad del device + último token confirmado (para el puente
+      // nativo) y sincronización del token Expo. La obtención del token y los permisos son nativos.
+      serverDeviceId: metaRef.current?.serverDeviceId,
+      pushLastToken: metaRef.current?.lastPushToken,
+      syncPushToken,
 
       openPregnancy: (animalId: string) => {
         const m = store()?.rows.get('pregnancies');

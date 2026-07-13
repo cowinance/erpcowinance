@@ -6,6 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSync, API_URL } from '@/sync/SyncContext';
 import { useAccount } from '@/account/AccountContext';
 import { Button, Card } from '@/components/ui';
+import { activatePush } from '@/push/native';
+import { pushStatusMessage, type PushRegistrationStatus } from '@/push/registration';
 import { T } from '@/theme';
 
 export default function Menu() {
@@ -15,6 +17,22 @@ export default function Menu() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
+  const [pushStatus, setPushStatus] = useState<PushRegistrationStatus>('idle');
+  const [activating, setActivating] = useState(false);
+
+  // Permiso CONTEXTUAL (D3): el prompt del SO solo se dispara por esta acción explícita del
+  // usuario, nunca en boot ni al abrir /notificaciones. La obtención/sync del token es nativa.
+  async function activateNotifications() {
+    if (activating) return;
+    setActivating(true);
+    const status = await activatePush({
+      hasServerDevice: () => !!sync.serverDeviceId,
+      lastSyncedToken: () => sync.pushLastToken,
+      syncToken: sync.syncPushToken,
+    });
+    setPushStatus(status);
+    setActivating(false);
+  }
 
   async function doResend() {
     if (resending) return;
@@ -105,6 +123,28 @@ export default function Menu() {
             </View>
           </Card>
         )}
+
+        <Card>
+          <Text style={styles.title}>Notificaciones push</Text>
+          <Text style={{ fontSize: T.type.label, color: T.ink3, marginVertical: T.space['2'] }}>
+            Recibí avisos de retiros, vacunas y preñeces en este dispositivo. Pediremos permiso al
+            sistema solo cuando toques el botón.
+          </Text>
+          {pushStatus !== 'idle' ? (
+            <Text
+              accessibilityRole={pushStatus === 'registered' ? 'text' : 'alert'}
+              style={{ fontSize: T.type.label, marginBottom: T.space['2'], color: pushStatus === 'registered' ? T.success : T.warning }}
+            >
+              {pushStatusMessage(pushStatus)}
+            </Text>
+          ) : null}
+          <Button
+            label={activating ? 'Activando…' : pushStatus === 'registered' ? 'Notificaciones activadas ✓' : 'Activar notificaciones'}
+            variant="secondary"
+            onPress={activateNotifications}
+            disabled={activating || pushStatus === 'registered'}
+          />
+        </Card>
 
         <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

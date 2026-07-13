@@ -32,6 +32,9 @@ export interface PersistedMeta {
   notifications?: CachedNotification[];
   notificationsAt?: string;
   notificationReadPending?: string[];
+  /** Último token Expo confirmado con el servidor (P7 F2.a): optimización local de idempotencia,
+   *  NO la fuente de verdad (el server puede reconciliarse en boot). */
+  lastPushToken?: string;
   // Propiedad del store local (P1.3.6a): identidad dueña de los datos operativos
   // en este dispositivo. Se compara al iniciar sesión para no exponer/sincronizar
   // el store de un usuario/tenant bajo otra cuenta (aislamiento multi-tenant local).
