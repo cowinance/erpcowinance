@@ -306,6 +306,7 @@ export class DbService implements OnModuleInit {
     'calvings',
     'calving_offspring',
     'weanings',
+    'repro_protocols',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -368,6 +369,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec(DbService.IMPORT_MIGRATION);
     await this.db.exec(DbService.MOVEMENT_MIGRATION);
     await this.db.exec(DbService.WEIGHING_PROJECTION_MIGRATION);
+    // R-2.a: el esquema canónico traía una policy dispersa sobre `app.current_tenant` (que la app
+    // NUNCA setea → denegaba en prod). Se elimina; `repro_protocols` ya está en RLS_TABLES y recibe
+    // la policy estándar `tenant_isolation` sobre `app.tenant_id` en rlsMigration.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_repro_protocols ON "repro_protocols";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

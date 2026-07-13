@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode } from '@cowinance/domain';
+import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 import { WeaningService } from './weaning.service';
@@ -295,6 +295,82 @@ export class ReproService {
       };
     });
     return { lot_id: lotId ?? null, counts, rows: out };
+  }
+
+  // ── Protocolos reproductivos (IATF), plantillas (R-2.a) ──────────────────────
+  /** Lista los protocolos del tenant (no eliminados); activos primero. */
+  async listProtocols() {
+    return this.db.query(
+      `SELECT id, name, steps, is_active, created_at, updated_at FROM repro_protocols
+       WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY is_active DESC, name`,
+      [this.db.tenant],
+    );
+  }
+
+  private steps(raw: unknown) {
+    try {
+      return validateProtocolSteps(raw);
+    } catch (e) {
+      throw new BadRequestException({ code: 'protocol.invalid_steps', title: e instanceof InvalidProtocolStepsError ? e.message : 'steps inválidos' });
+    }
+  }
+
+  /** Crea una plantilla de protocolo. `species_id` = bovino del catálogo por defecto. */
+  async createProtocol(body: any) {
+    const name = (body?.name ?? '').trim();
+    if (!name) throw new BadRequestException({ code: 'protocol.missing_name', title: 'name es obligatorio' });
+    const steps = this.steps(body?.steps ?? []);
+    const species = await this.db.one<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`);
+    if (!species) throw new BadRequestException({ code: 'protocol.no_species', title: 'Especie bovina no encontrada' });
+    return this.db.one<any>(
+      `INSERT INTO repro_protocols (tenant_id, name, species_id, steps, created_by)
+       VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING id, name, steps, is_active, created_at, updated_at`,
+      [this.db.tenant, name, species.id, JSON.stringify(steps), this.db.user],
+    );
+  }
+
+  /** Edita nombre / pasos / activación de una plantilla. */
+  async updateProtocol(id: string, body: any) {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (typeof body?.name === 'string') {
+      const name = body.name.trim();
+      if (!name) throw new BadRequestException({ code: 'protocol.missing_name', title: 'name no puede ser vacío' });
+      params.push(name);
+      sets.push(`name = $${params.length}`);
+    }
+    if (body?.steps !== undefined) {
+      params.push(JSON.stringify(this.steps(body.steps)));
+      sets.push(`steps = $${params.length}::jsonb`);
+    }
+    if (typeof body?.is_active === 'boolean') {
+      params.push(body.is_active);
+      sets.push(`is_active = $${params.length}`);
+    }
+    if (sets.length === 0) throw new BadRequestException({ code: 'protocol.no_changes', title: 'Nada para actualizar' });
+    params.push(id);
+    const idIdx = params.length;
+    params.push(this.db.tenant);
+    const tIdx = params.length;
+    const row = await this.db.one<any>(
+      `UPDATE repro_protocols SET ${sets.join(', ')}, updated_at = now()
+       WHERE id = $${idIdx} AND tenant_id = $${tIdx} AND deleted_at IS NULL
+       RETURNING id, name, steps, is_active, created_at, updated_at`,
+      params,
+    );
+    if (!row) throw new NotFoundException({ code: 'protocol.not_found', title: 'Protocolo no encontrado' });
+    return row;
+  }
+
+  /** Baja lógica (soft delete) de una plantilla. Los eventos históricos con protocol_id la conservan. */
+  async deleteProtocol(id: string) {
+    const row = await this.db.one<{ id: string }>(
+      `UPDATE repro_protocols SET deleted_at = now(), updated_at = now()
+       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL RETURNING id`,
+      [id, this.db.tenant],
+    );
+    if (!row) throw new NotFoundException({ code: 'protocol.not_found', title: 'Protocolo no encontrado' });
+    return { id, deleted: true };
   }
 
   private async requireFemale(animalId: string) {

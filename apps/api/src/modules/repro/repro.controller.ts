@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ReproService } from './repro.service';
 
 @Controller()
@@ -48,5 +48,25 @@ export class ReproController {
   @Get('reproduction/herd-status')
   herdStatus(@Query('lot_id') lotId?: string) {
     return this.repro.herdStatus(lotId);
+  }
+
+  @Get('reproduction/protocols')
+  listProtocols() {
+    return this.repro.listProtocols();
+  }
+
+  @Post('reproduction/protocols')
+  createProtocol(@Body() body: any) {
+    return this.repro.createProtocol(body);
+  }
+
+  @Patch('reproduction/protocols/:id')
+  updateProtocol(@Param('id') id: string, @Body() body: any) {
+    return this.repro.updateProtocol(id, body);
+  }
+
+  @Delete('reproduction/protocols/:id')
+  deleteProtocol(@Param('id') id: string) {
+    return this.repro.deleteProtocol(id);
   }
 }

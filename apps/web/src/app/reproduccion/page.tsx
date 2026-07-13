@@ -19,7 +19,12 @@ export default async function ReproPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">Reproducción</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Reproducción</h1>
+        <Link href="/reproduccion/protocolos" className="text-label font-medium text-brand hover:underline">
+          Protocolos IATF →
+        </Link>
+      </div>
       <p className="mt-0.5 mb-5 text-body text-ink-3">Celos, servicios, gestaciones, partos y destetes</p>
 
       <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
