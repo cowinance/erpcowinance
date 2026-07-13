@@ -7,13 +7,14 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
-type ReportKey = 'inventory' | 'movements' | 'production' | 'reproduction';
+type ReportKey = 'inventory' | 'movements' | 'production' | 'reproduction' | 'health';
 
 const REPORTS: { key: ReportKey; label: string }[] = [
   { key: 'inventory', label: 'Inventario a fecha' },
   { key: 'movements', label: 'Altas y bajas' },
   { key: 'production', label: 'Producción' },
   { key: 'reproduction', label: 'Reproducción' },
+  { key: 'health', label: 'Sanidad' },
 ];
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -61,7 +62,9 @@ export function ReportsView() {
             ? `herd-movements?from=${from}&to=${to}`
             : tab === 'production'
               ? `production?from=${from}&to=${to}`
-              : `reproduction?from=${from}&to=${to}`;
+              : tab === 'reproduction'
+                ? `reproduction?from=${from}&to=${to}`
+                : `health?from=${from}&to=${to}`;
       const res = await fetch(`${API_URL}/reports/${qs}`, { headers: authHeaders() });
       if (!res.ok) throw new Error(`Error ${res.status}`);
       setResult({ forTab: tab, payload: await res.json() });
@@ -105,17 +108,32 @@ export function ReportsView() {
         ['Lote', 'Pesajes', 'Animales', 'Peso prom. (kg)', 'GDP prom. (kg/d)'],
         ...data.rows.map((r: any) => [r.lote, r.pesajes, r.animales, r.peso_promedio, r.gdp_promedio]),
       ];
-    } else {
+    } else if (forTab === 'reproduction') {
       name = `reproduccion-${data.from}_${data.to}.csv`;
       rows = [
         ['Concepto', 'Cantidad'],
         ['Inseminaciones', data.servicios.ia],
         ['Montas', data.servicios.monta],
+        ['Transf. embrionaria', data.servicios.te ?? 0],
         ['Total servicios', data.servicios.total],
-        ['Diagnósticos', data.diagnosticos],
+        ['Diagnósticos positivos', data.diagnosticos.positivos],
+        ['Diagnósticos negativos', data.diagnosticos.negativos],
+        ['% Preñez (período)', data.indices?.prenez_pct ?? ''],
+        ['IEP (días)', data.indices?.iep_dias ?? ''],
+        ['Servicios por preñez', data.indices?.servicios_por_prenez ?? ''],
         ['Partos', data.partos],
         ['Crías nacidas', data.crias_nacidas],
         ['Destetes', data.destetes.n],
+      ];
+    } else if (forTab === 'health') {
+      name = `sanidad-${data.from}_${data.to}.csv`;
+      rows = [
+        ['Concepto', 'Cantidad'],
+        ['Vacunaciones', data.vacunaciones.total],
+        ['Tratamientos', data.tratamientos.total],
+        ['Muertes', data.mortalidad.n],
+        ['Pérdida estimada', data.mortalidad.perdida_estimada],
+        ['Tasa mortalidad (%)', data.mortalidad.tasa_pct ?? ''],
       ];
     }
     download(name, toCsv(rows));
@@ -187,6 +205,7 @@ export function ReportsView() {
             {result.forTab === 'movements' && <MovementsReport data={result.payload} />}
             {result.forTab === 'production' && <ProductionReport data={result.payload} />}
             {result.forTab === 'reproduction' && <ReproductionReport data={result.payload} />}
+            {result.forTab === 'health' && <HealthReport data={result.payload} />}
           </>
         )
       )}
@@ -367,6 +386,73 @@ function ReproductionReport({ data }: { data: any }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HealthReport({ data }: { data: any }) {
+  const mort = data.mortalidad ?? { n: 0, perdida_estimada: 0, tasa_pct: null };
+  const vacProd: any[] = data.vacunaciones?.por_producto ?? [];
+  const treatVia: any[] = data.tratamientos?.por_via ?? [];
+  const money = (v: number) => `$${Math.round(v).toLocaleString('es-AR')}`;
+  return (
+    <div className="space-y-4">
+      {/* Indicadores del período */}
+      <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1">
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Vacunaciones</div>
+          <div className="tnum text-compat-26 font-semibold">{data.vacunaciones?.total ?? 0}</div>
+          <div className="mt-1 text-label text-ink-3">aplicadas en el período</div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Tratamientos</div>
+          <div className="tnum text-compat-26 font-semibold">{data.tratamientos?.total ?? 0}</div>
+          <div className="mt-1 text-label text-ink-3">aplicados en el período</div>
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Mortalidad</div>
+          <div className="tnum text-compat-26 font-semibold">
+            {mort.n}
+            {mort.tasa_pct != null ? <span className="text-label text-ink-3"> · {mort.tasa_pct}%</span> : null}
+          </div>
+          <div className="mt-1 text-label text-ink-3">{mort.perdida_estimada ? `${money(mort.perdida_estimada)} pérdida est.` : 'muertes en el período'}</div>
+        </div>
+      </div>
+
+      {/* Desgloses */}
+      <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Vacunas por producto</div>
+          {vacProd.length === 0 ? (
+            <p className="py-4 text-center text-label text-ink-3">Sin vacunaciones en el período.</p>
+          ) : (
+            <div className="space-y-1">
+              {vacProd.map((r) => (
+                <div key={r.producto} className="flex justify-between text-body">
+                  <span className="truncate">{r.producto}</span>
+                  <span className="tnum font-semibold">{r.n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className={cardCls}>
+          <div className="mb-2 text-body font-semibold">Tratamientos por vía</div>
+          {treatVia.length === 0 ? (
+            <p className="py-4 text-center text-label text-ink-3">Sin tratamientos en el período.</p>
+          ) : (
+            <div className="space-y-1">
+              {treatVia.map((r) => (
+                <div key={r.via} className="flex justify-between text-body">
+                  <span className="uppercase">{r.via}</span>
+                  <span className="tnum font-semibold">{r.n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <p className="text-label text-ink-3">Indicadores del período. La cobertura de vacunación y los animales en retiro (a la fecha) viven en el panel de Alertas.</p>
     </div>
   );
 }

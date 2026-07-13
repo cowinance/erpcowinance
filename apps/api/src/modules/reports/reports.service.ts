@@ -121,6 +121,72 @@ export class ReportsService {
   }
 
   /**
+   * Sanidad del período (P9-2): vacunaciones y tratamientos APLICADOS + mortalidad, acotado a
+   * [from, to] (default 90 días). Los snapshots a-fecha (cobertura de vacunación, animales en
+   * retiro ahora, vacunas próximas a vencer) NO viven acá: son propiedad de dashboard/alerts.
+   * `tasa_pct` de mortalidad = muertes / animales activos a `to` × 100 (aprox); `null` si no hay
+   * base. Todo excluye `deleted_at` y acota por fecha.
+   */
+  async health(fromRaw?: string, toRaw?: string) {
+    const to = isoDate(toRaw);
+    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 90 * 86400000).toISOString());
+    const t = this.db.tenant;
+    const [vac, vacByProduct, treat, treatByRoute, mort, activos] = await Promise.all([
+      this.db.one<any>(
+        `SELECT count(*)::int AS n FROM vaccinations
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND applied_at::date BETWEEN $2::date AND $3::date`,
+        [t, from, to],
+      ),
+      this.db.query<any>(
+        `SELECT COALESCE(pv.name, '—') AS producto, count(*)::int AS n
+         FROM vaccinations v LEFT JOIN products_veterinary pv ON pv.id = v.product_id
+         WHERE v.tenant_id = $1 AND v.deleted_at IS NULL AND v.applied_at::date BETWEEN $2::date AND $3::date
+         GROUP BY pv.name ORDER BY n DESC LIMIT 8`,
+        [t, from, to],
+      ),
+      this.db.one<any>(
+        `SELECT count(*)::int AS n FROM treatments
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND applied_at::date BETWEEN $2::date AND $3::date`,
+        [t, from, to],
+      ),
+      this.db.query<any>(
+        `SELECT COALESCE(route, '—') AS via, count(*)::int AS n FROM treatments
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND applied_at::date BETWEEN $2::date AND $3::date
+         GROUP BY route ORDER BY n DESC`,
+        [t, from, to],
+      ),
+      this.db.one<any>(
+        `SELECT count(*)::int AS n, COALESCE(sum(estimated_loss), 0)::float AS perdida
+         FROM mortalities WHERE tenant_id = $1 AND deleted_at IS NULL AND died_at::date BETWEEN $2::date AND $3::date`,
+        [t, from, to],
+      ),
+      // Denominador de la tasa de mortalidad: animales activos a la fecha `to` (mismo predicado de
+      // "presente a fecha" del inventario).
+      this.db.one<any>(
+        `SELECT count(*)::int AS n FROM animals a
+         WHERE a.tenant_id = $1 AND a.deleted_at IS NULL
+           AND COALESCE(a.birth_date, a.acquisition_date, a.created_at::date) <= $2::date
+           AND (a.status = 'active' OR a.status_changed_at IS NULL OR a.status_changed_at::date > $2::date)`,
+        [t, to],
+      ),
+    ]);
+    const muertes = mort?.n ?? 0;
+    const activosN = activos?.n ?? 0;
+    return {
+      from,
+      to,
+      vacunaciones: { total: vac?.n ?? 0, por_producto: vacByProduct },
+      tratamientos: { total: treat?.n ?? 0, por_via: treatByRoute },
+      mortalidad: {
+        n: muertes,
+        perdida_estimada: mort?.perdida ?? 0,
+        base_activos: activosN,
+        tasa_pct: activosN > 0 ? +((muertes / activosN) * 100).toFixed(2) : null,
+      },
+    };
+  }
+
+  /**
    * Curva de peso: promedio de peso por mes en el período (default 12 meses), opcionalmente
    * filtrada por lote actual del animal. Lee de `v_weighings` (fuente única P8-1) — incluye los
    * pesajes capturados offline por el móvil.

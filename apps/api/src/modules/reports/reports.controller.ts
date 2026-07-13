@@ -34,4 +34,9 @@ export class ReportsController {
   reproduction(@Query('from') from?: string, @Query('to') to?: string) {
     return this.reports.reproduction(from, to);
   }
+
+  @Get('health')
+  health(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.reports.health(from, to);
+  }
 }
