@@ -27,7 +27,7 @@ describe('finance — libro mayor', () => {
     db = new DbService();
     await db.onModuleInit();
     accounts = new AccountsService(db);
-    ledger = new LedgerService(db, accounts);
+    ledger = new LedgerService(db);
 
     const c1: any = await accounts.createAccount({ code: '1.1.01', name: 'Caja', type: 'asset' });
     const c2: any = await accounts.createAccount({ code: '4.1.01', name: 'Ventas', type: 'income' });

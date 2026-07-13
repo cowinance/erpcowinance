@@ -17,5 +17,6 @@ import { HerdModule } from '../herd/herd.module';
   imports: [InventoryModule, HerdModule],
   controllers: [CommerceController, PurchasesController, SalesController],
   providers: [CommerceService, PurchasesService, SalesService],
+  exports: [PurchasesService, SalesService], // Finance (F-2) los lee para postear asientos automáticos.
 })
 export class CommerceModule {}

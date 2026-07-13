@@ -350,6 +350,8 @@ export class DbService implements OnModuleInit {
     'cost_centers',
     'journal_entries',
     'journal_lines',
+    // F-2: mapa de cuentas de posteo (k/v por company).
+    'system_settings',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -436,6 +438,8 @@ export class DbService implements OnModuleInit {
     for (const t of ['chart_of_accounts', 'fiscal_periods', 'cost_centers', 'journal_entries', 'journal_lines']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
+    // F-2: misma policy dispersa en system_settings (mapa de cuentas de posteo).
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_system_settings ON "system_settings";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

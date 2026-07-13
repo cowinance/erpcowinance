@@ -1,7 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { validateJournalBalance, UnbalancedJournalError, JournalLineInput } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
-import { AccountsService } from './accounts.service';
 
 /**
  * Finanzas — libro mayor (F-1): asientos de partida DOBLE. Regla única: el asiento balancea
@@ -11,13 +10,19 @@ import { AccountsService } from './accounts.service';
  */
 @Injectable()
 export class LedgerService {
-  constructor(
-    private readonly db: DbService,
-    private readonly accounts: AccountsService,
-  ) {}
+  constructor(private readonly db: DbService) {}
 
   /** Crea un asiento manual balanceado y posteado. `entry_date` debe caer en un período abierto. */
   async createEntry(body: any) {
+    return this.db.tx((q) => this.createEntryInTx(q, body));
+  }
+
+  /**
+   * Crea un asiento balanceado y posteado sobre la tx `q` recibida. Punto ÚNICO de creación de
+   * asientos: los manuales (createEntry) y los automáticos desde documentos (F-2, PostingService)
+   * lo reusan para postear + sellar en la misma tx. No abre transacción propia.
+   */
+  async createEntryInTx(q: Q, body: any) {
     let totals: { totalDebit: number; totalCredit: number };
     const rawLines: JournalLineInput[] = Array.isArray(body?.lines) ? body.lines : [];
     try {
@@ -29,20 +34,21 @@ export class LedgerService {
     const entryDate = body?.entry_date;
     if (!entryDate) throw new BadRequestException({ code: 'finance.missing_date', title: 'entry_date es obligatorio' });
     const t = this.db.tenant;
-    const companyId = await this.accounts.companyId();
-    const currency = await this.currency(companyId); // fuera de la tx (this.db en tx = deadlock PGlite)
+    // Company + moneda vía `q` (no this.db): createEntryInTx corre dentro de tx propia o ajena.
+    const company = await q.one<{ id: string; currency: string }>(`SELECT id, functional_currency AS currency FROM companies WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`, [t]);
+    if (!company) throw new BadRequestException({ code: 'finance.no_company', title: 'El tenant no tiene una empresa configurada' });
+    const companyId = company.id;
+    const currency = company.currency;
 
-    return this.db.tx(async (q) => {
-      const periodId = await this.requireOpenPeriod(q, companyId, entryDate);
-      await this.requirePostableAccounts(q, companyId, rawLines);
-      const entry = await q.one<{ id: string }>(
-        `INSERT INTO journal_entries (tenant_id, company_id, period_id, entry_date, reference, source_type, source_id, currency, status, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'posted',$9) RETURNING id`,
-        [t, companyId, periodId, entryDate, body?.reference ?? null, body?.source_type ?? null, body?.source_id ?? null, currency, this.db.user],
-      );
-      await this.insertLines(q, entry!.id, rawLines);
-      return this.getInTx(q, entry!.id, totals);
-    });
+    const periodId = await this.requireOpenPeriod(q, companyId, entryDate);
+    await this.requirePostableAccounts(q, companyId, rawLines);
+    const entry = await q.one<{ id: string }>(
+      `INSERT INTO journal_entries (tenant_id, company_id, period_id, entry_date, reference, source_type, source_id, currency, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'posted',$9) RETURNING id`,
+      [t, companyId, periodId, entryDate, body?.reference ?? null, body?.source_type ?? null, body?.source_id ?? null, currency, this.db.user],
+    );
+    await this.insertLines(q, entry!.id, rawLines);
+    return this.getInTx(q, entry!.id, totals);
   }
 
   /** Reversa: crea un contra-asiento (débito↔crédito) y marca el original `reversed`. Idempotente. */
@@ -122,11 +128,6 @@ export class LedgerService {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  private async currency(companyId: string): Promise<string> {
-    const c = await this.db.one<{ currency: string }>(`SELECT functional_currency AS currency FROM companies WHERE id=$1`, [companyId]);
-    return c?.currency ?? 'USD';
-  }
-
   /** Exige un período ABIERTO que contenga la fecha; devuelve su id. */
   private async requireOpenPeriod(q: Q, companyId: string, date: string): Promise<string> {
     const p = await q.one<{ id: string }>(

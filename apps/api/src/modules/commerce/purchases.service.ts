@@ -167,10 +167,15 @@ export class PurchasesService {
     return this.getInTx(this.db, id);
   }
 
+  /** Sella el asiento generado (F-2) en la compra, dentro de la tx del posteo. */
+  async attachJournalEntry(q: Q, id: string, entryId: string) {
+    await q.query(`UPDATE purchases SET journal_entry_id=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3`, [entryId, id, this.db.tenant]);
+  }
+
   private async getInTx(e: Q, id: string) {
     const purchase = await e.one(
       `SELECT pu.id, pu.document_number, pu.purchase_date, pu.currency, pu.subtotal::float AS subtotal, pu.tax_total::float AS tax_total,
-              pu.total::float AS total, pu.status, pu.supplier_partner_id, p.name AS supplier_name
+              pu.total::float AS total, pu.status, pu.journal_entry_id, pu.supplier_partner_id, p.name AS supplier_name
        FROM purchases pu JOIN business_partners p ON p.id = pu.supplier_partner_id
        WHERE pu.id=$1 AND pu.tenant_id=$2 AND pu.deleted_at IS NULL`,
       [id, this.db.tenant],
