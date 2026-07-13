@@ -10,3 +10,5 @@ export * from './health';
 export * from './reproduction';
 // Contratos de eventos de dominio (F5, ADR-0005).
 export * from './events';
+// Servicios de dominio — comercial: totales de documentos (C-2/C-3).
+export * from './commerce';

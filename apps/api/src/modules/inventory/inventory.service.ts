@@ -163,6 +163,15 @@ export class InventoryService {
    * hay stock negativo. Upsert por (item, warehouse, batch) con `IS NOT DISTINCT FROM` (batch NULL).
    */
   async recordMovement(body: any) {
+    return this.db.tx((q) => this.recordMovementInTx(q, body));
+  }
+
+  /**
+   * Punto ÚNICO de mutación de stock: valida, inserta el movimiento y aplica el saldo, todo sobre la
+   * tx `q` recibida. Otros módulos (p.ej. recepción de compras, C-2) lo invocan dentro de SU propia
+   * tx para mantener la atomicidad y la regla única (applyToLevel). No abre transacción propia.
+   */
+  async recordMovementInTx(q: Q, body: any) {
     const t = this.db.tenant;
     const TYPES = ['in', 'out', 'adjustment', 'consumption'];
     const itemId = body?.item_id;
@@ -176,20 +185,18 @@ export class InventoryService {
     if ((type === 'out' || type === 'consumption') && qty >= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: `'${type}' requiere cantidad negativa` });
     const unitCost = body?.unit_cost != null ? Number(body.unit_cost) : null;
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
-    const item = await this.requireItem(itemId);
-    await this.requireWarehouse(whId);
-    const batchId = await this.resolveBatch(item, body?.batch_id);
+    const item = await this.requireItem(q, itemId);
+    await this.requireWarehouse(q, whId);
+    const batchId = await this.resolveBatch(q, item, body?.batch_id);
 
-    return this.db.tx(async (q) => {
-      const mov = await q.one(
-        `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, batch_id, movement_type, quantity, unit_cost, occurred_at, reference_type, reference_id, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         RETURNING id, movement_type, quantity::float AS quantity, occurred_at`,
-        [t, itemId, whId, batchId, type, qty, unitCost, occurredAt, body?.reference_type ?? null, body?.reference_id ?? null, this.db.user],
-      );
-      const level = await this.applyToLevel(q, itemId, whId, batchId, qty, unitCost);
-      return { movement: mov, level };
-    });
+    const mov = await q.one(
+      `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, batch_id, movement_type, quantity, unit_cost, occurred_at, reference_type, reference_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id, movement_type, quantity::float AS quantity, occurred_at`,
+      [t, itemId, whId, batchId, type, qty, unitCost, occurredAt, body?.reference_type ?? null, body?.reference_id ?? null, this.db.user],
+    );
+    const level = await this.applyToLevel(q, itemId, whId, batchId, qty, unitCost);
+    return { movement: mov, level };
   }
 
   /**
@@ -206,10 +213,10 @@ export class InventoryService {
     if (!itemId || !fromId || !toId) throw new BadRequestException({ code: 'inventory.missing_fields', title: 'item_id, from_warehouse_id y to_warehouse_id son obligatorios' });
     if (fromId === toId) throw new BadRequestException({ code: 'inventory.same_warehouse', title: 'El origen y el destino deben ser distintos' });
     if (!Number.isFinite(qty) || qty <= 0) throw new BadRequestException({ code: 'inventory.invalid_quantity', title: 'quantity debe ser positiva' });
-    const item = await this.requireItem(itemId);
-    await this.requireWarehouse(fromId);
-    await this.requireWarehouse(toId);
-    const batchId = await this.resolveBatch(item, body?.batch_id);
+    const item = await this.requireItem(this.db, itemId);
+    await this.requireWarehouse(this.db, fromId);
+    await this.requireWarehouse(this.db, toId);
+    const batchId = await this.resolveBatch(this.db, item, body?.batch_id);
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
 
     return this.db.tx(async (q) => {
@@ -248,7 +255,7 @@ export class InventoryService {
     const itemId = body?.item_id;
     const num = String(body?.batch_number ?? '').trim();
     if (!itemId || !num) throw new BadRequestException({ code: 'inventory.missing_fields', title: 'item_id y batch_number son obligatorios' });
-    await this.requireItem(itemId);
+    await this.requireItem(this.db, itemId);
     return this.db.one(
       `INSERT INTO inventory_batches (tenant_id, item_id, batch_number, expiry_date, supplier_id, created_by) VALUES ($1,$2,$3,$4,$5,$6)
        RETURNING id, item_id, batch_number, expiry_date, supplier_id`,
@@ -305,22 +312,24 @@ export class InventoryService {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  private async requireItem(id: string): Promise<{ id: string; track_batches: boolean }> {
-    const item = await this.db.one<{ id: string; track_batches: boolean }>(`SELECT id, track_batches FROM inventory_items WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
+  // Los require* toman un executor `e` (DbService o una tx `q`) para poder validar dentro de una
+  // transacción ajena (p.ej. recepción de compras) sin anidar this.db.transaction (deadlock PGlite).
+  private async requireItem(e: Q, id: string): Promise<{ id: string; track_batches: boolean }> {
+    const item = await e.one<{ id: string; track_batches: boolean }>(`SELECT id, track_batches FROM inventory_items WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
     if (!item) throw new NotFoundException({ code: 'inventory.item_not_found', title: 'Ítem no encontrado' });
     return item;
   }
 
-  private async requireWarehouse(id: string): Promise<void> {
-    const wh = await this.db.one<{ id: string }>(`SELECT id FROM warehouses WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
+  private async requireWarehouse(e: Q, id: string): Promise<void> {
+    const wh = await e.one<{ id: string }>(`SELECT id FROM warehouses WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
     if (!wh) throw new NotFoundException({ code: 'inventory.warehouse_not_found', title: 'Depósito no encontrado' });
   }
 
   /** Resuelve el lote: obligatorio si el ítem controla lotes (y debe pertenecerle); null si no. */
-  private async resolveBatch(item: { id: string; track_batches: boolean }, batchId?: string | null): Promise<string | null> {
+  private async resolveBatch(e: Q, item: { id: string; track_batches: boolean }, batchId?: string | null): Promise<string | null> {
     if (!item.track_batches) return null;
     if (!batchId) throw new BadRequestException({ code: 'inventory.batch_required', title: 'Este ítem controla lotes: batch_id es obligatorio' });
-    const b = await this.db.one<{ id: string }>(`SELECT id FROM inventory_batches WHERE id=$1 AND item_id=$2 AND tenant_id=$3 AND deleted_at IS NULL`, [batchId, item.id, this.db.tenant]);
+    const b = await e.one<{ id: string }>(`SELECT id FROM inventory_batches WHERE id=$1 AND item_id=$2 AND tenant_id=$3 AND deleted_at IS NULL`, [batchId, item.id, this.db.tenant]);
     if (!b) throw new NotFoundException({ code: 'inventory.batch_not_found', title: 'Lote no encontrado para el ítem' });
     return batchId;
   }

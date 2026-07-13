@@ -6,5 +6,6 @@ import { InventoryService } from './inventory.service';
 @Module({
   controllers: [InventoryController],
   providers: [InventoryService],
+  exports: [InventoryService], // Commerce (C-2) reusa recordMovementInTx en la recepción de compras.
 })
 export class InventoryModule {}
