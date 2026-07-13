@@ -344,6 +344,12 @@ export class DbService implements OnModuleInit {
     'purchase_lines',
     'sales',
     'sale_lines',
+    // Finanzas (F-1): libro mayor core (tablas dormidas activadas).
+    'chart_of_accounts',
+    'fiscal_periods',
+    'cost_centers',
+    'journal_entries',
+    'journal_lines',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -424,6 +430,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_inventory_batches ON "inventory_batches";');
     // C-1: mismas policies dispersas (app.current_tenant) en las 9 tablas comerciales activadas.
     for (const t of ['business_partners', 'suppliers', 'customers', 'contacts', 'price_lists', 'purchases', 'purchase_lines', 'sales', 'sale_lines']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
+    // F-1: mismas policies dispersas en las 5 tablas del libro mayor.
+    for (const t of ['chart_of_accounts', 'fiscal_periods', 'cost_centers', 'journal_entries', 'journal_lines']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
     await this.db.exec(DbService.rlsMigration());

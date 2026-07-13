@@ -12,3 +12,5 @@ export * from './reproduction';
 export * from './events';
 // Servicios de dominio — comercial: totales de documentos (C-2/C-3).
 export * from './commerce';
+// Servicios de dominio — finanzas: partida doble balanceada (F-1/F-2).
+export * from './finance';
