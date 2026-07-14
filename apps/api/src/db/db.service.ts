@@ -373,6 +373,8 @@ export class DbService implements OnModuleInit {
     // AG-2: labores (consumo de insumos) + cosechas.
     'crop_operations',
     'harvests',
+    // MQ-1: maquinaria (maestro).
+    'machinery',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -485,6 +487,8 @@ export class DbService implements OnModuleInit {
     for (const t of ['crop_operations', 'harvests']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
+    // MQ-1: misma policy dispersa en machinery.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_machinery ON "machinery";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
