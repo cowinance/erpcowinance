@@ -53,7 +53,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
       { href: '/nutricion', label: 'Nutrición', icon: Wheat },
       { href: '/agricultura', label: 'Agricultura', icon: Sprout },
       { href: '/inventario', label: 'Inventario', icon: Package },
-      { href: '/modulo/maquinaria', label: 'Maquinaria', icon: Tractor },
+      { href: '/maquinaria', label: 'Maquinaria', icon: Tractor },
     ],
   },
   {
