@@ -35,6 +35,20 @@ export class LandService {
     }));
   }
 
+  /** Alta mínima de un potrero (name + finca por defecto; area/pastura opcionales). */
+  async createPaddock(body: any) {
+    const name = String(body?.name ?? '').trim();
+    if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name es obligatorio' });
+    const t = this.db.tenant;
+    const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
+    if (!farm) throw new BadRequestException({ code: 'paddock.no_farm', title: 'No hay finca para el potrero' });
+    return this.db.one(
+      `INSERT INTO paddocks (tenant_id, farm_id, name, area_ha, pasture_type, created_by) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, name, area_ha::float AS area_ha, pasture_type`,
+      [t, farm, name, body?.area_ha ?? null, body?.pasture_type ?? null, this.db.user],
+    );
+  }
+
   /**
    * Mover un lote completo a otro potrero. Actualiza `lots.current_paddock_id` y
    * DELEGA el movimiento de sus animales en el núcleo neutral

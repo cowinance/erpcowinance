@@ -13,6 +13,11 @@ export class LandController {
     return this.land.paddocks();
   }
 
+  @Post('paddocks')
+  createPaddock(@Body() body: any) {
+    return this.land.createPaddock(body);
+  }
+
   @Post('paddocks/:id/move-lot')
   moveLot(@Param('id') id: string, @Body() body: any) {
     return this.land.moveLot(id, body);
