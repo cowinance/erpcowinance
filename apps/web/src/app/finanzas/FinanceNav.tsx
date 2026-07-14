@@ -7,6 +7,9 @@ const TABS: [string, string][] = [
   ['/finanzas', 'Plan de cuentas'],
   ['/finanzas/asientos', 'Asientos'],
   ['/finanzas/sumas-y-saldos', 'Sumas y saldos'],
+  ['/finanzas/facturas', 'Facturas'],
+  ['/finanzas/pagos', 'Pagos'],
+  ['/finanzas/config', 'Config'],
 ];
 
 /** Navegación local del módulo Finanzas (F-4a). Sigue el patrón de CommerceNav. */
