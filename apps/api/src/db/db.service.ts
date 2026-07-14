@@ -361,6 +361,8 @@ export class DbService implements OnModuleInit {
     // N-1: raciones (fórmula + ingredientes de inventario).
     'rations',
     'ration_ingredients',
+    // N-2: entregas de alimento a lote (consumo de stock).
+    'feed_deliveries',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -459,6 +461,8 @@ export class DbService implements OnModuleInit {
     for (const t of ['rations', 'ration_ingredients']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
+    // N-2: misma policy dispersa en feed_deliveries.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_feed_deliveries ON "feed_deliveries";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
