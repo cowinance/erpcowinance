@@ -22,6 +22,9 @@ const ROLES: [string, string][] = [
   ['vat_credit', 'IVA crédito'],
   ['payable', 'Proveedores'],
   ['cash', 'Caja (efectivo)'],
+  ['salary_expense', 'Sueldos y jornales'],
+  ['salaries_payable', 'Remuneraciones a pagar'],
+  ['payroll_withholdings', 'Retenciones a pagar'],
 ];
 
 export function ConfigView({ accounts, map, banks }: { accounts: Account[]; map: Record<string, string>; banks: { id: string; name: string; currency: string; ledger_account_code: string | null }[] }) {

@@ -17,6 +17,7 @@ import {
   Landmark,
   ShoppingCart,
   Store,
+  Users,
   BarChart3,
   Bell,
   Inbox,
@@ -58,6 +59,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
     items: [
       { href: '/finanzas', label: 'Finanzas', icon: Landmark },
       { href: '/comercial', label: 'Compras y Ventas', icon: ShoppingCart },
+      { href: '/rrhh', label: 'Personal', icon: Users },
       { href: '/modulo/marketplace', label: 'Marketplace', icon: Store },
       { href: '/reportes', label: 'Reportes', icon: BarChart3 },
     ],
