@@ -387,6 +387,9 @@ export class DbService implements OnModuleInit {
     'movement_guides',
     // T-2: certificaciones (polimórficas).
     'certifications',
+    // BG-1: presupuestos (extensión de Finanzas).
+    'budgets',
+    'budget_lines',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -515,6 +518,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_movement_guides ON "movement_guides";');
     // T-2: misma policy dispersa en certifications.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_certifications ON "certifications";');
+    // BG-1: mismas policies dispersas en presupuestos y sus líneas.
+    for (const t of ['budgets', 'budget_lines']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
