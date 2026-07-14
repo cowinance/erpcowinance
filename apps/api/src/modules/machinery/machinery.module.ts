@@ -1,13 +1,17 @@
 import { Module } from '@nestjs/common';
 import { MachineryController } from './machinery.controller';
+import { MachineryLogsController } from './machinery-logs.controller';
 import { MachineryService } from './machinery.service';
+import { MachineryLogsService } from './machinery-logs.service';
+import { InventoryModule } from '../inventory/inventory.module';
 
 /**
- * Maquinaria (MQ-1): maestro de máquinas. Bounded context propio. Mantenimiento, combustible y horas
- * (MQ-2) cuelgan de este maestro.
+ * Maquinaria: maestro (MQ-1) + mantenimiento/combustible (MQ-2). Depende (unidireccional) de Inventory
+ * para descontar el combustible del stock por `consumption`.
  */
 @Module({
-  controllers: [MachineryController],
-  providers: [MachineryService],
+  imports: [InventoryModule],
+  controllers: [MachineryController, MachineryLogsController],
+  providers: [MachineryService, MachineryLogsService],
 })
 export class MachineryModule {}
