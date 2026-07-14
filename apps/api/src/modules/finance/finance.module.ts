@@ -3,10 +3,12 @@ import { FinanceController } from './finance.controller';
 import { LedgerController } from './ledger.controller';
 import { PostingController } from './posting.controller';
 import { InvoicesController } from './invoices.controller';
+import { PaymentsController } from './payments.controller';
 import { AccountsService } from './accounts.service';
 import { LedgerService } from './ledger.service';
 import { PostingService } from './posting.service';
 import { InvoicesService } from './invoices.service';
+import { PaymentsService } from './payments.service';
 import { CommerceModule } from '../commerce/commerce.module';
 
 /**
@@ -16,8 +18,8 @@ import { CommerceModule } from '../commerce/commerce.module';
  */
 @Module({
   imports: [CommerceModule],
-  controllers: [FinanceController, LedgerController, PostingController, InvoicesController],
-  providers: [AccountsService, LedgerService, PostingService, InvoicesService],
+  controllers: [FinanceController, LedgerController, PostingController, InvoicesController, PaymentsController],
+  providers: [AccountsService, LedgerService, PostingService, InvoicesService, PaymentsService],
   exports: [AccountsService, LedgerService],
 })
 export class FinanceModule {}

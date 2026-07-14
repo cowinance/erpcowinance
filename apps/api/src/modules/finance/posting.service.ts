@@ -11,9 +11,9 @@ const REQUIRED_ROLES = {
   sale: ['receivable', 'sales_income', 'vat_debit'] as const,
   purchase: ['purchases', 'vat_credit', 'payable'] as const,
 };
-const ALL_ROLES = ['receivable', 'sales_income', 'vat_debit', 'purchases', 'vat_credit', 'payable'] as const;
+const ALL_ROLES = ['receivable', 'sales_income', 'vat_debit', 'purchases', 'vat_credit', 'payable', 'cash'] as const;
 type Role = (typeof ALL_ROLES)[number];
-type AccountMap = Partial<Record<Role, string>>;
+export type AccountMap = Partial<Record<Role, string>>;
 
 /**
  * Asientos automáticos desde documentos comerciales (F-2). Lee el documento, arma un asiento

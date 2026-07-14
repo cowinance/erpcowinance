@@ -354,6 +354,10 @@ export class DbService implements OnModuleInit {
     'system_settings',
     // F-3a: facturas (documento fiscal ligado a venta/compra).
     'invoices',
+    // F-3b: pagos + imputaciones + cuentas bancarias.
+    'payments',
+    'payment_allocations',
+    'bank_accounts',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -444,6 +448,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_system_settings ON "system_settings";');
     // F-3a: misma policy dispersa en invoices.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_invoices ON "invoices";');
+    // F-3b: mismas policies dispersas en pagos/imputaciones/bancos.
+    for (const t of ['payments', 'payment_allocations', 'bank_accounts']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

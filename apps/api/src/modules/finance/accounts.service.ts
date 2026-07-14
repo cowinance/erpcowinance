@@ -115,6 +115,40 @@ export class AccountsService {
     return this.softDelete('cost_centers', id);
   }
 
+  // ── Cuentas bancarias (F-3b) ────────────────────────────────────────────────
+  async listBankAccounts() {
+    return this.db.query(
+      `SELECT b.id, b.name, b.bank_name, b.account_number, b.currency, b.ledger_account_id, a.code AS ledger_account_code
+       FROM bank_accounts b LEFT JOIN chart_of_accounts a ON a.id = b.ledger_account_id
+       WHERE b.tenant_id=$1 AND b.deleted_at IS NULL ORDER BY b.name`,
+      [this.db.tenant],
+    );
+  }
+
+  async createBankAccount(body: any) {
+    const name = String(body?.name ?? '').trim();
+    if (!name) throw new BadRequestException({ code: 'finance.missing_name', title: 'name es obligatorio' });
+    const currency = String(body?.currency ?? '').trim();
+    if (!currency) throw new BadRequestException({ code: 'finance.missing_currency', title: 'currency es obligatorio' });
+    const t = this.db.tenant;
+    const companyId = await this.companyId();
+    const ledgerAccountId = body?.ledger_account_id ?? null;
+    if (ledgerAccountId) {
+      const a = await this.db.one<{ id: string; is_postable: boolean }>(`SELECT id, is_postable FROM chart_of_accounts WHERE id=$1 AND tenant_id=$2 AND company_id=$3 AND deleted_at IS NULL`, [ledgerAccountId, t, companyId]);
+      if (!a) throw new NotFoundException({ code: 'finance.account_not_found', title: 'Cuenta contable no encontrada' });
+      if (!a.is_postable) throw new BadRequestException({ code: 'finance.account_not_postable', title: 'La cuenta contable del banco debe ser imputable' });
+    }
+    return this.db.one(
+      `INSERT INTO bank_accounts (tenant_id, company_id, name, bank_name, account_number, currency, ledger_account_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, name, bank_name, account_number, currency, ledger_account_id`,
+      [t, companyId, name, body?.bank_name ?? null, body?.account_number ?? null, currency, ledgerAccountId, this.db.user],
+    );
+  }
+
+  async deleteBankAccount(id: string) {
+    return this.softDelete('bank_accounts', id);
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   private async softUpdate(table: string, id: string, sets: string[], params: unknown[], returning: string) {
     params.push(id);
