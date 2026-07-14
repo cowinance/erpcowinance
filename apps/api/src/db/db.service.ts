@@ -378,6 +378,8 @@ export class DbService implements OnModuleInit {
     // MQ-2: mantenimiento + combustible.
     'maintenance_records',
     'fuel_logs',
+    // G-1: partidas de semen (pajuelas).
+    'semen_batches',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -496,6 +498,8 @@ export class DbService implements OnModuleInit {
     for (const t of ['maintenance_records', 'fuel_logs']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
+    // G-1: misma policy dispersa en semen_batches.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_semen_batches ON "semen_batches";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
