@@ -18,3 +18,5 @@ export * from './finance';
 export * from './nutrition';
 // Servicios de dominio — RRHH: totales de liquidación de sueldos (H-2).
 export * from './hr';
+// Servicios de dominio — producción: rendimiento de faena (FA-1).
+export * from './production';

@@ -390,6 +390,8 @@ export class DbService implements OnModuleInit {
     // BG-1: presupuestos (extensión de Finanzas).
     'budgets',
     'budget_lines',
+    // FA-1: faena (res por animal).
+    'carcass_records',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -522,6 +524,8 @@ export class DbService implements OnModuleInit {
     for (const t of ['budgets', 'budget_lines']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
+    // FA-1: misma policy dispersa en carcass_records.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_carcass_records ON "carcass_records";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
