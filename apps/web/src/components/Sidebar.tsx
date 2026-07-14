@@ -56,7 +56,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
   {
     title: 'Negocio',
     items: [
-      { href: '/modulo/finanzas', label: 'Finanzas', icon: Landmark },
+      { href: '/finanzas', label: 'Finanzas', icon: Landmark },
       { href: '/comercial', label: 'Compras y Ventas', icon: ShoppingCart },
       { href: '/modulo/marketplace', label: 'Marketplace', icon: Store },
       { href: '/reportes', label: 'Reportes', icon: BarChart3 },
