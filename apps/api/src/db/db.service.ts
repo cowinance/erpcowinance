@@ -383,6 +383,8 @@ export class DbService implements OnModuleInit {
     // G-2b: embriones + evaluaciones genéticas.
     'embryos',
     'genetic_evaluations',
+    // T-1: guías de traslado de hacienda.
+    'movement_guides',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -507,6 +509,8 @@ export class DbService implements OnModuleInit {
     for (const t of ['embryos', 'genetic_evaluations']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
+    // T-1: misma policy dispersa en movement_guides.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_movement_guides ON "movement_guides";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

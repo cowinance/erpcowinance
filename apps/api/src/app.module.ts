@@ -26,6 +26,7 @@ import { HrModule } from './modules/hr/hr.module';
 import { AgricultureModule } from './modules/agriculture/agriculture.module';
 import { MachineryModule } from './modules/machinery/machinery.module';
 import { GeneticsModule } from './modules/genetics/genetics.module';
+import { TraceabilityModule } from './modules/traceability/traceability.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 
 /**
@@ -34,6 +35,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule],
+  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule],
 })
 export class AppModule {}
