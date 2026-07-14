@@ -380,6 +380,9 @@ export class DbService implements OnModuleInit {
     'fuel_logs',
     // G-1: partidas de semen (pajuelas).
     'semen_batches',
+    // G-2b: embriones + evaluaciones genéticas.
+    'embryos',
+    'genetic_evaluations',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -500,6 +503,10 @@ export class DbService implements OnModuleInit {
     }
     // G-1: misma policy dispersa en semen_batches.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_semen_batches ON "semen_batches";');
+    // G-2b: mismas policies dispersas en embriones y evaluaciones.
+    for (const t of ['embryos', 'genetic_evaluations']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

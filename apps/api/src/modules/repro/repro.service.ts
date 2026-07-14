@@ -6,6 +6,7 @@ import { insertAnimalEvent, requireAnimal } from '../../common/events';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { SemenService } from '../genetics/semen.service';
+import { EmbryosService } from '../genetics/embryos.service';
 
 @Injectable()
 export class ReproService {
@@ -14,6 +15,7 @@ export class ReproService {
     private readonly weanings: WeaningService,
     private readonly tasks: TaskService,
     private readonly semen: SemenService,
+    private readonly embryos: EmbryosService,
   ) {}
 
   /** Detección de celo. */
@@ -29,23 +31,25 @@ export class ReproService {
     return { ...row, tag: animal.tag };
   }
 
-  /** Servicio: monta natural o inseminación artificial. */
+  /** Servicio: monta natural, inseminación artificial o transferencia embrionaria. */
   async service(animalId: string, body: any) {
     const animal = await this.requireFemale(animalId);
-    const method = body?.method === 'natural' ? 'service_natural' : body?.method === 'ai' ? 'service_ai' : null;
+    const method =
+      body?.method === 'natural' ? 'service_natural' : body?.method === 'ai' ? 'service_ai' : body?.method === 'embryo_transfer' ? 'embryo_transfer' : null;
     if (!method)
-      throw new BadRequestException({ code: 'service.invalid_method', title: "method debe ser 'natural' o 'ai'" });
+      throw new BadRequestException({ code: 'service.invalid_method', title: "method debe ser 'natural', 'ai' o 'embryo_transfer'" });
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
-    // Consumo de pajuela (G-2a): solo en inseminación artificial con partida indicada. Se descuenta
-    // ANTES de registrar el servicio (regla única del saldo de semen); si no alcanza (403), no queda
-    // ni el servicio ni el consumo. En una request todo comparte la misma tx; el móvil/sync aún no
-    // envía semen_batch_id (paridad diferida).
+    // Consumo de pajuela/embrión (G-2): solo en AI con partida o en transferencia con embrión. Se
+    // descuenta ANTES de registrar el servicio (regla única del saldo); si no alcanza (403), no queda
+    // ni el servicio ni el consumo (en una request comparten la misma tx). Móvil/sync aún no lo envía.
     const semenBatchId = method === 'service_ai' && body?.semen_batch_id ? body.semen_batch_id : null;
+    const embryoId = method === 'embryo_transfer' && body?.embryo_id ? body.embryo_id : null;
     if (semenBatchId) await this.semen.adjustStraws(semenBatchId, -1, 'insemination');
+    if (embryoId) await this.embryos.adjustStraws(embryoId, -1, 'transfer');
     const row = await this.db.one<any>(
-      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, type, occurred_at`,
-      [this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, body?.notes ?? null, this.db.user],
+      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, type, occurred_at`,
+      [this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.notes ?? null, this.db.user],
     );
     await insertAnimalEvent(
       this.db,
