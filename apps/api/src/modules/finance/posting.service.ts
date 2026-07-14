@@ -11,7 +11,7 @@ const REQUIRED_ROLES = {
   sale: ['receivable', 'sales_income', 'vat_debit'] as const,
   purchase: ['purchases', 'vat_credit', 'payable'] as const,
 };
-const ALL_ROLES = ['receivable', 'sales_income', 'vat_debit', 'purchases', 'vat_credit', 'payable', 'cash'] as const;
+const ALL_ROLES = ['receivable', 'sales_income', 'vat_debit', 'purchases', 'vat_credit', 'payable', 'cash', 'salary_expense', 'salaries_payable', 'payroll_withholdings'] as const;
 type Role = (typeof ALL_ROLES)[number];
 export type AccountMap = Partial<Record<Role, string>>;
 

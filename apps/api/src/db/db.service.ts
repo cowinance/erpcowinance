@@ -365,6 +365,9 @@ export class DbService implements OnModuleInit {
     'feed_deliveries',
     // H-1: empleados (maestro de RRHH).
     'employees',
+    // H-2: liquidaciones de sueldos.
+    'payroll_runs',
+    'payroll_items',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -467,6 +470,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_feed_deliveries ON "feed_deliveries";');
     // H-1: misma policy dispersa en employees.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_employees ON "employees";');
+    // H-2: mismas policies dispersas en liquidaciones e ítems.
+    for (const t of ['payroll_runs', 'payroll_items']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

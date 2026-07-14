@@ -16,3 +16,5 @@ export * from './commerce';
 export * from './finance';
 // Servicios de dominio — nutrición: composición de raciones (N-1).
 export * from './nutrition';
+// Servicios de dominio — RRHH: totales de liquidación de sueldos (H-2).
+export * from './hr';

@@ -20,6 +20,6 @@ import { CommerceModule } from '../commerce/commerce.module';
   imports: [CommerceModule],
   controllers: [FinanceController, LedgerController, PostingController, InvoicesController, PaymentsController],
   providers: [AccountsService, LedgerService, PostingService, InvoicesService, PaymentsService],
-  exports: [AccountsService, LedgerService],
+  exports: [AccountsService, LedgerService, PostingService], // HR (H-2) reusa el mapa de posteo + el mayor.
 })
 export class FinanceModule {}
