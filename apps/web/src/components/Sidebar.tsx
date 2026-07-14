@@ -9,6 +9,7 @@ import {
   Map,
   CalendarCheck,
   Heart,
+  Dna,
   Stethoscope,
   Weight,
   Wheat,
@@ -48,6 +49,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
     title: 'Gestión',
     items: [
       { href: '/reproduccion', label: 'Reproducción', icon: Heart },
+      { href: '/genetica', label: 'Genética', icon: Dna },
       { href: '/sanidad', label: 'Sanidad', icon: Stethoscope },
       { href: '/produccion', label: 'Producción', icon: Weight },
       { href: '/nutricion', label: 'Nutrición', icon: Wheat },

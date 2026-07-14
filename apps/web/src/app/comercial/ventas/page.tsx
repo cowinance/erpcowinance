@@ -7,11 +7,11 @@ import { DocumentList } from '../DocumentList';
 /** Ventas (C-4): alta con líneas de ítem/animal + máquina de estados; entregar descuenta stock y
  *  marca el animal como vendido (C-3). */
 export default async function SalesPage() {
-  const [sales, partners, items, animals] = await Promise.all([
+  const [sales, partners, items, animalsRes] = await Promise.all([
     apiSafe<any[]>('/commerce/sales'),
     apiSafe<any[]>('/commerce/partners?type=customer'),
     apiSafe<any[]>('/inventory/items'),
-    apiSafe<any[]>('/animals?status=active'),
+    apiSafe<{ data: any[] }>('/animals?status=active'),
   ]);
   if (sales === null) {
     return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
@@ -25,7 +25,7 @@ export default async function SalesPage() {
       </div>
       <CommerceNav />
       <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
-        <DocumentForm kind="sale" partners={partners ?? []} items={items ?? []} warehouses={[]} animals={animals ?? []} />
+        <DocumentForm kind="sale" partners={partners ?? []} items={items ?? []} warehouses={[]} animals={animalsRes?.data ?? []} />
         <DocumentList kind="sale" docs={docs} />
       </div>
     </div>
