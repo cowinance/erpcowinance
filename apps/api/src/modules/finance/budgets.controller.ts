@@ -9,6 +9,10 @@ export class BudgetsController {
   list(@Query('status') status?: string) {
     return this.budgets.list(status);
   }
+  @Get(':id/vs-actual')
+  vsActual(@Param('id') id: string, @Query('by') by?: string, @Query('cost_center_id') costCenterId?: string) {
+    return this.budgets.vsActual(id, by === 'month', costCenterId);
+  }
   @Get(':id')
   get(@Param('id') id: string) {
     return this.budgets.get(id);

@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { normalizeByAccountType, computeBudgetVariance } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { AccountsService } from './accounts.service';
+import { LEDGER_COUNTS } from './ledger.service';
 
 const STATUSES = ['draft', 'approved', 'closed'];
 /** Transiciones permitidas del ciclo de un presupuesto. */
@@ -111,6 +113,80 @@ export class BudgetsService {
     const row = await this.db.one<{ id: string }>(`UPDATE budgets SET deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL RETURNING id`, [id, this.db.tenant]);
     if (!row) throw new NotFoundException({ code: 'finance.budget_not_found', title: 'Presupuesto no encontrado' });
     return { id, deleted: true };
+  }
+
+  /**
+   * Presupuesto vs REAL (BG-2). El real sale de los asientos POSTEADOS del año fiscal del presupuesto;
+   * se normaliza al sentido natural de la cuenta (`normalizeByAccountType`, regla única del dominio) —
+   * sin eso el comparativo mentiría el signo en las cuentas acreedoras. Incluye cuentas con real sin
+   * presupuesto (budget=0) y presupuestadas sin real (actual=0).
+   */
+  async vsActual(id: string, byMonth: boolean, costCenterId?: string) {
+    const t = this.db.tenant;
+    const budget = await this.db.one<{ id: string; fiscal_year: number }>(`SELECT id, fiscal_year FROM budgets WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!budget) throw new NotFoundException({ code: 'finance.budget_not_found', title: 'Presupuesto no encontrado' });
+    const from = `${budget.fiscal_year}-01-01`;
+    const to = `${budget.fiscal_year}-12-31`;
+    const monthCol = byMonth ? 'l.month' : '0';
+    const actualMonthCol = byMonth ? 'EXTRACT(MONTH FROM je.entry_date)::int' : '0';
+
+    const bParams: unknown[] = [id, t];
+    let bCc = '';
+    if (costCenterId) {
+      bParams.push(costCenterId);
+      bCc = ` AND l.cost_center_id = $${bParams.length}`;
+    }
+    const budgetRows = await this.db.query<{ account_id: string; code: string; name: string; type: string; month: number; budget: number }>(
+      `SELECT l.account_id, a.code, a.name, a.type, ${monthCol} AS month, SUM(l.amount)::float AS budget
+       FROM budget_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+       WHERE l.budget_id=$1 AND l.tenant_id=$2 AND l.deleted_at IS NULL${bCc}
+       GROUP BY l.account_id, a.code, a.name, a.type${byMonth ? ', l.month' : ''}`,
+      bParams,
+    );
+
+    const aParams: unknown[] = [t, from, to];
+    let aCc = '';
+    if (costCenterId) {
+      aParams.push(costCenterId);
+      aCc = ` AND jl.cost_center_id = $${aParams.length}`;
+    }
+    const actualRows = await this.db.query<{ account_id: string; code: string; name: string; type: string; month: number; debit: number; credit: number }>(
+      `SELECT jl.account_id, a.code, a.name, a.type, ${actualMonthCol} AS month,
+              SUM(jl.debit)::float AS debit, SUM(jl.credit)::float AS credit
+       FROM journal_lines jl
+       JOIN journal_entries je ON je.id = jl.entry_id AND je.deleted_at IS NULL AND ${LEDGER_COUNTS}
+       JOIN chart_of_accounts a ON a.id = jl.account_id
+       WHERE jl.tenant_id=$1 AND jl.deleted_at IS NULL AND je.entry_date BETWEEN $2 AND $3${aCc}
+       GROUP BY jl.account_id, a.code, a.name, a.type${byMonth ? ', EXTRACT(MONTH FROM je.entry_date)' : ''}`,
+      aParams,
+    );
+
+    // Unión por (cuenta, mes): una cuenta puede tener presupuesto sin real, o real sin presupuesto.
+    type Row = { account_id: string; account_code: string; account_name: string; account_type: string; month: number; budget: number; debit: number; credit: number };
+    const rows = new Map<string, Row>();
+    const keyOf = (accountId: string, month: number) => `${accountId}:${month}`;
+    for (const b of budgetRows) {
+      rows.set(keyOf(b.account_id, b.month), { account_id: b.account_id, account_code: b.code, account_name: b.name, account_type: b.type, month: b.month, budget: b.budget, debit: 0, credit: 0 });
+    }
+    for (const a of actualRows) {
+      const k = keyOf(a.account_id, a.month);
+      const existing = rows.get(k);
+      if (existing) {
+        existing.debit = a.debit;
+        existing.credit = a.credit;
+      } else {
+        rows.set(k, { account_id: a.account_id, account_code: a.code, account_name: a.name, account_type: a.type, month: a.month, budget: 0, debit: a.debit, credit: a.credit });
+      }
+    }
+
+    return [...rows.values()]
+      .map((r) => {
+        const actual = normalizeByAccountType(r.account_type, r.debit, r.credit);
+        const { variance, variance_pct } = computeBudgetVariance(r.budget, actual);
+        const base = { account_id: r.account_id, account_code: r.account_code, account_name: r.account_name, account_type: r.account_type, budget: r.budget, actual, variance, variance_pct };
+        return byMonth ? { ...base, month: r.month } : base;
+      })
+      .sort((x: any, y: any) => x.account_code.localeCompare(y.account_code) || (x.month ?? 0) - (y.month ?? 0));
   }
 
   private async getInTx(e: Q, id: string) {

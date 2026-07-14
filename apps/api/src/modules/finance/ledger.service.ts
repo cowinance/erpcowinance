@@ -3,6 +3,14 @@ import { validateJournalBalance, UnbalancedJournalError, JournalLineInput } from
 import { DbService, Q } from '../../db/db.service';
 
 /**
+ * REGLA ÚNICA de qué asientos cuentan para saldos y reportes (sumas y saldos, presupuesto vs real):
+ * todos menos los borradores. Un asiento `reversed` **sigue contando**: su contra-asiento (posted) lo
+ * cancela, así que el par neto es CERO. Excluirlo restaría la reversa dos veces (el original desaparece
+ * Y el contra-asiento resta). El alias de `journal_entries` debe ser `je`.
+ */
+export const LEDGER_COUNTS = "je.status <> 'draft'";
+
+/**
  * Finanzas — libro mayor (F-1): asientos de partida DOBLE. Regla única: el asiento balancea
  * (validateJournalBalance en @cowinance/domain). Se crea `posted` e INMUTABLE; corregir = reversa
  * (contra-asiento con débito/crédito invertidos + original a `reversed`). Postear exige un período
@@ -117,7 +125,7 @@ export class LedgerService {
               COALESCE(SUM(jl.credit),0)::float AS credit,
               (COALESCE(SUM(jl.debit),0) - COALESCE(SUM(jl.credit),0))::float AS balance
        FROM journal_lines jl
-       JOIN journal_entries je ON je.id = jl.entry_id AND je.deleted_at IS NULL AND je.status = 'posted'${dateFilter}
+       JOIN journal_entries je ON je.id = jl.entry_id AND je.deleted_at IS NULL AND ${LEDGER_COUNTS}${dateFilter}
        JOIN chart_of_accounts a ON a.id = jl.account_id
        WHERE jl.tenant_id = $1 AND jl.deleted_at IS NULL
        GROUP BY a.id, a.code, a.name, a.type

@@ -92,13 +92,14 @@ describe('finance — libro mayor', () => {
     await expect(ledger.reverseEntry(e.id, {})).rejects.toMatchObject({ status: 409 });
   });
 
-  it('sumas y saldos: por cuenta, débito/crédito/saldo, excluye reversados', async () => {
+  it('sumas y saldos: un asiento reversado y su contra-asiento se CANCELAN (neto cero)', async () => {
     const tb: any[] = await ledger.trialBalance('2030-01-01', '2030-12-31');
     const cajaRow = tb.find((r) => r.account_id === caja)!;
     const ventasRow = tb.find((r) => r.account_id === ventas)!;
-    // Asientos posteados vigentes: 121 (venta contado) + 200 (reversado, se excluye porque el original
-    // pasó a 'reversed' pero su contra-asiento SÍ postea): caja debe balancear contra ventas.
-    expect(cajaRow.debit).toBeGreaterThan(0);
-    expect(Number((cajaRow.debit - cajaRow.credit).toFixed(2))).toBe(-Number((ventasRow.debit - ventasRow.credit).toFixed(2)));
+    // Cuentan todos los asientos menos los borradores: el reversado (200) SIGUE contando y su
+    // contra-asiento (200) lo cancela → el par neto es 0. Queda solo la venta de 121.
+    // Excluir el reversado restaría la reversa dos veces (bug detectado en BG-2).
+    expect(Number((cajaRow.debit - cajaRow.credit).toFixed(2))).toBe(121);
+    expect(Number((ventasRow.credit - ventasRow.debit).toFixed(2))).toBe(121);
   });
 });
