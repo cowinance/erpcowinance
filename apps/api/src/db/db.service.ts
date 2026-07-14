@@ -385,6 +385,8 @@ export class DbService implements OnModuleInit {
     'genetic_evaluations',
     // T-1: guías de traslado de hacienda.
     'movement_guides',
+    // T-2: certificaciones (polimórficas).
+    'certifications',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -511,6 +513,8 @@ export class DbService implements OnModuleInit {
     }
     // T-1: misma policy dispersa en movement_guides.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_movement_guides ON "movement_guides";');
+    // T-2: misma policy dispersa en certifications.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_certifications ON "certifications";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

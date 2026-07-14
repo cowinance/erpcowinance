@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { TraceabilityController } from './traceability.controller';
+import { CertificationsController } from './certifications.controller';
 import { GuidesService } from './guides.service';
+import { CertificationsService } from './certifications.service';
 
 /**
- * Trazabilidad (T-1): guías de traslado de hacienda. Bounded context propio. Las certificaciones (T-2)
- * cuelgan del mismo módulo.
+ * Trazabilidad: guías de traslado (T-1) + certificaciones (T-2). Bounded context propio.
  */
 @Module({
-  controllers: [TraceabilityController],
-  providers: [GuidesService],
+  controllers: [TraceabilityController, CertificationsController],
+  providers: [GuidesService, CertificationsService],
 })
 export class TraceabilityModule {}
