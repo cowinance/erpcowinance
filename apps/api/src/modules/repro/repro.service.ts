@@ -5,6 +5,7 @@ import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
+import { SemenService } from '../genetics/semen.service';
 
 @Injectable()
 export class ReproService {
@@ -12,6 +13,7 @@ export class ReproService {
     private readonly db: DbService,
     private readonly weanings: WeaningService,
     private readonly tasks: TaskService,
+    private readonly semen: SemenService,
   ) {}
 
   /** Detección de celo. */
@@ -34,10 +36,16 @@ export class ReproService {
     if (!method)
       throw new BadRequestException({ code: 'service.invalid_method', title: "method debe ser 'natural' o 'ai'" });
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    // Consumo de pajuela (G-2a): solo en inseminación artificial con partida indicada. Se descuenta
+    // ANTES de registrar el servicio (regla única del saldo de semen); si no alcanza (403), no queda
+    // ni el servicio ni el consumo. En una request todo comparte la misma tx; el móvil/sync aún no
+    // envía semen_batch_id (paridad diferida).
+    const semenBatchId = method === 'service_ai' && body?.semen_batch_id ? body.semen_batch_id : null;
+    if (semenBatchId) await this.semen.adjustStraws(semenBatchId, -1, 'insemination');
     const row = await this.db.one<any>(
-      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, type, occurred_at`,
-      [this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, body?.notes ?? null, this.db.user],
+      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, type, occurred_at`,
+      [this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, body?.notes ?? null, this.db.user],
     );
     await insertAnimalEvent(
       this.db,

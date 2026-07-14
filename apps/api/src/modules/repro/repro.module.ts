@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TasksModule } from '../tasks/tasks.module';
+import { GeneticsModule } from '../genetics/genetics.module';
 import { ReproController } from './repro.controller';
 import { ReproService } from './repro.service';
 import { WeaningService } from './weaning.service';
@@ -10,7 +11,7 @@ import { PregnancySyncHandler } from './sync/pregnancy-sync.handler';
 import { WeaningSyncHandler } from './sync/weaning-sync.handler';
 
 @Module({
-  imports: [TasksModule],
+  imports: [TasksModule, GeneticsModule],
   controllers: [ReproController],
   providers: [ReproService, WeaningService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler, PregnancySyncHandler, WeaningSyncHandler],
 })
