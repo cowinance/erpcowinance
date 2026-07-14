@@ -9,6 +9,7 @@ const TABS: [string, string][] = [
   ['/finanzas/sumas-y-saldos', 'Sumas y saldos'],
   ['/finanzas/facturas', 'Facturas'],
   ['/finanzas/pagos', 'Pagos'],
+  ['/finanzas/presupuestos', 'Presupuestos'],
   ['/finanzas/config', 'Config'],
 ];
 
