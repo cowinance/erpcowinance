@@ -358,6 +358,9 @@ export class DbService implements OnModuleInit {
     'payments',
     'payment_allocations',
     'bank_accounts',
+    // N-1: raciones (fórmula + ingredientes de inventario).
+    'rations',
+    'ration_ingredients',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -450,6 +453,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_invoices ON "invoices";');
     // F-3b: mismas policies dispersas en pagos/imputaciones/bancos.
     for (const t of ['payments', 'payment_allocations', 'bank_accounts']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
+    // N-1: mismas policies dispersas en raciones e ingredientes.
+    for (const t of ['rations', 'ration_ingredients']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
     await this.db.exec(DbService.rlsMigration());

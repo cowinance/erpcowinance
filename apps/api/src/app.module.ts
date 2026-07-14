@@ -21,6 +21,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { CommerceModule } from './modules/commerce/commerce.module';
 import { FinanceModule } from './modules/finance/finance.module';
+import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 
 /**
@@ -29,6 +30,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule],
+  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule],
 })
 export class AppModule {}

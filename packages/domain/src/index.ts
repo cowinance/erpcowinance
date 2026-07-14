@@ -14,3 +14,5 @@ export * from './events';
 export * from './commerce';
 // Servicios de dominio — finanzas: partida doble balanceada (F-1/F-2).
 export * from './finance';
+// Servicios de dominio — nutrición: composición de raciones (N-1).
+export * from './nutrition';
