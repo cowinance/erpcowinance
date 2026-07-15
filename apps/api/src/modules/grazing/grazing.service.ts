@@ -79,6 +79,31 @@ export class GrazingService {
     return this.get(id);
   }
 
+  /**
+   * Ocupación (PG-2): estado actual de cada potrero. Si tiene un pastoreo abierto → ocupado, con el lote
+   * y los días transcurridos; si está libre → días de DESCANSO desde la última salida (clave para la
+   * recuperación del forraje). Los días los calcula SQL con CURRENT_DATE.
+   */
+  async occupancy() {
+    return this.db.query(
+      `SELECT p.id AS paddock_id, p.name AS paddock_name,
+              og.lot_id, l.name AS lot_name, og.entry_date::text AS entry_date,
+              CASE WHEN og.id IS NOT NULL THEN (CURRENT_DATE - og.entry_date) END AS days_grazing,
+              last.exit_date::text AS last_exit_date,
+              CASE WHEN og.id IS NULL AND last.exit_date IS NOT NULL THEN (CURRENT_DATE - last.exit_date) END AS days_rest,
+              (og.id IS NOT NULL) AS occupied
+       FROM paddocks p
+       LEFT JOIN LATERAL (SELECT g.id, g.lot_id, g.entry_date FROM grazing_records g
+                          WHERE g.paddock_id=p.id AND g.tenant_id=p.tenant_id AND g.exit_date IS NULL AND g.deleted_at IS NULL LIMIT 1) og ON true
+       LEFT JOIN lots l ON l.id = og.lot_id
+       LEFT JOIN LATERAL (SELECT max(g.exit_date) AS exit_date FROM grazing_records g
+                          WHERE g.paddock_id=p.id AND g.tenant_id=p.tenant_id AND g.deleted_at IS NULL) last ON true
+       WHERE p.tenant_id=$1 AND p.deleted_at IS NULL
+       ORDER BY (og.id IS NOT NULL) DESC, p.name`,
+      [this.db.tenant],
+    );
+  }
+
   async remove(id: string) {
     const row = await this.db.one<{ id: string }>(`UPDATE grazing_records SET deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL RETURNING id`, [id, this.db.tenant]);
     if (!row) throw new NotFoundException({ code: 'grazing.not_found', title: 'Pastoreo no encontrado' });

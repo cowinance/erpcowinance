@@ -5,6 +5,10 @@ import { GrazingService } from './grazing.service';
 export class GrazingController {
   constructor(private readonly grazing: GrazingService) {}
 
+  @Get('occupancy')
+  occupancy() {
+    return this.grazing.occupancy();
+  }
   @Get()
   list(@Query('paddock_id') paddockId?: string, @Query('lot_id') lotId?: string) {
     return this.grazing.list(paddockId, lotId);
