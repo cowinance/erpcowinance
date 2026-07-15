@@ -26,4 +26,22 @@ export class DairyController {
   recordProduction(@Body() body: any) {
     return this.dairy.recordProduction(body);
   }
+
+  @Get('deliveries')
+  listDeliveries() {
+    return this.dairy.listDeliveries();
+  }
+  @Post('deliveries')
+  recordDelivery(@Body() body: any) {
+    return this.dairy.recordDelivery(body);
+  }
+
+  @Get('quality-tests')
+  listQualityTests() {
+    return this.dairy.listQualityTests();
+  }
+  @Post('quality-tests')
+  recordQualityTest(@Body() body: any) {
+    return this.dairy.recordQualityTest(body);
+  }
 }

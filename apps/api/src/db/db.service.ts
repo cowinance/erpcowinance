@@ -397,6 +397,9 @@ export class DbService implements OnModuleInit {
     // TB-1: tambo — tanques + producción diaria por vaca.
     'milk_tanks',
     'milk_production_daily',
+    // TB-2: entregas de leche + tests de calidad.
+    'milk_deliveries',
+    'milk_quality_tests',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -535,6 +538,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_grazing_records ON "grazing_records";');
     // TB-1: mismas policies dispersas en tanques y producción diaria.
     for (const t of ['milk_tanks', 'milk_production_daily']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
+    // TB-2: mismas policies dispersas en entregas y tests de calidad.
+    for (const t of ['milk_deliveries', 'milk_quality_tests']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
     await this.db.exec(DbService.rlsMigration());
