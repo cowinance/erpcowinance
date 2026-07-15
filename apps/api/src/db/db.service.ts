@@ -392,6 +392,8 @@ export class DbService implements OnModuleInit {
     'budget_lines',
     // FA-1: faena (res por animal).
     'carcass_records',
+    // PG-1: pastoreo (rotación de lotes por potrero).
+    'grazing_records',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -526,6 +528,8 @@ export class DbService implements OnModuleInit {
     }
     // FA-1: misma policy dispersa en carcass_records.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_carcass_records ON "carcass_records";');
+    // PG-1: misma policy dispersa en grazing_records.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_grazing_records ON "grazing_records";');
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que

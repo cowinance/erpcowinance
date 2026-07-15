@@ -20,3 +20,5 @@ export * from './nutrition';
 export * from './hr';
 // Servicios de dominio — producción: rendimiento de faena (FA-1).
 export * from './production';
+// Servicios de dominio — tierra: métricas de pastoreo (PG-1).
+export * from './land';
