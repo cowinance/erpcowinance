@@ -26,6 +26,10 @@ export class DairyController {
   recordProduction(@Body() body: any) {
     return this.dairy.recordProduction(body);
   }
+  @Get('production/by-day')
+  productionByDay() {
+    return this.dairy.productionByDay();
+  }
 
   @Get('deliveries')
   listDeliveries() {

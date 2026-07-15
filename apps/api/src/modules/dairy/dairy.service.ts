@@ -81,6 +81,20 @@ export class DairyService {
     );
   }
 
+  /**
+   * Producción del tambo por día (TB-3): total de litros, n° de vacas en ordeñe y promedio por vaca.
+   * Deriva de milk_production_daily agregado por fecha.
+   */
+  async productionByDay() {
+    return this.db.query(
+      `SELECT production_date::text AS production_date, count(*)::int AS cows,
+              SUM(total_liters)::float AS total_liters, ROUND(AVG(total_liters), 2)::float AS avg_liters_per_cow
+       FROM milk_production_daily WHERE tenant_id=$1 AND deleted_at IS NULL
+       GROUP BY production_date ORDER BY production_date DESC LIMIT 60`,
+      [this.db.tenant],
+    );
+  }
+
   // ── Entregas (TB-2) ──────────────────────────────────────────────────────
   async listDeliveries() {
     const rows = await this.db.query<any>(
