@@ -394,6 +394,9 @@ export class DbService implements OnModuleInit {
     'carcass_records',
     // PG-1: pastoreo (rotación de lotes por potrero).
     'grazing_records',
+    // TB-1: tambo — tanques + producción diaria por vaca.
+    'milk_tanks',
+    'milk_production_daily',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -530,6 +533,10 @@ export class DbService implements OnModuleInit {
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_carcass_records ON "carcass_records";');
     // PG-1: misma policy dispersa en grazing_records.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_grazing_records ON "grazing_records";');
+    // TB-1: mismas policies dispersas en tanques y producción diaria.
+    for (const t of ['milk_tanks', 'milk_production_daily']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
     await this.db.exec(DbService.rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
