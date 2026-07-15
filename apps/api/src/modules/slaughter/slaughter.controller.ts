@@ -5,6 +5,10 @@ import { CarcassService } from './carcass.service';
 export class SlaughterController {
   constructor(private readonly carcasses: CarcassService) {}
 
+  @Get('analytics')
+  analytics(@Query('by') by?: string) {
+    return this.carcasses.analytics(by === 'sire' ? 'sire' : 'lot');
+  }
   @Get()
   list(@Query('sale_id') saleId?: string) {
     return this.carcasses.list(saleId);

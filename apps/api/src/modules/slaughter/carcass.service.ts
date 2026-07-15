@@ -90,6 +90,38 @@ export class CarcassService {
     return { ...row, live_weight_kg: liveKg };
   }
 
+  /**
+   * Análisis de faena (FA-2): rendimiento promedio + peso de res + n° de reses, agrupado por PADRE
+   * (`sire_id`) o por LOTE (`current_lot_id`). El AVG de SQL ignora los rendimientos `null` (reses sin
+   * pesada) — no ensucian el promedio, pero la res igual cuenta en `count` y en el peso. Cierra el loop
+   * con Genética: evaluar un toro por la res de su progenie.
+   */
+  async analytics(by: 'sire' | 'lot') {
+    const t = this.db.tenant;
+    if (by === 'sire') {
+      return this.db.query(
+        `SELECT a.sire_id AS group_id, st.value AS group_label, count(*)::int AS count,
+                ROUND(AVG(c.dressing_pct), 2)::float AS avg_dressing_pct,
+                ROUND(AVG(c.hot_carcass_weight_kg), 2)::float AS avg_carcass_kg
+         FROM carcass_records c JOIN animals a ON a.id = c.animal_id
+         LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) st ON true
+         WHERE c.tenant_id=$1 AND c.deleted_at IS NULL AND a.sire_id IS NOT NULL
+         GROUP BY a.sire_id, st.value ORDER BY avg_dressing_pct DESC NULLS LAST`,
+        [t],
+      );
+    }
+    return this.db.query(
+      `SELECT a.current_lot_id AS group_id, l.name AS group_label, count(*)::int AS count,
+              ROUND(AVG(c.dressing_pct), 2)::float AS avg_dressing_pct,
+              ROUND(AVG(c.hot_carcass_weight_kg), 2)::float AS avg_carcass_kg
+       FROM carcass_records c JOIN animals a ON a.id = c.animal_id
+       LEFT JOIN lots l ON l.id = a.current_lot_id
+       WHERE c.tenant_id=$1 AND c.deleted_at IS NULL AND a.current_lot_id IS NOT NULL
+       GROUP BY a.current_lot_id, l.name ORDER BY avg_dressing_pct DESC NULLS LAST`,
+      [t],
+    );
+  }
+
   async remove(id: string) {
     const row = await this.db.one<{ id: string }>(`UPDATE carcass_records SET deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL RETURNING id`, [id, this.db.tenant]);
     if (!row) throw new NotFoundException({ code: 'slaughter.carcass_not_found', title: 'Registro de faena no encontrado' });
