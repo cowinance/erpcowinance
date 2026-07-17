@@ -7,6 +7,7 @@ import { HealthPlansPanel } from './HealthPlansPanel';
 import { MedicationsPanel } from './MedicationsPanel';
 import { ClinicalCasesPanel } from './ClinicalCasesPanel';
 import { ControlPanel } from './ControlPanel';
+import { MassHealthPanel } from './MassHealthPanel';
 import { Clock, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
@@ -62,6 +63,8 @@ export default async function SanidadPage() {
       </div>
 
       <ControlPanel />
+
+      <MassHealthPanel products={products ?? []} lots={lots ?? []} categories={categories ?? []} />
 
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
         <div id="retiros" className="col-span-3 space-y-4 scroll-mt-4">

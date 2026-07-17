@@ -25,6 +25,21 @@ export class HealthController {
     return this.health.treat(body, idempotencyKey);
   }
 
+  @Post('vaccinations/bulk')
+  vaccinateMass(@Body() body: any, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.health.vaccinateMass(body, idempotencyKey);
+  }
+
+  @Post('treatments/bulk')
+  treatMass(@Body() body: any, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.health.treatMass(body, idempotencyKey);
+  }
+
+  @Get('health/coverage')
+  coverage(@Query('by') by?: string, @Query('product_id') productId?: string) {
+    return this.health.coverage(by === 'category' ? 'category' : 'lot', productId);
+  }
+
   @Post('health-events')
   healthEvent(@Body() body: any) {
     return this.health.healthEvent(body);

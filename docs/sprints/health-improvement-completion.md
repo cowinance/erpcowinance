@@ -133,6 +133,35 @@ puntaje + orden), vacuna renovada que NO cuenta como vencida, y agregado por lot
 tests** (695 → +4), 0 ciclos. Verificado en web: 6 KPIs; críticos 8 → filtro «Engorde» deja 4; sanidad
 por lote rankea 3 lotes; acceso rápido «Tratar» cambia la captura a la pestaña Tratamiento.
 
+---
+
+## Etapa 4 — Aplicación masiva + cobertura ✅
+
+Vacunar/tratar por objetivo, reusando los núcleos neutrales de la Etapa 1. Sin tablas nuevas.
+
+**Backend (`health.service`):**
+- `resolveTargetAnimals(body)`: traduce el objetivo (`all` / `lot` / `category` / `selection`) al conjunto
+  de animales ACTIVOS (selección = ids dados, se validan por animal).
+- `vaccinateMass` / `treatMass`: aplican la regla única por animal, idempotentes por
+  (`Idempotency-Key`, animal). **Robustas**: un animal no apto (muerto/vendido) se **saltea con motivo**
+  sin abortar el resto — el rechazo del dominio es un throw JS PREVIO a cualquier SQL, así la tx no se
+  corrompe (los errores SQL inesperados sí abortan: `skipReason` los re-lanza). Producto validado
+  fail-fast a nivel request (404/400). Resultado: `{resolved, applied, already, skipped, skipped_detail}`.
+- `coverage(by, productId)`: cobertura de vacunación por lote o categoría (cabezas activas vs vacunados
+  en 12 meses, opcionalmente de un producto), con porcentaje.
+- Endpoints: `POST /vaccinations/bulk`, `POST /treatments/bulk`, `GET /health/coverage`.
+
+**Web (`MassHealthPanel`):** toggle Vacunar/Tratar, objetivo (Todo el hato / Lote / Categoría) con
+estimación de cabezas, producto y parámetros, **confirmación** («vas a vacunar ~N animales de …, los no
+aptos se saltean») y resultado (aplicadas / ya estaban / salteadas). Tarjeta **Cobertura de vacunación**
+(por lote/categoría, filtro por producto, barras coloreadas por umbral).
+
+**Tests (6 nuevos):** `health-mass.integration` — masiva por lote e idempotencia por key; selección con
+un muerto → salteado con motivo, resto aplicado; objetivo categoría; producto de tipo incorrecto →
+400 fail-fast; selección vacía → 400; cobertura por lote. **705 tests** (699 → +6), 0 ciclos. Verificado
+en web: masiva a «Engorde Otoño» 9/9 aplicadas, replay idempotente (0 nuevas / 9 ya), cobertura 100 %.
+
 ### Siguiente
-**Etapa 4 — Aplicación masiva**: vacunar/tratar por lote, categoría, selección o todo el hato (reusa los
-núcleos neutrales con idempotencia por operación) + cobertura por lote/categoría/producto.
+**Etapa 5 — Inventario de medicamentos + costos**: conectar `products_veterinary.inventory_item_id`
+para descontar stock al aplicar (reusa `InventoryService.recordMovementInTx`), lote/vencimiento del
+frasco, alertas de stock bajo/vencido, y costo sanitario por aplicación/animal/lote.

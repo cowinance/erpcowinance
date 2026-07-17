@@ -100,6 +100,156 @@ export class HealthService {
     }
   }
 
+  /**
+   * Vacunación MASIVA por objetivo (todo el hato / lote / categoría / selección) — reusa la regla
+   * única `VaccinationService` por animal, idempotente por (Idempotency-Key, animal). Robusta: un
+   * animal no apto (muerto/vendido) se SALTEA con motivo, sin abortar la aplicación del resto (el
+   * rechazo del dominio es un throw JS previo a cualquier SQL → la tx no se corrompe).
+   */
+  async vaccinateMass(body: any, idempotencyKey?: string) {
+    if (!body?.product_id) throw new BadRequestException({ code: 'vaccination.missing_product', title: 'product_id es obligatorio' });
+    await this.requireDiagnosisOrProductValid('vaccine', body.product_id);
+    const appliedAt = body.applied_at ?? new Date().toISOString();
+    const nextDue = body.next_due_days
+      ? new Date(new Date(appliedAt).getTime() + Number(body.next_due_days) * 86400000).toISOString().slice(0, 10)
+      : (body.next_due_date ?? null);
+    const animals = await this.resolveTargetAnimals(body);
+    const baseKey = idempotencyKey ?? randomUUID();
+
+    return this.db.tx(async (q) => {
+      const applied: any[] = [];
+      const skipped: { animal_id: string; reason: string }[] = [];
+      for (const animalId of animals) {
+        try {
+          const r = await this.vaccinations.recordVaccination(q, {
+            animalId, productId: body.product_id, appliedAt, dose: body.dose ?? null, doseUnit: body.dose_unit ?? null,
+            batchNumber: body.batch_number ?? null, nextDueDate: nextDue, planId: body.plan_id ?? null,
+            actorUserId: this.db.user, origin: 'rest', vaccinationId: this.deriveId(baseKey, animalId),
+          });
+          applied.push(r);
+        } catch (e) {
+          skipped.push({ animal_id: animalId, reason: this.skipReason(e) });
+        }
+      }
+      return this.massResult(animals.length, applied, skipped);
+    });
+  }
+
+  /** Tratamiento MASIVO por objetivo — análogo a `vaccinateMass`, reusa `TreatmentService`. */
+  async treatMass(body: any, idempotencyKey?: string) {
+    if (!body?.product_id) throw new BadRequestException({ code: 'treatment.missing_product', title: 'product_id es obligatorio' });
+    await this.requireDiagnosisOrProductValid(null, body.product_id);
+    if (body.diagnosis_id) await this.requireDiagnosis(body.diagnosis_id);
+    const animals = await this.resolveTargetAnimals(body);
+    const baseKey = idempotencyKey ?? randomUUID();
+
+    return this.db.tx(async (q) => {
+      const applied: any[] = [];
+      const skipped: { animal_id: string; reason: string }[] = [];
+      for (const animalId of animals) {
+        try {
+          const r = await this.treatments.recordTreatment(q, {
+            animalId, productId: body.product_id, appliedAt: body.applied_at, dose: body.dose ?? null,
+            doseUnit: body.dose_unit ?? null, route: body.route ?? null, diagnosisId: body.diagnosis_id ?? null,
+            cost: body.cost ?? null, notes: body.notes ?? null, actorUserId: this.db.user, origin: 'rest',
+            treatmentId: this.deriveId(baseKey, animalId),
+          });
+          applied.push(r);
+        } catch (e) {
+          skipped.push({ animal_id: animalId, reason: this.skipReason(e) });
+        }
+      }
+      return this.massResult(animals.length, applied, skipped);
+    });
+  }
+
+  /**
+   * Cobertura de vacunación agrupada por lote o categoría (opcional: de un producto específico).
+   * Cabezas activas vs animales con al menos una vacunación (del producto, si se pide) en 12 meses.
+   */
+  async coverage(by: 'lot' | 'category' = 'lot', productId?: string) {
+    const t = this.db.tenant;
+    const args: unknown[] = [t];
+    let prodFilter = '';
+    if (productId) {
+      args.push(productId);
+      prodFilter = `AND v.product_id = $${args.length}`;
+    }
+    const groupSel = by === 'category'
+      ? `c.id AS group_id, c.name AS group_name`
+      : `l.id AS group_id, l.name AS group_name`;
+    const groupJoin = by === 'category'
+      ? `JOIN animal_categories c ON c.id = a.category_id`
+      : `JOIN lots l ON l.id = a.current_lot_id AND l.deleted_at IS NULL`;
+    const groupBy = by === 'category' ? `c.id, c.name` : `l.id, l.name`;
+    return this.db.query(
+      `SELECT ${groupSel},
+              count(DISTINCT a.id)::int AS head,
+              count(DISTINCT a.id) FILTER (WHERE v.animal_id IS NOT NULL)::int AS vaccinated,
+              round(count(DISTINCT a.id) FILTER (WHERE v.animal_id IS NOT NULL)::numeric
+                    / NULLIF(count(DISTINCT a.id), 0) * 100, 1)::float AS pct
+       FROM animals a
+       ${groupJoin}
+       LEFT JOIN vaccinations v ON v.animal_id = a.id AND v.deleted_at IS NULL
+             AND v.applied_at >= now() - interval '12 months' ${prodFilter}
+       WHERE a.tenant_id = $1 AND a.status = 'active' AND a.deleted_at IS NULL
+       GROUP BY ${groupBy}
+       ORDER BY pct ASC NULLS FIRST, head DESC`,
+      args,
+    );
+  }
+
+  /** Resuelve el objetivo (all/lot/category/selection) al conjunto de ids de animales a aplicar. */
+  private async resolveTargetAnimals(body: any): Promise<string[]> {
+    const scope = body?.scope ?? (body?.animal_ids ? 'selection' : 'all');
+    if (scope === 'selection') {
+      const ids: string[] = Array.isArray(body?.animal_ids) ? body.animal_ids : [];
+      if (!ids.length) throw new BadRequestException({ code: 'mass.empty_selection', title: 'La selección de animales está vacía' });
+      return ids;
+    }
+    const args: unknown[] = [this.db.tenant];
+    const where = [`a.tenant_id = $1`, `a.status = 'active'`, `a.deleted_at IS NULL`];
+    if (scope === 'lot') {
+      if (!body?.lot_id) throw new BadRequestException({ code: 'mass.missing_lot', title: 'lot_id es obligatorio para el objetivo lote' });
+      args.push(body.lot_id);
+      where.push(`a.current_lot_id = $${args.length}`);
+    } else if (scope === 'category') {
+      if (!body?.category_code) throw new BadRequestException({ code: 'mass.missing_category', title: 'category_code es obligatorio para el objetivo categoría' });
+      args.push(body.category_code);
+      where.push(`c.code = $${args.length}`);
+    } else if (scope !== 'all') {
+      throw new BadRequestException({ code: 'mass.invalid_scope', title: `Objetivo inválido: ${scope}` });
+    }
+    const rows = await this.db.query<{ id: string }>(
+      `SELECT a.id FROM animals a LEFT JOIN animal_categories c ON c.id = a.category_id WHERE ${where.join(' AND ')}`,
+      args,
+    );
+    return rows.map((r) => r.id);
+  }
+
+  private massResult(resolved: number, applied: any[], skipped: { animal_id: string; reason: string }[]) {
+    const newlyApplied = applied.filter((r) => r.recorded).length;
+    const already = applied.filter((r) => r.alreadyRecorded).length;
+    return { resolved, applied: newlyApplied, already, skipped: skipped.length, skipped_detail: skipped };
+  }
+
+  private skipReason(e: unknown): string {
+    if (e instanceof HealthApplicationError || e instanceof HealthApplicationLookupError) return e.code;
+    throw e; // errores inesperados (SQL, etc.) NO se tragan: abortan la aplicación
+  }
+
+  /** Valida que el producto exista y (si se pide) sea del tipo esperado — fail-fast a nivel request. */
+  private async requireDiagnosisOrProductValid(expectedType: string | null, productId: string) {
+    const p = await this.db.one<{ id: string; name: string; type: string }>(
+      `SELECT id, name, type FROM products_veterinary WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [productId, this.db.tenant],
+    );
+    if (!p) throw new NotFoundException({ code: 'product.not_found', title: 'Producto veterinario no encontrado' });
+    if (expectedType && p.type !== expectedType)
+      throw new BadRequestException({ code: 'product.wrong_type', title: `El producto '${p.name}' no es del tipo requerido (${expectedType})` });
+    return p;
+  }
+
   /** id determinista uuid v5-like a partir de (key, animal), sin dependencias externas. */
   private deriveId(baseKey: string, animalId: string): string {
     const h = createHash('sha1').update(`${baseKey}:${animalId}`).digest('hex');
