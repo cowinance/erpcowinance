@@ -10,27 +10,18 @@ export default async function MapaPage() {
   ]);
   if (!paddocks) return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
 
-  const withGeometry = paddocks.filter((p) => p.boundary?.coordinates?.length);
-
   return (
     <div>
       <div className="mb-5">
         <h1 className="text-xl font-semibold">Potreros y Mapa</h1>
         <p className="mt-0.5 text-body text-ink-3">
           {farms?.[0]?.name ?? 'Finca'} · {paddocks.length} potreros ·{' '}
-          {paddocks.reduce((s, p) => s + (p.area_ha ?? 0), 0).toLocaleString('es-AR')} ha · mapa esquemático (el
-          dibujo sobre cartografía real llega en Fase 2)
+          {paddocks.reduce((s, p) => s + (p.area_ha ?? 0), 0).toLocaleString('es-AR')} ha · dibujá y editá potreros
+          sobre el mapa (en producción, sobre cartografía real)
         </p>
       </div>
 
-      {withGeometry.length === 0 ? (
-        <EmptyState
-          title="Sin potreros dibujados todavía"
-          body="Los potreros de esta finca no tienen geometría cargada. El editor de dibujo con snapping sobre tiles vectoriales llega con el módulo completo de Mapas (Fase 2)."
-        />
-      ) : (
-        <FarmMap paddocks={paddocks} lots={lots ?? []} />
-      )}
+      <FarmMap paddocks={paddocks} lots={lots ?? []} />
     </div>
   );
 }

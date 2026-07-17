@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Post, Put } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { LandService } from './land.service';
 
@@ -16,6 +16,16 @@ export class LandController {
   @Post('paddocks')
   createPaddock(@Body() body: any) {
     return this.land.createPaddock(body);
+  }
+
+  @Put('paddocks/:id')
+  updatePaddock(@Param('id') id: string, @Body() body: any) {
+    return this.land.updatePaddock(id, body);
+  }
+
+  @Delete('paddocks/:id')
+  deletePaddock(@Param('id') id: string) {
+    return this.land.deletePaddock(id);
   }
 
   @Post('paddocks/:id/move-lot')

@@ -26,3 +26,5 @@ export * from './land';
 export * from './config';
 // Documentos — validación del DMS formal (A6).
 export * from './documents';
+// Geo — geometría de potreros: validación de polígono y superficie (D3).
+export * from './geo';

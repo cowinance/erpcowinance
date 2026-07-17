@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { InvalidPolygonError, polygonAreaHa, toPolygonGeoJSON } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { MovementService, type MovementIntent } from './movement.service';
 
@@ -36,17 +37,83 @@ export class LandService {
   }
 
   /** Alta mínima de un potrero (name + finca por defecto; area/pastura opcionales). */
+  /**
+   * Normaliza la geometría dibujada: valida el polígono y DERIVA la superficie (medición, regla única
+   * `polygonAreaHa`). Devuelve el GeoJSON a persistir en `boundary` y el área en ha. Sin geometría,
+   * conserva el `area_ha` provisto (potrero sin mapear todavía).
+   */
+  private geometry(body: any): { boundary: string | null; areaHa: number | null } {
+    if (body?.boundary == null) return { boundary: null, areaHa: body?.area_ha != null ? Number(body.area_ha) : null };
+    try {
+      const geo = toPolygonGeoJSON(body.boundary);
+      return { boundary: JSON.stringify(geo), areaHa: polygonAreaHa(geo) };
+    } catch (e) {
+      if (e instanceof InvalidPolygonError) throw new BadRequestException({ code: 'paddock.invalid_boundary', title: e.reason });
+      throw e;
+    }
+  }
+
   async createPaddock(body: any) {
     const name = String(body?.name ?? '').trim();
     if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name es obligatorio' });
     const t = this.db.tenant;
     const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
     if (!farm) throw new BadRequestException({ code: 'paddock.no_farm', title: 'No hay finca para el potrero' });
+    const { boundary, areaHa } = this.geometry(body);
     return this.db.one(
-      `INSERT INTO paddocks (tenant_id, farm_id, name, area_ha, pasture_type, created_by) VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id, name, area_ha::float AS area_ha, pasture_type`,
-      [t, farm, name, body?.area_ha ?? null, body?.pasture_type ?? null, this.db.user],
+      `INSERT INTO paddocks (tenant_id, farm_id, name, boundary, area_ha, pasture_type, created_by) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
+       RETURNING id, name, boundary, area_ha::float AS area_ha, pasture_type`,
+      [t, farm, name, boundary, areaHa, body?.pasture_type ?? null, this.db.user],
     );
+  }
+
+  /** Edita nombre, tipo de pastura y/o forma. Al cambiar la forma, re-deriva la superficie. */
+  async updatePaddock(id: string, body: any) {
+    const t = this.db.tenant;
+    const existing = await this.db.one<any>(`SELECT id FROM paddocks WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!existing) throw new NotFoundException({ code: 'paddock.not_found', title: 'Potrero no encontrado' });
+    const sets: string[] = [];
+    const args: any[] = [id, t];
+    if (body?.name != null) {
+      const name = String(body.name).trim();
+      if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name no puede quedar vacío' });
+      args.push(name);
+      sets.push(`name=$${args.length}`);
+    }
+    if (body?.pasture_type !== undefined) {
+      args.push(body.pasture_type || null);
+      sets.push(`pasture_type=$${args.length}`);
+    }
+    if (body?.boundary !== undefined) {
+      const { boundary, areaHa } = this.geometry(body);
+      args.push(boundary);
+      sets.push(`boundary=$${args.length}::jsonb`);
+      args.push(areaHa);
+      sets.push(`area_ha=$${args.length}`);
+    } else if (body?.area_ha !== undefined) {
+      args.push(body.area_ha != null ? Number(body.area_ha) : null);
+      sets.push(`area_ha=$${args.length}`);
+    }
+    if (sets.length === 0) throw new BadRequestException({ code: 'paddock.no_changes', title: 'Nada para actualizar' });
+    return this.db.one(
+      `UPDATE paddocks SET ${sets.join(', ')}, updated_at=now() WHERE id=$1 AND tenant_id=$2
+       RETURNING id, name, boundary, area_ha::float AS area_ha, pasture_type`,
+      args,
+    );
+  }
+
+  /** Baja de un potrero. Se bloquea si tiene animales activos (moverlos primero). */
+  async deletePaddock(id: string) {
+    const t = this.db.tenant;
+    const paddock = await this.db.one<any>(`SELECT id FROM paddocks WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!paddock) throw new NotFoundException({ code: 'paddock.not_found', title: 'Potrero no encontrado' });
+    const occ = await this.db.one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM animals WHERE current_paddock_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`,
+      [id, t],
+    );
+    if ((occ?.n ?? 0) > 0) throw new ConflictException({ code: 'paddock.occupied', title: `El potrero tiene ${occ!.n} animales; movelos antes de borrarlo` });
+    await this.db.query(`UPDATE paddocks SET is_active=false, deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2`, [id, t]);
+    return { id, deleted: true };
   }
 
   /**
