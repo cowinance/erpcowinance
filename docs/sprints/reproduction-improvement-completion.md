@@ -85,6 +85,30 @@ duplicar), servicio grupal por lote, celos sin servir. **748 tests** (742 → +6
 web: servicio idempotente (`already`), dudoso (recontrol +14 d), aborto (preñez cerrada), parto con crías
 + tareas «Revisión postparto»/«Preparar para servicio», celos sin servir.
 
+---
+
+## Etapa 3 — Dashboard reproductivo operativo ✅
+
+Sin backend nuevo de reglas: un endpoint que COMPONE lo existente.
+
+**Backend (`repro.service`):** `reproDashboard()` (`GET /reproduction/dashboard`) compone en UNA llamada
+KPIs + estado del rodeo (`herdStatus`) + próximas a preparar (`toPrepare`) + partos próximos
+(`upcomingCalvings`) + protocolos activos (`listAssignments`). Los buckets **diagnóstico pendiente** y
+**abiertas críticas** (open + repetidoras) se DERIVAN de la regla única `computeReproStatus` (filtrando
+las filas del estado del rodeo) — sin recomputar.
+
+**Web (`ReproDashboard`):** vista «qué tengo que hacer» con **accesos rápidos** (Celo / Servicio /
+Diagnosticar / Parto / Protocolos) que enfocan la captura en la pestaña correcta (evento DOM desacoplado
+`repro:capture` que escucha `ReproCapture`) y **buckets** accionables (diagnóstico pendiente, abiertas
+críticas, partos próximos, próximas a preparar, protocolos activos). La página se reorganizó: KPIs →
+dashboard → captura (con foco) + celos sin servir → estado del rodeo (tabla filtrable). Se retiró el
+panel «Próximos partos» y `ToPreparePanel` sueltos (ahora dentro del dashboard).
+
+**Tests (1 nuevo):** caso de `herd-status.integration` que verifica que el dashboard compone los buckets
+(diagnóstico pendiente + abiertas críticas + KPIs). **749 tests** (748 → +1), 0 ciclos. Verificado en
+web: dashboard con KPIs, accesos rápidos y buckets con datos reales (diagnóstico pendiente 1, abiertas
+críticas 3, partos próximos 4); el acceso rápido «Diagnosticar» enfoca la pestaña de diagnóstico.
+
 ### Siguiente
-**Etapa 3 — Dashboard reproductivo operativo:** próximas a preparar, diagnóstico pendiente, partos
-próximos, abiertas críticas, protocolos activos, KPIs principales, acciones rápidas y filtros.
+**Etapa 4 — Protocolos completos:** pasos que al completarse registran eventos reales (tratamiento
+hormonal, servicio, diagnóstico), aplicar a categoría/selección (no solo lote), y progreso por protocolo.

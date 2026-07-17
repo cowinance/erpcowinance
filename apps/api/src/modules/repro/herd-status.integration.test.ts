@@ -119,4 +119,16 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
     expect(codes.has('open_too_long')).toBe(true);
     expect(codes.has('vwp_ready')).toBe(true); // hay vacas ready_for_service por parto
   });
+
+  it('dashboard compone buckets: diagnóstico pendiente + abiertas críticas + KPIs', async () => {
+    const vDiag = await mkAnimal(vaca); await service(vDiag, 50); // diagnóstico pendiente
+    const vOpen2 = await mkAnimal(vaca); await calving(vOpen2, 140); // abierta crítica
+    const d: any = await repro.reproDashboard();
+    expect(d.kpis).toBeTruthy();
+    expect(d.counts.total).toBeGreaterThan(0);
+    expect(d.diagnosis_pending.some((r: any) => r.animal_id === vDiag)).toBe(true);
+    expect(d.critical_open.some((r: any) => r.animal_id === vOpen2)).toBe(true);
+    expect(Array.isArray(d.upcoming_calvings)).toBe(true);
+    expect(Array.isArray(d.active_protocols)).toBe(true);
+  });
 });

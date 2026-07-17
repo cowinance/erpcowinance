@@ -4,16 +4,12 @@ import { Card, CardTitle, EmptyState, KpiCard, TagMono } from '@/components/ui';
 import { formatDate } from '@/lib/format';
 import { ReproCapture } from './ReproCapture';
 import { HerdStatus } from './HerdStatus';
-import { ToPreparePanel } from './ToPreparePanel';
 import { HeatsNotServedPanel } from './HeatsNotServedPanel';
-import { Baby } from 'lucide-react';
-
-const DIAG_METHOD: Record<string, string> = { ultrasound: 'Ecografía', palpation: 'Palpación', blood: 'Sangre', visual: 'Visual' };
+import { ReproDashboard } from './ReproDashboard';
 
 export default async function ReproPage() {
-  const [kpis, upcoming, bullsRes, lots] = await Promise.all([
+  const [kpis, bullsRes, lots] = await Promise.all([
     apiSafe<any>('/reproduction/kpis'),
-    apiSafe<any[]>('/reproduction/upcoming-calvings?days=400'),
     apiSafe<any>('/animals?category=toro&limit=50'),
     apiSafe<any[]>('/lots'),
   ]);
@@ -45,60 +41,18 @@ export default async function ReproPage() {
         />
       </div>
 
+      <ReproDashboard />
+
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
-        <Card className="col-span-3">
-          <CardTitle action={<span className="text-label text-ink-3">{(upcoming ?? []).length} preñeces abiertas</span>}>
-            Próximos partos
-          </CardTitle>
-          {(upcoming ?? []).length === 0 ? (
-            <p className="py-5 text-center text-body text-ink-3">Sin preñeces abiertas.</p>
-          ) : (
-            <table className="w-full text-body">
-              <thead>
-                <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
-                  <th>Caravana</th>
-                  <th>Nombre</th>
-                  <th>Diagnóstico</th>
-                  <th>Método</th>
-                  <th className="text-right">Parto probable</th>
-                  <th className="pr-1 text-right">Faltan</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(upcoming ?? []).map((p: any) => (
-                  <tr key={p.id} className="h-9 border-b border-subtle last:border-0 hover:bg-sunken">
-                    <td>
-                      <Link href={`/animales/${p.animal_id}`} className="font-mono font-medium text-brand hover:underline">
-                        {p.tag ?? '—'}
-                      </Link>
-                    </td>
-                    <td className="text-ink-2">{p.name ?? '—'}</td>
-                    <td className="text-ink-2">{formatDate(p.diagnosis_date)}</td>
-                    <td className="text-ink-2">{DIAG_METHOD[p.method] ?? p.method ?? '—'}</td>
-                    <td className="tnum text-right font-medium">{formatDate(p.expected_due_date)}</td>
-                    <td className="pr-1 text-right">
-                      <span
-                        className={`inline-flex items-center gap-1 font-medium ${p.days_until <= 30 ? 'text-warning' : 'text-ink-2'}`}
-                      >
-                        <Baby size={12} /> {p.days_until} d
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        <Card className="col-span-2 self-start max-lg:col-span-3">
-          <CardTitle>Captura rápida</CardTitle>
-          <ReproCapture bulls={bullsRes?.data ?? []} />
-        </Card>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-4 max-lg:grid-cols-1">
-        <ToPreparePanel />
-        <HeatsNotServedPanel />
+        <div id="captura-repro" className="col-span-3 scroll-mt-4">
+          <Card>
+            <CardTitle>Captura rápida</CardTitle>
+            <ReproCapture bulls={bullsRes?.data ?? []} />
+          </Card>
+        </div>
+        <div className="col-span-2 self-start max-lg:col-span-5">
+          <HeatsNotServedPanel />
+        </div>
       </div>
 
       <div className="mt-4">

@@ -371,6 +371,37 @@ export class ReproService {
   }
 
   /**
+   * Dashboard reproductivo operativo (E3): «qué tengo que hacer» en una sola llamada. COMPONE los
+   * métodos existentes (KPIs, estado del rodeo, próximas a preparar, partos próximos, protocolos
+   * activos) — sin duplicar reglas. El estado (diagnóstico pendiente / abiertas críticas) se deriva
+   * de la regla única `computeReproStatus` vía `herdStatus`.
+   */
+  async reproDashboard() {
+    const [kpis, herd, prepare, calvings, assignments] = await Promise.all([
+      this.kpis(),
+      this.herdStatus(),
+      this.toPrepare(14),
+      this.upcomingCalvings(30),
+      this.listAssignments(),
+    ]);
+    const diagnosisPending = herd.rows.filter((r) => r.status === 'diagnosis_pending')
+      .sort((a, b) => (b.days_since_service ?? 0) - (a.days_since_service ?? 0)).slice(0, 50);
+    const criticalOpen = herd.rows.filter((r) => r.status === 'open' || r.status === 'repeat_breeder')
+      .sort((a, b) => (b.days_open ?? 0) - (a.days_open ?? 0)).slice(0, 50);
+    const activeProtocols = (assignments as any[]).filter((a) => a.status === 'active');
+    return {
+      kpis,
+      counts: herd.counts,
+      config: herd.config,
+      diagnosis_pending: diagnosisPending,
+      critical_open: criticalOpen,
+      upcoming_calvings: calvings,
+      to_prepare: prepare.rows,
+      active_protocols: activeProtocols,
+    };
+  }
+
+  /**
    * Configuración reproductiva del rodeo: días voluntarios de espera y umbrales, leídos de las reglas
    * de alerta configurables (overrides por tenant) con fallback a `DEFAULT_REPRO_CONFIG` del dominio.
    */

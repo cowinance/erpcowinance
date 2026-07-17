@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, useSubmit } from '@/components/capture';
 import { Button } from '@/components/Button';
@@ -14,6 +14,16 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
   const [animal, setAnimal] = useState<PickedAnimal | null>(null);
   const [method, setMethod] = useState('ai');
   const { state, message, submit } = useSubmit();
+
+  // Accesos rápidos del dashboard: enfocan una pestaña concreta de la captura.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const t = (e as CustomEvent).detail;
+      if (typeof t === 'string') setTab(t);
+    };
+    window.addEventListener('repro:capture', onFocus);
+    return () => window.removeEventListener('repro:capture', onFocus);
+  }, []);
 
   async function handle(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

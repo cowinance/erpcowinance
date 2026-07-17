@@ -60,6 +60,11 @@ export class ReproController {
     return this.repro.kpis();
   }
 
+  @Get('reproduction/dashboard')
+  dashboard() {
+    return this.repro.reproDashboard();
+  }
+
   @Get('reproduction/herd-status')
   herdStatus(@Query('lot_id') lotId?: string) {
     return this.repro.herdStatus(lotId);
