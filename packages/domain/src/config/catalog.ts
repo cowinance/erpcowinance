@@ -21,6 +21,15 @@ export function normalizeCatalogCode(code: unknown): string {
   return c;
 }
 
+/** Umbral en días de una regla de alerta: entero 1..365. */
+export function assertThresholdDays(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 365) {
+    throw new InvalidCatalogEntryError('El umbral debe ser un entero entre 1 y 365 días');
+  }
+  return n;
+}
+
 export const UNIT_SYSTEMS = ['metric', 'imperial'] as const;
 export type UnitSystem = (typeof UNIT_SYSTEMS)[number];
 

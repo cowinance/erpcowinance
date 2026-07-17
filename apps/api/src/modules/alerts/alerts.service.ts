@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -16,15 +17,18 @@ interface RuleDef {
   name: string;
   category: 'health' | 'reproduction' | 'task';
   severity: 'info' | 'warning' | 'critical';
+  /** Umbral configurable en días (ventana de anticipación / antigüedad). Ausente = regla sin parámetro. */
+  defaultDays?: number;
+  paramLabel?: string;
 }
 
 const RULES: RuleDef[] = [
   { code: 'withdrawal_active', name: 'Retiro activo', category: 'health', severity: 'warning' },
-  { code: 'vaccination_due', name: 'Vacunación programada', category: 'health', severity: 'info' },
-  { code: 'health_task_due', name: 'Tarea sanitaria programada', category: 'health', severity: 'info' },
-  { code: 'calving_soon', name: 'Parto próximo', category: 'reproduction', severity: 'info' },
+  { code: 'vaccination_due', name: 'Vacunación programada', category: 'health', severity: 'info', defaultDays: 30, paramLabel: 'Días de anticipación' },
+  { code: 'health_task_due', name: 'Tarea sanitaria programada', category: 'health', severity: 'info', defaultDays: 15, paramLabel: 'Días de anticipación' },
+  { code: 'calving_soon', name: 'Parto próximo', category: 'reproduction', severity: 'info', defaultDays: 15, paramLabel: 'Días de anticipación' },
   { code: 'pregnancy_overdue', name: 'Preñez vencida', category: 'reproduction', severity: 'warning' },
-  { code: 'sync_device_stale', name: 'Dispositivo sin sincronizar', category: 'task', severity: 'info' },
+  { code: 'sync_device_stale', name: 'Dispositivo sin sincronizar', category: 'task', severity: 'info', defaultDays: 7, paramLabel: 'Días sin sincronizar' },
   { code: 'sync_conflicts', name: 'Conflictos de sincronización', category: 'task', severity: 'warning' },
 ];
 
@@ -249,11 +253,79 @@ export class AlertsService {
     return map;
   }
 
+  /**
+   * Config declarativa de reglas por tenant: estado (activa/inactiva) y umbral en días, con fallback al
+   * default del registro cuando no hay override guardado. `computeDesired` la consulta para saltear
+   * reglas apagadas y usar el umbral configurado — el motor deja de ser hardcodeado.
+   */
+  private async ruleConfig(): Promise<Map<string, { active: boolean; days: number }>> {
+    const rows = await this.db.query<any>(
+      `SELECT condition->>'code' AS code, is_active, (condition->>'days')::int AS days FROM alert_rules WHERE tenant_id=$1 AND deleted_at IS NULL`,
+      [this.db.tenant],
+    );
+    const byCode = new Map(rows.map((r) => [r.code, r]));
+    const cfg = new Map<string, { active: boolean; days: number }>();
+    for (const r of RULES) {
+      const stored = byCode.get(r.code);
+      cfg.set(r.code, { active: stored ? stored.is_active : true, days: stored?.days ?? r.defaultDays ?? 0 });
+    }
+    return cfg;
+  }
+
+  /** Reglas con su metadato + config actual del tenant (para la pantalla de Configuración). */
+  async listRules() {
+    await this.ensureRules();
+    const cfg = await this.ruleConfig();
+    return RULES.map((r) => ({
+      code: r.code,
+      name: r.name,
+      category: r.category,
+      severity: r.severity,
+      is_active: cfg.get(r.code)!.active,
+      days: r.defaultDays != null ? cfg.get(r.code)!.days : null,
+      param_label: r.paramLabel ?? null,
+      default_days: r.defaultDays ?? null,
+    }));
+  }
+
+  /** Cambia el estado y/o el umbral de una regla conocida (upsert en alert_rules por code). */
+  async updateRule(code: string, body: { is_active?: unknown; days?: unknown }) {
+    const rule = RULES.find((r) => r.code === code);
+    if (!rule) throw new NotFoundException({ code: 'alert.rule_not_found', title: `Regla desconocida: ${code}` });
+    const isActive = body?.is_active == null ? true : Boolean(body.is_active);
+    let days: number | undefined;
+    if (rule.defaultDays != null) {
+      try {
+        days = assertThresholdDays(body?.days ?? rule.defaultDays);
+      } catch (e) {
+        if (e instanceof InvalidCatalogEntryError) throw new BadRequestException({ code: 'alert.invalid_threshold', title: e.reason });
+        throw e;
+      }
+    }
+    const condition = JSON.stringify(days != null ? { code, days } : { code });
+    // No hay unique sobre (tenant, code): match explícito por code y update, o insert si falta.
+    const existing = await this.db.one<{ id: string }>(
+      `SELECT id FROM alert_rules WHERE tenant_id=$1 AND condition->>'code'=$2 AND deleted_at IS NULL`,
+      [this.db.tenant, code],
+    );
+    if (existing) {
+      await this.db.query(`UPDATE alert_rules SET is_active=$2, condition=$3, updated_at=now() WHERE id=$1`, [existing.id, isActive, condition]);
+    } else {
+      await this.db.query(
+        `INSERT INTO alert_rules (tenant_id, name, category, condition, severity, is_active, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [this.db.tenant, rule.name, rule.category, condition, rule.severity, isActive, this.db.user],
+      );
+    }
+    return this.listRules();
+  }
+
   private async computeDesired(): Promise<Desired[]> {
     const t = this.db.tenant;
     const out: Desired[] = [];
+    const cfg = await this.ruleConfig();
 
     // Retiros activos
+    if (cfg.get('withdrawal_active')!.active) {
     const withdrawals = await this.db.query<any>(
       `SELECT a.id AS rid, ai.value AS tag, max(tr.meat_withdrawal_until) AS meat_until
        FROM treatments tr
@@ -276,17 +348,19 @@ export class AlertsService {
         due_at: iso(w.meat_until),
         tag: w.tag ?? null,
       });
+    }
 
     // Vacunaciones próximas o vencidas
+    if (cfg.get('vaccination_due')!.active) {
     const vaccinations = await this.db.query<any>(
       `SELECT DISTINCT ON (v.animal_id) v.animal_id AS rid, ai.value AS tag, pv.name AS product, v.next_due_date AS due
        FROM vaccinations v
        JOIN animals a ON a.id = v.animal_id AND a.status = 'active' AND a.deleted_at IS NULL
        LEFT JOIN products_veterinary pv ON pv.id = v.product_id
        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
-       WHERE v.tenant_id = $1 AND v.deleted_at IS NULL AND v.next_due_date IS NOT NULL AND v.next_due_date <= CURRENT_DATE + 30
+       WHERE v.tenant_id = $1 AND v.deleted_at IS NULL AND v.next_due_date IS NOT NULL AND v.next_due_date <= CURRENT_DATE + $2::int
        ORDER BY v.animal_id, v.next_due_date ASC`,
-      [t],
+      [t, cfg.get('vaccination_due')!.days],
     );
     const todayStr = new Date().toISOString().slice(0, 10);
     for (const v of vaccinations) {
@@ -303,14 +377,16 @@ export class AlertsService {
         tag: v.tag ?? null,
       });
     }
+    }
 
-    // Tareas sanitarias programadas (de planes) por vencer o vencidas (≤ 15 días)
+    // Tareas sanitarias programadas (de planes) por vencer o vencidas
+    if (cfg.get('health_task_due')!.active) {
     const tasks = await this.db.query<any>(
       `SELECT tk.id AS rid, tk.title, tk.due_date, (tk.due_date::date < CURRENT_DATE) AS overdue
        FROM tasks tk
        WHERE tk.tenant_id = $1 AND tk.type = 'health' AND tk.status = 'pending' AND tk.deleted_at IS NULL
-         AND tk.due_date <= now() + interval '15 days'`,
-      [t],
+         AND tk.due_date <= now() + ($2::int * interval '1 day')`,
+      [t, cfg.get('health_task_due')!.days],
     );
     for (const tk of tasks)
       out.push({
@@ -324,16 +400,18 @@ export class AlertsService {
         due_at: iso(tk.due_date),
         tag: null,
       });
+    }
 
-    // Partos próximos (≤ 15 días)
+    // Partos próximos
+    if (cfg.get('calving_soon')!.active) {
     const calvings = await this.db.query<any>(
       `SELECT p.animal_id AS rid, ai.value AS tag, p.expected_due_date AS due
        FROM pregnancies p
        JOIN animals a ON a.id = p.animal_id AND a.status = 'active' AND a.deleted_at IS NULL
        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
        WHERE p.tenant_id = $1 AND p.status = 'open' AND p.deleted_at IS NULL
-         AND p.expected_due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 15`,
-      [t],
+         AND p.expected_due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + $2::int`,
+      [t, cfg.get('calving_soon')!.days],
     );
     for (const c of calvings)
       out.push({
@@ -347,8 +425,10 @@ export class AlertsService {
         due_at: iso(c.due),
         tag: c.tag ?? null,
       });
+    }
 
     // Preñeces vencidas (parto probable pasó, sin parto registrado)
+    if (cfg.get('pregnancy_overdue')!.active) {
     const overdue = await this.db.query<any>(
       `SELECT p.animal_id AS rid, ai.value AS tag, p.expected_due_date AS due
        FROM pregnancies p
@@ -369,13 +449,16 @@ export class AlertsService {
         due_at: iso(o.due),
         tag: o.tag ?? null,
       });
+    }
 
-    // Dispositivos sin sincronizar (> 7 días)
+    // Dispositivos sin sincronizar
+    if (cfg.get('sync_device_stale')!.active) {
+    const staleDays = cfg.get('sync_device_stale')!.days;
     const devices = await this.db.query<any>(
       `SELECT id AS rid, device_name FROM sync_devices
        WHERE tenant_id = $1 AND status = 'active' AND deleted_at IS NULL
-         AND (last_sync_at IS NULL OR last_sync_at < now() - interval '7 days')`,
-      [t],
+         AND (last_sync_at IS NULL OR last_sync_at < now() - ($2::int * interval '1 day'))`,
+      [t, staleDays],
     );
     for (const d of devices)
       out.push({
@@ -383,12 +466,14 @@ export class AlertsService {
         category: 'task',
         severity: 'info',
         title: 'Dispositivo sin sincronizar',
-        message: `${d.device_name ?? 'Un dispositivo'} no sincroniza hace más de 7 días`,
+        message: `${d.device_name ?? 'Un dispositivo'} no sincroniza hace más de ${staleDays} días`,
         related_type: 'sync_device',
         related_id: d.rid,
       });
+    }
 
     // Conflictos de sync sin resolver (agregada, una por tenant)
+    if (cfg.get('sync_conflicts')!.active) {
     const conflicts = await this.db.one<any>(
       `SELECT count(*)::int AS n FROM sync_conflicts WHERE tenant_id = $1 AND resolved_at IS NULL AND deleted_at IS NULL`,
       [t],
@@ -403,6 +488,7 @@ export class AlertsService {
         related_type: null,
         related_id: null,
       });
+    }
 
     return out;
   }

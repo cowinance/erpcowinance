@@ -18,12 +18,13 @@ interface Currency { code: string; name: string; symbol: string }
 interface CurrencySettings { default_currency: string | null; companies: { id: string; name: string; functional_currency: string }[]; currencies: Currency[] }
 interface OrgParams { country_code: string; default_currency: string; default_locale: string; timezone: string; unit_system: string; data_region: string }
 interface Flag { key: string; label: string; description: string; enabled: boolean }
+interface Rule { code: string; name: string; category: string; severity: string; is_active: boolean; days: number | null; param_label: string | null; default_days: number | null }
 
 const PURPOSES: [string, string][] = [['beef', 'Carne'], ['dairy', 'Leche'], ['dual', 'Doble'], ['wool', 'Lana'], ['work', 'Trabajo']];
 const PURPOSE_ES = Object.fromEntries(PURPOSES) as Record<string, string>;
-const TABS = ['Moneda', 'Parámetros', 'Funciones', 'Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
+const TABS = ['Moneda', 'Parámetros', 'Funciones', 'Reglas', 'Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
 
-export function ConfigView({ catalogs, currency, params, flags }: { catalogs: Catalogs; currency: CurrencySettings | null; params: OrgParams | null; flags: Flag[] }) {
+export function ConfigView({ catalogs, currency, params, flags, rules }: { catalogs: Catalogs; currency: CurrencySettings | null; params: OrgParams | null; flags: Flag[]; rules: Rule[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<(typeof TABS)[number]>('Moneda');
   const [busy, setBusy] = useState(false);
@@ -68,6 +69,7 @@ export function ConfigView({ catalogs, currency, params, flags }: { catalogs: Ca
       {tab === 'Moneda' && <CurrencyTab currency={currency} busy={busy} call={call} />}
       {tab === 'Parámetros' && <ParamsTab params={params} busy={busy} call={call} />}
       {tab === 'Funciones' && <FlagsTab flags={flags} busy={busy} call={call} />}
+      {tab === 'Reglas' && <RulesTab rules={rules} busy={busy} call={call} />}
       {tab === 'Razas' && <BreedsTab catalogs={catalogs} busy={busy} call={call} />}
       {tab === 'Diagnósticos' && <DiagnosesTab diagnoses={catalogs.diagnoses} busy={busy} call={call} />}
       {tab === 'Categorías' && <CategoriesTab categories={catalogs.categories} />}
@@ -175,6 +177,55 @@ function FlagsTab({ flags, busy, call }: { flags: Flag[]; busy: boolean; call: C
         ))}
       </ul>
     </Card>
+  );
+}
+
+const CATEGORY_ES: Record<string, string> = { health: 'Sanidad', reproduction: 'Reproducción', task: 'Operación', inventory: 'Inventario', finance: 'Finanzas', iot: 'IoT' };
+const SEVERITY_ES: Record<string, string> = { info: 'Info', warning: 'Atención', critical: 'Crítico' };
+
+function RulesTab({ rules, busy, call }: { rules: Rule[]; busy: boolean; call: Call }) {
+  return (
+    <Card className="max-w-3xl">
+      <CardTitle>Reglas de alerta</CardTitle>
+      <p className="mb-3 text-label text-ink-3">Activá o desactivá cada regla y ajustá su umbral (ventana de anticipación). El motor de alertas usa esta configuración.</p>
+      <ul className="divide-y divide-subtle">
+        {rules.map((r) => <RuleRow key={r.code} rule={r} busy={busy} call={call} />)}
+      </ul>
+    </Card>
+  );
+}
+
+function RuleRow({ rule, busy, call }: { rule: Rule; busy: boolean; call: Call }) {
+  const [days, setDays] = useState(rule.days != null ? String(rule.days) : '');
+  const changed = rule.days != null && String(rule.days) !== days;
+  return (
+    <li className="flex items-center justify-between gap-4 py-3">
+      <div>
+        <div className="text-body font-medium">{rule.name}</div>
+        <div className="text-label text-ink-3">{CATEGORY_ES[rule.category] ?? rule.category} · {SEVERITY_ES[rule.severity] ?? rule.severity}</div>
+      </div>
+      <div className="flex items-center gap-3">
+        {rule.days != null && (
+          <div className="flex items-center gap-1.5">
+            <div className="w-16"><Input type="number" min="1" max="365" value={days} onChange={(e) => setDays(e.target.value)} aria-label={`${rule.param_label ?? 'Umbral'} de ${rule.name}`} /></div>
+            <span className="text-caption text-ink-3 whitespace-nowrap">{rule.param_label ?? 'días'}</span>
+            {changed && (
+              <Button size="sm" variant="secondary" loading={busy} disabled={busy || !days.trim()} onClick={() => call('PUT', `/alerts/rules/${rule.code}`, { is_active: rule.is_active, days: Number(days) })}>Guardar</Button>
+            )}
+          </div>
+        )}
+        <button
+          role="switch"
+          aria-checked={rule.is_active}
+          aria-label={rule.name}
+          disabled={busy}
+          onClick={() => call('PUT', `/alerts/rules/${rule.code}`, { is_active: !rule.is_active, days: rule.days ?? undefined })}
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${rule.is_active ? 'bg-brand' : 'bg-sunken border border-subtle'}`}
+        >
+          <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${rule.is_active ? 'left-4' : 'left-0.5'}`} />
+        </button>
+      </div>
+    </li>
   );
 }
 

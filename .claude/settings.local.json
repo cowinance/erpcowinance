@@ -339,7 +339,9 @@
       "Bash(awk '/CREATE TABLE \"feed_deliveries\"/{f=1} f{print} f&&/^\\\\\\);/{exit}' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \"weighings\"/{f=1} f{print} f&&/^\\\\\\);/{exit}' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \"business_partners\"/{f=1} f{print} f&&/^\\\\\\);/{exit}' packages/db/cowinance_schema.sql)",
-      "Bash(awk '/CREATE TABLE \"organizations\"/{f=1} f{print} f&&/^\\\\\\);/{exit}' packages/db/cowinance_schema.sql)"
+      "Bash(awk '/CREATE TABLE \"organizations\"/{f=1} f{print} f&&/^\\\\\\);/{exit}' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \"alert_rules\"/{f=1} f{print} f&&/^\\\\\\);/{exit}' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/const RULES/{f=1} f{print} f&&/\\\\];/{exit}' apps/api/src/modules/alerts/alerts.service.ts)"
     ]
   }
 }

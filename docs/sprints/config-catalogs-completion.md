@@ -91,10 +91,27 @@ Los catálogos tienen dos modelos distintos en el esquema:
   (habría denegado en prod). Se agregó a `RLS_TABLES` (policy estándar `app.tenant_id`) y se dropeó la
   dispersa. `system_settings` ya estaba activa (la usa el mapa de posteo de Finanzas). RLS 90 → 91 tablas.
 
+## 6-quater. Motor de reglas declarativas (4ª entrega)
+
+- **Las reglas de alerta pasan a ser configurables por tenant.** Antes `computeDesired()` tenía la
+  lógica y los umbrales hardcodeados; ahora cada regla del registro (`RULES` en `alerts.service.ts`,
+  fuente única) tiene estado (activa/inactiva) y umbral en días editables, guardados en `alert_rules`
+  (columna `is_active` + `condition` jsonb `{code, days}`). **`computeDesired` LEE esa config**: saltea
+  reglas apagadas y usa el umbral del tenant (queries parametrizadas).
+- **API** `GET /alerts/rules` (catálogo + config del tenant) y `PUT /alerts/rules/:code`
+  (activar/desactivar + umbral). **Web** pestaña «Reglas» en `/configuracion`.
+- **Regla única (dominio):** `assertThresholdDays` (entero 1..365).
+- **Backward-compatible:** los defaults del registro = los valores hardcodeados anteriores, así que sin
+  tocar nada el comportamiento no cambia. 7 reglas; 4 con umbral (vacunación 30, tarea 15, parto 15,
+  dispositivo 7), 3 solo on/off.
+- **No es hueco:** el motor efectivamente cambia su salida — probado en integración (vacuna a +20 días:
+  entra con umbral 30, no con 10; desaparece si la regla se apaga) y en la web (apagar «Preñez vencida»
+  bajó el contador de alertas 55 → 53 al auto-resolverse).
+
 ## 7. Estado del roadmap
 
-**Configuración · Catálogos + Moneda + Parámetros + Feature flags → COMPLETAS.** El módulo dejó de ser
-placeholder y cubre las cuatro partes de A3 salvo el motor de reglas declarativas.
+**Configuración (A3) → COMPLETA en sus cinco partes:** catálogos maestros, moneda, parámetros de la
+organización, feature flags y motor de reglas declarativas. El módulo dejó de ser placeholder.
 
 **Siguiente en A3 (a elección):** monedas y tipos de cambio (desbloquea multi-moneda de Tesorería),
 feature flags por tenant, o parámetros de negocio. También pendiente el hardening de RLS de los

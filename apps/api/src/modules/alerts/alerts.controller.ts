@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { AlertsService } from './alerts.service';
 
 @Controller('alerts')
@@ -13,6 +13,16 @@ export class AlertsController {
   @Get('kpis')
   kpis() {
     return this.alerts.kpis();
+  }
+
+  /** Motor de reglas: catálogo de reglas con su estado y umbral configurable por tenant. */
+  @Get('rules')
+  rules() {
+    return this.alerts.listRules();
+  }
+  @Put('rules/:code')
+  updateRule(@Param('code') code: string, @Body() body: any) {
+    return this.alerts.updateRule(code, body);
   }
 
   @Post('evaluate')

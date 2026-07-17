@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidCatalogEntryError, assertBreedPurpose, assertUnitSystem, normalizeCatalogCode, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from './catalog';
+import { InvalidCatalogEntryError, assertBreedPurpose, assertThresholdDays, assertUnitSystem, normalizeCatalogCode, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from './catalog';
+
+describe('assertThresholdDays', () => {
+  it('acepta enteros 1..365 y rechaza el resto', () => {
+    expect(assertThresholdDays(30)).toBe(30);
+    expect(assertThresholdDays('15')).toBe(15);
+    expect(() => assertThresholdDays(0)).toThrow(InvalidCatalogEntryError);
+    expect(() => assertThresholdDays(366)).toThrow(InvalidCatalogEntryError);
+    expect(() => assertThresholdDays(1.5)).toThrow(InvalidCatalogEntryError);
+  });
+});
 
 describe('assertUnitSystem', () => {
   it('acepta metric/imperial y rechaza el resto', () => {
