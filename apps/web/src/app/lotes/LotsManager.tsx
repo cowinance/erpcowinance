@@ -11,6 +11,7 @@ import { Select } from '@/components/Select';
 
 interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number }
 interface Paddock { id: string; name: string }
+interface AnimalRow { id: string; tag: string | null; name: string | null; category: string | null; sex: string; lot_id: string | null; lot_name: string | null }
 interface Detail extends Lot {
   current_paddock_id: string | null;
   head: number;
@@ -39,6 +40,14 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
   const [purpose, setPurpose] = useState('');
   const [paddockId, setPaddockId] = useState('');
   const [active, setActive] = useState(true);
+  // animales del lote + selección + agregado
+  const [animals, setAnimals] = useState<AnimalRow[]>([]);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [moveTarget, setMoveTarget] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState<AnimalRow[]>([]);
+  const [addSel, setAddSel] = useState<Set<string>>(new Set());
 
   async function call(method: string, path: string, body?: any): Promise<any | null> {
     setBusy(true); setError('');
@@ -51,10 +60,36 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
     finally { setBusy(false); }
   }
 
+  async function loadAnimals(lotId: string) {
+    const r = await call('GET', `/animals?lot=${lotId}&status=active&limit=300`);
+    setAnimals((r?.data ?? []) as AnimalRow[]);
+    setSel(new Set());
+  }
   async function open(id: string) {
-    setSelectedId(id); setMode('none'); setError('');
+    setSelectedId(id); setMode('none'); setError(''); setAdding(false); setResults([]); setSearch('');
     const d = await call('GET', `/lots/${id}`);
-    if (d) setDetail(d);
+    if (d) { setDetail(d); loadAnimals(id); }
+  }
+  function toggle(set: Set<string>, id: string): Set<string> {
+    const next = new Set(set);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  }
+  /** Mueve los animales seleccionados a `target` (id de lote) o los quita (null). Reusa POST /movements. */
+  async function moveSelected(target: string | null) {
+    if (!selectedId || sel.size === 0) return;
+    const r = await call('POST', '/movements', { animal_ids: [...sel], lot_id: target, reason: target ? 'reasignación de lote' : 'salida de lote' });
+    if (r) { setMoveTarget(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId); }
+  }
+  async function runSearch(q: string) {
+    setSearch(q);
+    const r = await call('GET', `/animals?status=active&limit=40${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`);
+    setResults(((r?.data ?? []) as AnimalRow[]).filter((a) => a.lot_id !== selectedId));
+  }
+  async function addSelected() {
+    if (!selectedId || addSel.size === 0) return;
+    const r = await call('POST', '/movements', { animal_ids: [...addSel], lot_id: selectedId, reason: 'ingreso al lote' });
+    if (r) { setAdding(false); setAddSel(new Set()); setResults([]); setSearch(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId); }
   }
   function startNew() { setMode('new'); setSelectedId(null); setDetail(null); setName(''); setPurpose(''); setError(''); }
   function startEdit() {
@@ -184,7 +219,62 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
               </>
             )}
 
-            <Link href={`/animales?lot=${detail.id}`} className="mt-5 inline-block text-label font-medium text-brand hover:underline">Ver animales del lote →</Link>
+            {/* Animales del lote: selección + mover/quitar + agregar */}
+            <div className="mt-5 border-t border-subtle pt-4">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Animales ({animals.length})</span>
+                <button onClick={() => { setAdding((v) => !v); setResults([]); setSearch(''); setAddSel(new Set()); }} className="text-label font-medium text-brand hover:underline">
+                  {adding ? 'Cerrar' : '+ Agregar'}
+                </button>
+              </div>
+
+              {adding && (
+                <div className="mb-3 rounded-md border border-subtle bg-sunken p-2">
+                  <Input value={search} onChange={(e) => runSearch(e.target.value)} placeholder="Buscar animales por caravana o nombre…" aria-label="Buscar animales" />
+                  <div className="mt-2 max-h-48 space-y-0.5 overflow-y-auto">
+                    {results.length === 0 ? (
+                      <p className="py-2 text-center text-caption text-ink-3">{search ? 'Sin resultados fuera de este lote.' : 'Escribí para buscar animales.'}</p>
+                    ) : results.map((a) => (
+                      <label key={a.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-label hover:bg-surface">
+                        <input type="checkbox" checked={addSel.has(a.id)} onChange={() => setAddSel((s) => toggle(s, a.id))} />
+                        <span className="font-medium">{a.tag ?? a.name ?? a.id.slice(0, 6)}</span>
+                        <span className="text-ink-3">{a.category ?? ''}{a.lot_name ? ` · ${a.lot_name}` : ' · sin lote'}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {addSel.size > 0 && <Button size="sm" fullWidth className="mt-2" loading={busy} onClick={addSelected}>Agregar {addSel.size} al lote</Button>}
+                </div>
+              )}
+
+              {animals.length === 0 ? (
+                <p className="text-body text-ink-3">Sin animales en el lote.</p>
+              ) : (
+                <>
+                  <div className="max-h-56 space-y-0.5 overflow-y-auto">
+                    {animals.map((a) => (
+                      <label key={a.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-label hover:bg-sunken">
+                        <input type="checkbox" checked={sel.has(a.id)} onChange={() => setSel((s) => toggle(s, a.id))} />
+                        <span className="font-medium">{a.tag ?? a.name ?? a.id.slice(0, 6)}</span>
+                        <span className="text-ink-3">{a.category ?? ''} · {SEX_ES[a.sex] ?? a.sex}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {sel.size > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-sunken p-2">
+                      <span className="text-label font-medium text-ink-2">{sel.size} seleccionados</span>
+                      <Select value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)} aria-label="Lote destino" controlSize="sm" fullWidth={false} className="min-w-0 flex-1">
+                        <option value="">Mover a…</option>
+                        {lots.filter((l) => l.id !== detail.id && l.is_active).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </Select>
+                      <Button size="sm" disabled={!moveTarget || busy} onClick={() => moveSelected(moveTarget)}>Mover</Button>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => moveSelected(null)}>Quitar</Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <Link href={`/animales?lot=${detail.id}`} className="mt-4 inline-block text-label font-medium text-brand hover:underline">Ver animales del lote →</Link>
           </div>
         ) : (
           <div className="py-10 text-center">

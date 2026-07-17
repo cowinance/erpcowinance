@@ -43,12 +43,26 @@ CRUD parcial (solo listar + crear, web de solo lectura) a un gestor completo con
 | RLS | sin cambios |
 | Verificación web | Rodeo Cría 1: 20 cab · 509 kg · GDP 1,77 · Vaca 18 / Toro 2 · Hembras 18 / Machos 2; edición pre-cargada |
 
+## 5-bis. Mover / agregar / quitar animales (2ª entrega)
+
+- **Descubrimiento:** el backend YA soportaba mover animales — `POST /movements` (`land.moveAnimals`)
+  toma `{ animal_ids, lot_id, reason }` y usa la **regla única `recordMovement`** (P3: timeline +
+  versiones + sync server-origin). No hicieron falta endpoints nuevos, solo la UI y su reuso.
+- **UI en el detalle del lote (`LotsManager`):**
+  - **Lista de animales del lote** con checkboxes (`GET /animals?lot=X&status=active`).
+  - **Mover a otro lote**: seleccionar animales + lote destino → `POST /movements { lot_id: destino }`.
+  - **Quitar del lote**: seleccionar → `POST /movements { lot_id: null }`.
+  - **Agregar existentes**: buscador (`GET /animals?q=`) que excluye los ya del lote → seleccionar →
+    mover al lote. Refresca detalle + composición + cards en el acto.
+- **Test de integración** (`lots-move`): mover entre lotes se refleja en `getLot` de ambos y **crea filas
+  en `animal_movements`** (prueba que reusa la regla única, no un UPDATE directo de `current_lot_id`).
+- Verificado en web: moví 2 animales (Rodeo Cría 2 10→8, Rodeo Cría 1 20→22) y agregué 1 de vuelta (8→9).
+
 ## 6. Trabajo diferido
 
-- **Asignar/quitar animales al lote** desde el detalle (hoy se hace desde Animales o moviendo lotes
-  entre potreros en el mapa).
 - **Historial del lote** (movimientos, cambios de composición en el tiempo).
 - **Filtros** en la grilla (por propósito, por potrero, activos/todos).
+- **Mover TODO el lote** de un tiro (merge) como acción rápida.
 
 ## 7. Estado del roadmap
 
