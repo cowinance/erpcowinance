@@ -28,3 +28,5 @@ export * from './config';
 export * from './documents';
 // Geo — geometría de potreros: validación de polígono y superficie (D3).
 export * from './geo';
+// Hato — lotes/rodeos: validación de grupo de manejo (B1).
+export * from './herd';

@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { InvalidLotError, validateLotInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
@@ -316,28 +317,118 @@ export class HerdService {
   }
 
   /** Crea un lote (rodeo/grupo de manejo) del tenant. `purpose` opcional (validado). */
+  private validateLot<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof InvalidLotError) throw new BadRequestException({ code: 'lot.invalid', title: e.reason });
+      throw e;
+    }
+  }
+
   async createLot(body: any) {
-    const name = String(body?.name ?? '').trim();
-    if (!name) throw new BadRequestException({ code: 'lot.missing_name', title: 'name es obligatorio' });
-    const PURPOSES = ['breeding', 'fattening', 'dairy', 'weaning', 'quarantine', 'hospital'];
-    const purpose = body?.purpose && PURPOSES.includes(body.purpose) ? body.purpose : null;
+    const input = this.validateLot(() => validateLotInput(body));
     const t = this.db.tenant;
     const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
     if (!farm) throw new BadRequestException({ code: 'lot.no_farm', title: 'No hay finca para asociar el lote' });
     return this.db.one<any>(
       `INSERT INTO lots (tenant_id, farm_id, name, purpose) VALUES ($1,$2,$3,$4) RETURNING id, name, purpose, is_active`,
-      [t, farm, name, purpose],
+      [t, farm, input.name, input.purpose],
     );
   }
 
   async lots() {
     return this.db.query(
-      `SELECT l.id, l.name, l.purpose, p.name AS paddock_name,
+      `SELECT l.id, l.name, l.purpose, l.is_active, p.name AS paddock_name,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS animal_count
        FROM lots l LEFT JOIN paddocks p ON p.id = l.current_paddock_id
-       WHERE l.tenant_id = $1 AND l.deleted_at IS NULL ORDER BY l.name`,
+       WHERE l.tenant_id = $1 AND l.deleted_at IS NULL ORDER BY l.is_active DESC, l.name`,
       [this.db.tenant],
     );
+  }
+
+  /** Detalle del lote: propósito, potrero, estado + composición (categoría/sexo) y agregados (peso, GDP). */
+  async getLot(id: string) {
+    const t = this.db.tenant;
+    const lot = await this.db.one<any>(
+      `SELECT l.id, l.name, l.purpose, l.is_active, l.current_paddock_id, p.name AS paddock_name
+       FROM lots l LEFT JOIN paddocks p ON p.id = l.current_paddock_id
+       WHERE l.id=$1 AND l.tenant_id=$2 AND l.deleted_at IS NULL`,
+      [id, t],
+    );
+    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+    const [agg, byCategory, bySex] = await Promise.all([
+      this.db.one<any>(
+        `SELECT count(*)::int AS head,
+                round(avg(lw.weight_kg))::int AS avg_weight_kg,
+                round(avg(lw.adg)::numeric, 2)::float AS avg_gdp
+         FROM animals a
+         LEFT JOIN LATERAL (SELECT weight_kg, adg_since_last AS adg FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) lw ON true
+         WHERE a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL`,
+        [id, t],
+      ),
+      this.db.query<any>(
+        `SELECT COALESCE(c.name, 'Sin categoría') AS category, count(*)::int AS n
+         FROM animals a LEFT JOIN animal_categories c ON c.id=a.category_id
+         WHERE a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL
+         GROUP BY c.name ORDER BY n DESC`,
+        [id, t],
+      ),
+      this.db.query<any>(
+        `SELECT a.sex, count(*)::int AS n FROM animals a
+         WHERE a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL GROUP BY a.sex`,
+        [id, t],
+      ),
+    ]);
+    return { ...lot, head: agg?.head ?? 0, avg_weight_kg: agg?.avg_weight_kg ?? null, avg_gdp: agg?.avg_gdp ?? null, by_category: byCategory, by_sex: bySex };
+  }
+
+  /** Edita nombre, propósito, potrero asignado y/o estado. El potrero debe pertenecer al tenant. */
+  async updateLot(id: string, body: any) {
+    const t = this.db.tenant;
+    const existing = await this.db.one<any>(`SELECT id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!existing) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+    const sets: string[] = [];
+    const args: any[] = [id, t];
+    if (body?.name !== undefined || body?.purpose !== undefined) {
+      // Reusa la regla única para nombre/propósito (usa el nombre actual si sólo cambia el propósito).
+      const current = await this.db.one<any>(`SELECT name FROM lots WHERE id=$1 AND tenant_id=$2`, [id, t]);
+      const input = this.validateLot(() => validateLotInput({ name: body?.name ?? current!.name, purpose: body?.purpose }));
+      args.push(input.name);
+      sets.push(`name=$${args.length}`);
+      args.push(input.purpose);
+      sets.push(`purpose=$${args.length}`);
+    }
+    if (body?.current_paddock_id !== undefined) {
+      const pid = body.current_paddock_id || null;
+      if (pid) {
+        const paddock = await this.db.one(`SELECT id FROM paddocks WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [pid, t]);
+        if (!paddock) throw new BadRequestException({ code: 'lot.paddock_not_found', title: 'El potrero no existe' });
+      }
+      args.push(pid);
+      sets.push(`current_paddock_id=$${args.length}`);
+    }
+    if (body?.is_active !== undefined) {
+      args.push(Boolean(body.is_active));
+      sets.push(`is_active=$${args.length}`);
+    }
+    if (sets.length === 0) throw new BadRequestException({ code: 'lot.no_changes', title: 'Nada para actualizar' });
+    await this.db.query(`UPDATE lots SET ${sets.join(', ')}, updated_at=now() WHERE id=$1 AND tenant_id=$2`, args);
+    return this.getLot(id);
+  }
+
+  /** Archiva un lote. Se bloquea si tiene animales activos (reasignarlos primero). */
+  async deleteLot(id: string) {
+    const t = this.db.tenant;
+    const lot = await this.db.one<any>(`SELECT id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+    const occ = await this.db.one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`,
+      [id, t],
+    );
+    if ((occ?.n ?? 0) > 0) throw new ConflictException({ code: 'lot.occupied', title: `El lote tiene ${occ!.n} animales; reasignalos antes de archivarlo` });
+    await this.db.query(`UPDATE lots SET is_active=false, deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2`, [id, t]);
+    return { id, deleted: true };
   }
 
   async categories() {

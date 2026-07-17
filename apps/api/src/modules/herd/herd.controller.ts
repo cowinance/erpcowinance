@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { HerdService } from './herd.service';
 
 @Controller()
@@ -50,6 +50,21 @@ export class HerdController {
   @Get('lots')
   lots() {
     return this.herd.lots();
+  }
+
+  @Get('lots/:id')
+  getLot(@Param('id') id: string) {
+    return this.herd.getLot(id);
+  }
+
+  @Put('lots/:id')
+  updateLot(@Param('id') id: string, @Body() body: any) {
+    return this.herd.updateLot(id, body);
+  }
+
+  @Delete('lots/:id')
+  deleteLot(@Param('id') id: string) {
+    return this.herd.deleteLot(id);
   }
 
   @Get('catalogs/categories')

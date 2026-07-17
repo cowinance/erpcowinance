@@ -1,42 +1,19 @@
-import Link from 'next/link';
 import { apiSafe } from '@/lib/server-api';
 import { EmptyState } from '@/components/ui';
+import { LotsManager } from './LotsManager';
 
-const PURPOSE: Record<string, string> = {
-  breeding: 'Cría',
-  fattening: 'Engorde',
-  dairy: 'Lechería',
-  weaning: 'Recría / destete',
-  quarantine: 'Cuarentena',
-  hospital: 'Hospital',
-};
-
+/** Lotes / rodeos (B1): gestor completo — crear, editar, detalle con composición y archivar. */
 export default async function LotsPage() {
-  const lots = await apiSafe<any[]>('/lots');
+  const [lots, paddocks] = await Promise.all([apiSafe<any[]>('/lots'), apiSafe<any[]>('/paddocks')]);
   if (!lots) return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
 
   return (
-    <div>
-      <h1 className="mb-1 text-xl font-semibold">Lotes</h1>
-      <p className="mb-5 text-body text-ink-3">Rodeos y grupos de manejo de la finca</p>
-      <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-2 max-md:grid-cols-1">
-        {lots.map((l) => (
-          <Link
-            key={l.id}
-            href={`/animales?lot=${l.id}`}
-            className="rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)] transition-colors hover:border-strong"
-          >
-            <div className="text-subheading font-semibold">{l.name}</div>
-            <div className="mt-0.5 text-label text-ink-3">
-              {PURPOSE[l.purpose] ?? l.purpose ?? '—'} · {l.paddock_name ?? 'sin potrero'}
-            </div>
-            <div className="tnum mt-3 text-compat-26 font-semibold">
-              {l.animal_count}
-              <span className="ml-1 text-body font-normal text-ink-2">animales</span>
-            </div>
-          </Link>
-        ))}
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Lotes</h1>
+        <p className="mt-0.5 text-body text-ink-3">Rodeos y grupos de manejo de la finca — creá, editá y seguí su composición.</p>
       </div>
+      <LotsManager lots={lots ?? []} paddocks={(paddocks ?? []).map((p) => ({ id: p.id, name: p.name }))} />
     </div>
   );
 }
