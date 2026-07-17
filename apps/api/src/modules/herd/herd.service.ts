@@ -274,7 +274,7 @@ export class HerdService {
            AND (meat_withdrawal_until >= CURRENT_DATE OR milk_withdrawal_until >= now())`,
         [id],
       ),
-      this.db.one<any>(`SELECT count(*)::int AS n FROM animal_events WHERE animal_id = $1`, [id]),
+      this.db.one<any>(`SELECT count(*)::int AS n FROM animal_events WHERE animal_id = $1 AND deleted_at IS NULL`, [id]),
     ]);
 
     const genealogy = await this.db.one<any>(
@@ -382,7 +382,7 @@ export class HerdService {
          ORDER BY w.created_at, w.id
          LIMIT 1
        ) w ON e.event_type = 'weighing'
-       WHERE e.animal_id = $1 AND e.tenant_id = $2
+       WHERE e.animal_id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL
        ORDER BY e.occurred_at DESC LIMIT 300`,
       [id, this.db.tenant],
     );
@@ -1063,8 +1063,9 @@ export class HerdService {
         `SELECT adg_since_last::float FROM v_weighings WHERE id = $1`,
         [inserted?.id],
       );
-      const ev = await this.insertEvent(id, 'weighing', { weight_kg: kg }, occurredAt);
-      return { ...ev, adg_since_last: derived?.adg_since_last ?? null };
+      // `weighing_id` en el payload → permite deshacer (borra pesada + su evento) desde la manga.
+      const ev = await this.insertEvent(id, 'weighing', { weight_kg: kg, weighing_id: inserted?.id }, occurredAt);
+      return { ...ev, weighing_id: inserted?.id, adg_since_last: derived?.adg_since_last ?? null };
     }
 
     if (body.type === 'note') {
@@ -1072,6 +1073,29 @@ export class HerdService {
     }
 
     throw new BadRequestException({ code: 'event.unsupported_type', title: `Tipo de evento no soportado aún: ${body.type}` });
+  }
+
+  /**
+   * Deshacer una pesada (A-Manga E6) — soft-delete SEGURO de la pesada y su evento de timeline.
+   * v_weighings excluye las borradas → el último peso/GDP se recalculan solos. Solo pesadas
+   * (aditivas y reversibles); tratamientos/vacunas/movimientos NO se deshacen desde acá (efectos).
+   */
+  async deleteWeighing(weighingId: string) {
+    const t = this.db.tenant;
+    const w = await this.db.one<{ id: string }>(
+      `SELECT id FROM weighings WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [weighingId, t],
+    );
+    if (!w) throw new NotFoundException({ code: 'weighing.not_found', title: 'Pesada no encontrada o ya deshecha' });
+    await this.db.tx(async (q) => {
+      await q.query(`UPDATE weighings SET deleted_at = now() WHERE id = $1 AND tenant_id = $2`, [weighingId, t]);
+      await q.query(
+        `UPDATE animal_events SET deleted_at = now()
+         WHERE tenant_id = $1 AND event_type = 'weighing' AND deleted_at IS NULL AND payload->>'weighing_id' = $2`,
+        [t, weighingId],
+      );
+    });
+    return { undone: true };
   }
 
   /** Crea un lote (rodeo/grupo de manejo) del tenant. `purpose` opcional (validado). */

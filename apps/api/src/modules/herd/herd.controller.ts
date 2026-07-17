@@ -94,6 +94,11 @@ export class HerdController {
     return this.herd.registerEvent(id, body);
   }
 
+  @Delete('weighings/:id')
+  deleteWeighing(@Param('id') id: string) {
+    return this.herd.deleteWeighing(id);
+  }
+
   @Post('animals/:id/identifiers')
   addIdentifier(@Param('id') id: string, @Body() body: any) {
     return this.herd.addIdentifier(id, body);

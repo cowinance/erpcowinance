@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { validateWeighing } from '@cowinance/domain';
 import { API_URL, authHeaders } from '@/lib/api';
+import { downloadCsv } from '@/lib/csv';
 import { MangaCapture, type MangaMode } from './MangaCapture';
 
 const MODES: MangaMode[] = ['Pesaje', 'Revisión', 'Nota', 'Tratamiento', 'Vacunación', 'Movimiento', 'Reproducción'];
@@ -47,6 +48,8 @@ interface SessionRecord {
   detail: string;
   at: number;
   status: 'saved' | 'pending' | 'error';
+  undoId?: string; // weighing_id → permite deshacer un pesaje
+  retry?: { url: string; body: any }; // guardado offline pendiente de reenvío
 }
 
 function beep(freq: number, ms = 120, when = 0) {
@@ -246,10 +249,11 @@ export default function MangaPage() {
         const b = await res.json().catch(() => null);
         return fail(b?.message?.title ?? 'ERROR AL GUARDAR');
       }
+      const j = await res.json().catch(() => ({}));
       soundSaved();
       vibrate(60);
       setRecords((r) => [
-        { key: crypto.randomUUID(), tag: animal.tag, action: 'Pesaje', detail: `${kg} kg${cc ? ` · CC ${cc}` : ''}`, at: Date.now(), status: 'saved' },
+        { key: crypto.randomUUID(), tag: animal.tag, action: 'Pesaje', detail: `${kg} kg${cc ? ` · CC ${cc}` : ''}`, at: Date.now(), status: 'saved', undoId: j?.weighing_id },
         ...r,
       ]);
       setAnimal(null);
@@ -258,13 +262,71 @@ export default function MangaPage() {
       setWarn(null);
       setConfirmMsg(null);
     } catch {
-      fail('SIN CONEXIÓN CON LA API');
+      // Offline: no se pierde el dato — queda PENDIENTE y se reenvía al reconectar.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        soundError();
+        vibrate([80, 60, 80]);
+        setRecords((r) => [
+          { key: crypto.randomUUID(), tag: animal.tag, action: 'Pesaje', detail: `${kg} kg${cc ? ` · CC ${cc}` : ''}`, at: Date.now(), status: 'pending', retry: { url: `/animals/${animal.id}/events`, body: { type: 'weighing', weight_kg: Number(kg), body_condition: cc ?? undefined } } },
+          ...r,
+        ]);
+        setAnimal(null);
+        setKg('');
+        setCc(null);
+        setWarn(null);
+        setConfirmMsg(null);
+      } else {
+        fail('SIN CONEXIÓN CON LA API');
+      }
     } finally {
       setSaving(false);
     }
   }
 
+  // Reenvía los registros pendientes (offline) cuando vuelve la conexión.
+  const flushPending = useCallback(() => {
+    setRecords((prev) => {
+      prev.filter((r) => r.status === 'pending' && r.retry).forEach(async (r) => {
+        try {
+          const res = await fetch(`${API_URL}${r.retry!.url}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() },
+            body: JSON.stringify(r.retry!.body),
+          });
+          if (res.ok) {
+            const j = await res.json().catch(() => ({}));
+            setRecords((rs) => rs.map((x) => (x.key === r.key ? { ...x, status: 'saved', retry: undefined, undoId: j?.weighing_id } : x)));
+          }
+        } catch {
+          /* sigue pendiente */
+        }
+      });
+      return prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (online) flushPending();
+  }, [online, flushPending]);
+
+  // Deshace el último pesaje guardado (soft-delete seguro en el servidor).
+  async function undoLast() {
+    const last = records.find((r) => r.status === 'saved' && r.action === 'Pesaje' && r.undoId);
+    if (!last) return;
+    try {
+      const res = await fetch(`${API_URL}/weighings/${last.undoId}`, { method: 'DELETE', headers: authHeaders() });
+      if (!res.ok) return fail('NO SE PUDO DESHACER');
+      setRecords((r) => r.filter((x) => x.key !== last.key));
+      soundOk();
+      vibrate(40);
+    } catch {
+      fail('SIN CONEXIÓN CON LA API');
+    }
+  }
+
   const saved = records.filter((r) => r.status === 'saved').length;
+  const pending = records.filter((r) => r.status === 'pending').length;
+  const canUndo = records.length > 0 && records[0].status === 'saved' && records[0].action === 'Pesaje' && !!records[0].undoId;
 
   // ── Pantalla de inicio de sesión ──
   if (phase === 'setup') {
@@ -335,17 +397,43 @@ export default function MangaPage() {
         <div className="grid w-full max-w-md grid-cols-2 gap-3">
           <SummaryStat label="Procesados" value={saved} tone="ok" />
           <SummaryStat label="Errores" value={errors} tone={errors ? 'error' : 'muted'} />
-          <SummaryStat label="Pesos registrados" value={records.filter((r) => r.action === 'Pesaje').length} tone="muted" />
-          <SummaryStat label="Pendientes de sync" value={records.filter((r) => r.status === 'pending').length} tone="muted" />
+          <SummaryStat label="Pendientes de sync" value={pending} tone={pending ? 'error' : 'muted'} />
+          <SummaryStat label="Animales únicos" value={new Set(records.map((r) => r.tag)).size} tone="muted" />
         </div>
+
+        {(() => {
+          const byAction = records.reduce<Record<string, number>>((acc, r) => ((acc[r.action] = (acc[r.action] ?? 0) + 1), acc), {});
+          const entries = Object.entries(byAction);
+          return entries.length ? (
+            <div className="flex w-full max-w-md flex-wrap justify-center gap-2">
+              {entries.map(([a, n]) => (
+                <span key={a} className="rounded-full bg-white/[0.06] px-3 py-1.5 text-[15px] text-white/80">{a}: <b className="text-white">{n}</b></span>
+              ))}
+            </div>
+          ) : null;
+        })()}
+
         {records.length > 0 && (
           <div className="w-full max-w-md">
-            <div className="mb-2 text-[12px] font-bold tracking-[0.15em] text-white/40 uppercase">Últimos registros</div>
-            <div className="max-h-48 space-y-1 overflow-y-auto">
-              {records.slice(0, 20).map((r) => (
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[12px] font-bold tracking-[0.15em] text-white/40 uppercase">Registros</span>
+              <button
+                onClick={() =>
+                  downloadCsv('manga-sesion', [
+                    ['Caravana', 'Acción', 'Dato', 'Hora', 'Estado'],
+                    ...records.map((r) => [r.tag, r.action, r.detail, new Date(r.at).toISOString(), r.status]),
+                  ])
+                }
+                className="text-[13px] font-bold text-[#4ade80] underline"
+              >
+                Exportar CSV
+              </button>
+            </div>
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {records.slice(0, 30).map((r) => (
                 <div key={r.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-[15px]">
                   <span className="font-mono font-bold text-[#4ade80]">{r.tag}</span>
-                  <span className="text-white/70">{r.detail}</span>
+                  <span className="text-white/70">{r.action} · {r.detail}</span>
                   <span className="text-white/40">{fmtClock(r.at)}</span>
                 </div>
               ))}
@@ -372,12 +460,19 @@ export default function MangaPage() {
         </span>
         <span className="flex items-center gap-4 font-mono text-[18px] font-bold">
           <span className="text-[#4ade80]">{saved} <span className="text-[12px] font-normal text-white/40">reg</span></span>
+          {pending > 0 && <span className="text-[#facc15]">{pending} <span className="text-[12px] font-normal text-white/40">pend</span></span>}
           <span className={errors ? 'text-[#f87171]' : 'text-white/30'}>{errors} <span className="text-[12px] font-normal text-white/40">err</span></span>
         </span>
         <button onClick={() => setPhase('summary')} className="rounded border border-white/30 px-3 py-1.5 text-[13px] text-white/70 hover:text-white">
           Salir
         </button>
       </div>
+
+      {!online && (
+        <div className="bg-[#facc15] py-1.5 text-center text-[14px] font-bold text-black">
+          SIN CONEXIÓN · los guardados quedan pendientes y se reenvían al reconectar
+        </div>
+      )}
 
       <div className={`flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-6 py-6 ${shake ? 'animate-[shake_0.4s]' : ''}`}>
         {!animal ? (
@@ -415,11 +510,19 @@ export default function MangaPage() {
             </button>
             {records.length > 0 && (
               <div className="w-full max-w-md">
-                <div className="mb-2 text-center text-[12px] font-bold tracking-[0.15em] text-white/40 uppercase">Últimos registros</div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[12px] font-bold tracking-[0.15em] text-white/40 uppercase">Últimos registros</span>
+                  {canUndo && (
+                    <button onClick={undoLast} className="text-[13px] font-bold text-[#f87171] underline">Deshacer último</button>
+                  )}
+                </div>
                 <div className="space-y-1">
                   {records.slice(0, 4).map((r) => (
                     <div key={r.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-[15px]">
-                      <span className="font-mono font-bold text-[#4ade80]">{r.tag}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className={`inline-block size-2 rounded-full ${r.status === 'saved' ? 'bg-[#4ade80]' : r.status === 'pending' ? 'bg-[#facc15]' : 'bg-[#f87171]'}`} />
+                        <span className="font-mono font-bold text-[#4ade80]">{r.tag}</span>
+                      </span>
                       <span className="text-white/60">{r.action} · {r.detail}</span>
                       <span className="text-white/35">{fmtClock(r.at)}</span>
                     </div>

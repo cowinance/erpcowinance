@@ -95,9 +95,25 @@ describe('HerdService.lookup — tarjeta robusta de manga (E1)', () => {
     await expect(herd.registerEvent(animalId, { type: 'weighing', weight_kg: 0 })).rejects.toThrow();
     await expect(herd.registerEvent(animalId, { type: 'weighing', weight_kg: -10 })).rejects.toThrow();
     await expect(herd.registerEvent(animalId, { type: 'weighing', weight_kg: 2000 })).rejects.toThrow();
-    // Un peso válido se guarda y devuelve el GDP derivado.
+    // Un peso válido se guarda y devuelve el GDP derivado + el id de la pesada (para deshacer).
     const ev: any = await herd.registerEvent(animalId, { type: 'weighing', weight_kg: 445 });
     expect(ev.event_type).toBe('weighing');
     expect(ev).toHaveProperty('adg_since_last');
+    expect(ev.weighing_id).toBeTruthy();
+  });
+
+  it('deshacer una pesada la borra de v_weighings y del timeline', async () => {
+    const before: any[] = await herd.timeline(animalId);
+    const ev: any = await herd.registerEvent(animalId, { type: 'weighing', weight_kg: 448 });
+    const lastW = (await db.query<{ weight_kg: number }>(`SELECT weight_kg::float FROM v_weighings WHERE animal_id=$1 ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1`, [animalId]))[0].weight_kg;
+    expect(lastW).toBe(448);
+    const res = await herd.deleteWeighing(ev.weighing_id);
+    expect(res.undone).toBe(true);
+    // v_weighings ya no la incluye (último peso vuelve al anterior) y el timeline tampoco.
+    const nowLast = (await db.query<{ weight_kg: number }>(`SELECT weight_kg::float FROM v_weighings WHERE animal_id=$1 ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1`, [animalId]))[0].weight_kg;
+    expect(nowLast).not.toBe(448);
+    const after: any[] = await herd.timeline(animalId);
+    expect(after.length).toBe(before.length); // el 448 se deshizo → timeline vuelve al estado previo
+    await expect(herd.deleteWeighing(ev.weighing_id)).rejects.toThrow(); // idempotente: ya deshecha
   });
 });
