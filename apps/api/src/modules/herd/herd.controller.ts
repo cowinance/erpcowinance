@@ -10,19 +10,36 @@ export class HerdController {
     @Query('status') status?: string,
     @Query('category') category?: string,
     @Query('lot') lot?: string,
+    @Query('paddock') paddock?: string,
+    @Query('breed') breed?: string,
+    @Query('origin') origin?: string,
     @Query('q') q?: string,
     @Query('sex') sex?: string,
     @Query('min_weight') minWeight?: string,
     @Query('max_weight') maxWeight?: string,
     @Query('min_age') minAge?: string,
     @Query('max_age') maxAge?: string,
+    @Query('with_lot') withLot?: string,
+    @Query('with_photo') withPhoto?: string,
+    @Query('with_official_id') withOfficialId?: string,
+    @Query('withdrawal') withdrawal?: string,
+    @Query('open_case') openCase?: string,
+    @Query('pregnant') pregnant?: string,
+    @Query('no_recent_weighing') noRecentWeighing?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
     const num = (v?: string) => (v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : undefined);
+    const bool = (v?: string) => (v === 'true' ? true : v === 'false' ? false : undefined);
     return this.herd.listAnimals({
-      status, category, lot, q, sex,
+      status, category, lot, paddock, breed, origin, q, sex,
       minWeight: num(minWeight), maxWeight: num(maxWeight), minAgeMonths: num(minAge), maxAgeMonths: num(maxAge),
+      withLot: bool(withLot), withPhoto: bool(withPhoto), withOfficialId: bool(withOfficialId),
+      withdrawal: withdrawal === 'true', openCase: openCase === 'true', pregnant: pregnant === 'true',
+      noRecentWeighingDays: num(noRecentWeighing),
+      sort, dir: dir === 'asc' || dir === 'desc' ? dir : undefined,
       limit: limit ? Number(limit) : undefined, cursor,
     });
   }

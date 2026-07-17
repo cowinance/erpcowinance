@@ -15,15 +15,44 @@ export interface ListAnimalsParams {
   status?: string;
   category?: string;
   lot?: string;
+  paddock?: string;
+  breed?: string;
+  origin?: string;
   q?: string;
   sex?: string;
   minWeight?: number;
   maxWeight?: number;
   minAgeMonths?: number;
   maxAgeMonths?: number;
+  withLot?: boolean;
+  withPhoto?: boolean;
+  withOfficialId?: boolean;
+  withdrawal?: boolean;
+  openCase?: boolean;
+  pregnant?: boolean;
+  noRecentWeighingDays?: number;
+  sort?: string;
+  dir?: 'asc' | 'desc';
   limit?: number;
   cursor?: string;
 }
+
+/**
+ * Expresiones de orden del listado (Animales E1). Cada clave es un criterio
+ * público; `expr` es la columna/valor SQL y `kind` decide el sentinel de COALESCE
+ * para que los NULL queden SIEMPRE al final del orden (keyset sin ramas de null).
+ * Así la paginación por cursor `(sortval, id)` funciona para cualquier orden.
+ */
+const ANIMAL_SORTS: Record<string, { expr: string; kind: 'num' | 'text' | 'date' }> = {
+  tag: { expr: 't.value', kind: 'text' },
+  created: { expr: 'a.created_at', kind: 'date' },
+  age: { expr: 'a.birth_date', kind: 'date' },
+  weight: { expr: 'w.weight_kg', kind: 'num' },
+  gdp: { expr: 'w.adg_since_last', kind: 'num' },
+  lot: { expr: 'l.name', kind: 'text' },
+  category: { expr: 'c.name', kind: 'text' },
+  status: { expr: 'a.status', kind: 'text' },
+};
 
 @Injectable()
 export class HerdService {
@@ -50,9 +79,26 @@ export class HerdService {
       args.push(params.lot);
       where.push(`a.current_lot_id = $${args.length}`);
     }
+    if (params.paddock) {
+      args.push(params.paddock);
+      where.push(`a.current_paddock_id = $${args.length}`);
+    }
+    if (params.origin) {
+      args.push(params.origin);
+      where.push(`a.origin = $${args.length}`);
+    }
+    if (params.breed) {
+      args.push(params.breed);
+      where.push(
+        `EXISTS (SELECT 1 FROM animal_breeds ab WHERE ab.animal_id = a.id AND ab.deleted_at IS NULL AND ab.breed_id = $${args.length})`,
+      );
+    }
+    // Búsqueda: cualquier identificador (visual/RFID/oficial/tatuaje/bolo/marca) o nombre.
     if (params.q) {
       args.push(`%${params.q}%`);
-      where.push(`(t.value ILIKE $${args.length} OR a.name ILIKE $${args.length})`);
+      where.push(
+        `(a.name ILIKE $${args.length} OR EXISTS (SELECT 1 FROM animal_identifiers qi WHERE qi.animal_id = a.id AND qi.deleted_at IS NULL AND qi.value ILIKE $${args.length}))`,
+      );
     }
     if (params.sex) {
       args.push(params.sex);
@@ -76,11 +122,57 @@ export class HerdService {
       args.push(params.maxAgeMonths);
       where.push(`a.birth_date IS NOT NULL AND a.birth_date >= CURRENT_DATE - ($${args.length}::int * INTERVAL '1 month')`);
     }
+    // Presencia/ausencia (calidad de datos): lote, foto, identificador oficial.
+    if (params.withLot != null) where.push(`a.current_lot_id IS ${params.withLot ? 'NOT NULL' : 'NULL'}`);
+    if (params.withPhoto != null) where.push(`a.photo_file_id IS ${params.withPhoto ? 'NOT NULL' : 'NULL'}`);
+    if (params.withOfficialId != null)
+      where.push(
+        `${params.withOfficialId ? '' : 'NOT '}EXISTS (SELECT 1 FROM animal_identifiers oi WHERE oi.animal_id = a.id AND oi.deleted_at IS NULL AND oi.is_official = true)`,
+      );
+    // Retiro sanitario activo (carne/leche vigente) — reusa treatments.
+    if (params.withdrawal)
+      where.push(
+        `EXISTS (SELECT 1 FROM treatments tr WHERE tr.animal_id = a.id AND tr.deleted_at IS NULL AND (tr.meat_withdrawal_until >= CURRENT_DATE OR tr.milk_withdrawal_until >= now()))`,
+      );
+    // Caso clínico abierto (open/in_treatment/observation) — reusa clinical_cases.
+    if (params.openCase)
+      where.push(
+        `EXISTS (SELECT 1 FROM clinical_cases cc WHERE cc.animal_id = a.id AND cc.deleted_at IS NULL AND cc.status IN ('open','in_treatment','observation'))`,
+      );
+    // Preñez abierta — reusa pregnancies.
+    if (params.pregnant)
+      where.push(
+        `EXISTS (SELECT 1 FROM pregnancies pg WHERE pg.animal_id = a.id AND pg.status = 'open' AND pg.deleted_at IS NULL)`,
+      );
+    // Sin pesaje reciente: última pesada más vieja que N días, o nunca pesado.
+    if (params.noRecentWeighingDays != null) {
+      args.push(params.noRecentWeighingDays);
+      where.push(`(w.weighed_at IS NULL OR w.weighed_at < now() - ($${args.length}::int * INTERVAL '1 day'))`);
+    }
+
+    // Orden configurable + keyset. COALESCE con sentinel según dirección → NULLs al final.
+    const sort = ANIMAL_SORTS[params.sort ?? 'created'] ?? ANIMAL_SORTS.created;
+    const dir = params.dir === 'asc' || params.dir === 'desc'
+      ? params.dir
+      : params.sort === 'tag' || params.sort === 'lot' || params.sort === 'category' || params.sort === 'status'
+        ? 'asc'
+        : 'desc';
+    const sentinel =
+      sort.kind === 'num'
+        ? dir === 'desc' ? 'COALESCE(' + sort.expr + '::float, -1e15)' : 'COALESCE(' + sort.expr + '::float, 1e15)'
+        : sort.kind === 'date'
+          ? dir === 'desc'
+            ? "COALESCE(" + sort.expr + "::timestamptz, '0001-01-01T00:00:00Z'::timestamptz)"
+            : "COALESCE(" + sort.expr + "::timestamptz, '9999-12-31T00:00:00Z'::timestamptz)"
+          : dir === 'desc' ? "COALESCE(" + sort.expr + ", '')" : "COALESCE(" + sort.expr + ", '~~~~~~~~~~~~~~~~')";
+    const cmp = dir === 'desc' ? '<' : '>';
+    const cast = sort.kind === 'num' ? '::float' : sort.kind === 'date' ? '::timestamptz' : '::text';
+
     if (params.cursor) {
       try {
-        const { created_at, id } = JSON.parse(Buffer.from(params.cursor, 'base64url').toString());
-        args.push(created_at, id);
-        where.push(`(a.created_at, a.id) < ($${args.length - 1}::timestamptz, $${args.length}::uuid)`);
+        const { v, id } = JSON.parse(Buffer.from(params.cursor, 'base64url').toString());
+        args.push(v, id);
+        where.push(`(${sentinel}, a.id) ${cmp} ($${args.length - 1}${cast}, $${args.length}::uuid)`);
       } catch {
         throw new BadRequestException({ code: 'pagination.invalid_cursor', title: 'Cursor inválido' });
       }
@@ -88,14 +180,15 @@ export class HerdService {
 
     args.push(limit + 1);
     const rows = await this.db.query<any>(
-      `SELECT a.id, a.name, a.sex, a.status, a.birth_date, a.created_at,
+      `SELECT a.id, a.name, a.sex, a.status, a.birth_date, a.created_at, a.origin,
               c.name AS category, c.code AS category_code,
               l.name AS lot_name, a.current_lot_id AS lot_id,
-              p.name AS paddock_name,
+              p.name AS paddock_name, a.current_paddock_id AS paddock_id,
               t.value AS tag,
               w.weight_kg::float AS last_weight_kg, w.adg_since_last::float AS adg, w.weighed_at AS last_weighed_at,
               br.breeds,
-              a.photo_file_id, pf.mime_type AS photo_mime
+              a.photo_file_id, pf.mime_type AS photo_mime,
+              ${sentinel} AS _sortval
        FROM animals a
        LEFT JOIN animal_categories c ON c.id = a.category_id
        LEFT JOIN lots l ON l.id = a.current_lot_id
@@ -114,21 +207,21 @@ export class HerdService {
          FROM animal_breeds ab JOIN breeds b ON b.id = ab.breed_id
          WHERE ab.animal_id = a.id AND ab.deleted_at IS NULL) br ON true
        WHERE ${where.join(' AND ')}
-       ORDER BY a.created_at DESC, a.id DESC
+       ORDER BY _sortval ${dir}, a.id ${dir}
        LIMIT $${args.length}`,
       args,
     );
 
     const hasMore = rows.length > limit;
-    const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => ({
+    const data = (hasMore ? rows.slice(0, limit) : rows).map(({ _sortval, ...r }) => ({
       ...r,
       photo: photoRef(this.db, r.photo_file_id, r.photo_mime),
     }));
-    const last = data[data.length - 1];
+    const lastRaw = (hasMore ? rows.slice(0, limit) : rows).at(-1);
     return {
       data,
       next_cursor: hasMore
-        ? Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString('base64url')
+        ? Buffer.from(JSON.stringify({ v: lastRaw._sortval, id: lastRaw.id })).toString('base64url')
         : null,
     };
   }
