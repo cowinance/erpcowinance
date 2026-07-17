@@ -20,13 +20,16 @@ async function sessionContext() {
     // /alerts/kpis evalúa las reglas (read-through) → el badge siempre está fresco
     // /notifications/unread-count es READ-THROUGH (genera el ledger si falta) → el badge es
     // correcto en cualquier página sin descargar el feed, como /alerts/kpis con las alertas.
-    const [me, farms, alertKpis, unread] = await Promise.all([
+    const [me, farms, alertKpis, unread, flags] = await Promise.all([
       fetch(`${API_URL}/auth/me`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/farms`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/alerts/kpis`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/notifications/unread-count`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API_URL}/config/feature-flags`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
     ]);
     if (!me) return null;
+    const moduleFlags: Record<string, boolean> = {};
+    for (const f of (flags ?? []) as { key: string; enabled: boolean }[]) moduleFlags[f.key] = f.enabled;
     return {
       userName: me.name as string,
       orgName: me.organization?.name as string,
@@ -34,6 +37,7 @@ async function sessionContext() {
       openAlerts: (alertKpis?.open ?? 0) as number,
       criticalAlerts: (alertKpis?.critical ?? 0) as number,
       unreadNotifications: (unread?.count ?? 0) as number,
+      moduleFlags,
     };
   } catch {
     return null;
@@ -53,6 +57,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             openAlerts={session?.openAlerts ?? 0}
             criticalAlerts={session?.criticalAlerts ?? 0}
             unreadNotifications={session?.unreadNotifications ?? 0}
+            moduleFlags={session?.moduleFlags ?? {}}
           />
           <main className="min-w-0 flex-1">
             <div className="mx-auto max-w-[1440px] px-8 py-6">{children}</div>

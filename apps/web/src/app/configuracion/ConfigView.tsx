@@ -154,8 +154,8 @@ function ParamsTab({ params, busy, call }: { params: OrgParams | null; busy: boo
 function FlagsTab({ flags, busy, call }: { flags: Flag[]; busy: boolean; call: Call }) {
   return (
     <Card className="max-w-2xl">
-      <CardTitle>Funciones opcionales</CardTitle>
-      <p className="mb-3 text-label text-ink-3">Activá o desactivá funciones para tu finca. Los cambios se aplican por organización.</p>
+      <CardTitle>Módulos de la finca</CardTitle>
+      <p className="mb-3 text-label text-ink-3">Activá o desactivá módulos según lo que usa tu finca. Los módulos apagados se ocultan del menú lateral.</p>
       <ul className="divide-y divide-subtle">
         {flags.map((f) => (
           <li key={f.key} className="flex items-center justify-between gap-4 py-3">

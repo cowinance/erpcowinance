@@ -92,6 +92,25 @@ const FOOTER_ITEMS = [
   { href: '/configuracion', label: 'Configuración', icon: Settings },
 ];
 
+/**
+ * href → bandera de módulo (FeatureFlagsService.FLAG_REGISTRY). Un módulo sin entrada acá es SIEMPRE
+ * visible (core operativo). Los que están se ocultan si su bandera está apagada para el tenant.
+ */
+const MODULE_FLAG: Record<string, string> = {
+  '/tambo': 'module_dairy',
+  '/engorde': 'module_feedlot',
+  '/cria': 'module_breeding',
+  '/faena': 'module_slaughter',
+  '/genetica': 'module_genetics',
+  '/laboratorio': 'module_lab',
+  '/agricultura': 'module_agriculture',
+  '/pastoreo': 'module_grazing',
+  '/maquinaria': 'module_machinery',
+  '/trazabilidad': 'module_traceability',
+  '/modulo/marketplace': 'module_marketplace',
+  '/modulo/academia': 'module_academy',
+};
+
 function NavItem({
   href,
   label,
@@ -141,6 +160,7 @@ export function Sidebar({
   openAlerts = 0,
   criticalAlerts = 0,
   unreadNotifications = 0,
+  moduleFlags = {},
 }: {
   orgName?: string;
   farmName?: string;
@@ -148,7 +168,13 @@ export function Sidebar({
   openAlerts?: number;
   criticalAlerts?: number;
   unreadNotifications?: number;
+  /** Estado de las banderas de módulo (key→enabled). Un módulo con bandera apagada se oculta. */
+  moduleFlags?: Record<string, boolean>;
 }) {
+  const visible = (href: string) => {
+    const flag = MODULE_FLAG[href];
+    return !flag || moduleFlags[flag] !== false;
+  };
   const farm = farmName ?? 'Cowinance';
   const initials = farm
     .split(' ')
@@ -179,24 +205,28 @@ export function Sidebar({
       </button>
 
       <nav className="mt-4 flex-1 space-y-5 overflow-y-auto">
-        {SECTIONS.map((s) => (
-          <div key={s.title}>
-            {s.title && (
-              <div className="mb-1 px-2.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
-                {s.title}
+        {SECTIONS.map((s) => {
+          const items = s.items.filter((it) => visible(it.href));
+          if (items.length === 0) return null;
+          return (
+            <div key={s.title}>
+              {s.title && (
+                <div className="mb-1 px-2.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
+                  {s.title}
+                </div>
+              )}
+              <div className="space-y-0.5">
+                {items.map((it) => (
+                  <NavItem key={it.href} {...it} />
+                ))}
               </div>
-            )}
-            <div className="space-y-0.5">
-              {s.items.map((it) => (
-                <NavItem key={it.href} {...it} />
-              ))}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       <div className="space-y-0.5 border-t border-subtle pt-3">
-        {FOOTER_ITEMS.map((it) =>
+        {FOOTER_ITEMS.filter((it) => visible(it.href)).map((it) =>
           it.href === '/notificaciones' ? (
             <NavItem key={it.href} {...it} badge={unreadNotifications} badgeTone="warning" badgeAriaLabel="notificaciones no leídas" />
           ) : (

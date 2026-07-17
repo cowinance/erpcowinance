@@ -7,11 +7,25 @@ import { DbService } from '../../db/db.service';
  * El código que quiera condicionar una función pregunta por `isEnabled(key)`. Agregar una bandera nueva
  * = una entrada acá (fuente única de la verdad de qué banderas existen y qué significan).
  */
+/**
+ * Banderas de MÓDULO: activan/desactivan la visibilidad de un módulo en la finca (el sidebar web las
+ * lee y oculta los apagados). Son las "módulos que se activan por tenant" del catálogo. Default: true
+ * (todo visible; el tenant apaga lo que no usa — un feedlot de carne apaga Tambo, un tambo apaga Faena).
+ * El `key` `module_<x>` empareja con un href del sidebar (ver MODULE_FLAG en Sidebar.tsx).
+ */
 export const FLAG_REGISTRY = [
-  { key: 'regional_benchmarking', label: 'Benchmarking regional', description: 'Comparación anónima de indicadores (preñez, GDP, costo/kg) con otras fincas de la región. Opt-in.', default: false },
-  { key: 'voice_capture', label: 'Captura por voz en manga', description: 'Registro por voz de pesajes y eventos en el modo manga.', default: false },
-  { key: 'push_notifications', label: 'Notificaciones push', description: 'Envío de notificaciones push a los dispositivos móviles de la finca.', default: false },
-  { key: 'advisor_access', label: 'Acceso de asesores externos', description: 'Habilita delegaciones temporales con vencimiento para técnicos y asesores.', default: false },
+  { key: 'module_dairy', label: 'Tambo (lechería)', description: 'Producción lechera, tanques, entregas y calidad de leche.', default: true },
+  { key: 'module_feedlot', label: 'Engorde a corral', description: 'Panel de feedlot: conversión, costo del kilo ganado y terminación.', default: true },
+  { key: 'module_breeding', label: 'Cría y recría', description: 'Eficiencia del rodeo de cría: destete, reposición, kg destetados/ha.', default: true },
+  { key: 'module_slaughter', label: 'Faena', description: 'Registro de res y rendimiento (dressing) por lote y padre.', default: true },
+  { key: 'module_genetics', label: 'Genética', description: 'Semen/embriones, consumo en inseminación y evaluaciones.', default: true },
+  { key: 'module_lab', label: 'Laboratorio', description: 'Muestras, estados y resultados de laboratorio.', default: true },
+  { key: 'module_agriculture', label: 'Agricultura', description: 'Cultivos, labores y cosechas sobre potreros.', default: true },
+  { key: 'module_grazing', label: 'Pastoreo', description: 'Rotación y métricas de pastoreo por potrero.', default: true },
+  { key: 'module_machinery', label: 'Maquinaria', description: 'Máquinas, mantenimiento y combustible.', default: true },
+  { key: 'module_traceability', label: 'Trazabilidad', description: 'Guías de traslado y certificaciones.', default: true },
+  { key: 'module_marketplace', label: 'Marketplace', description: 'Comercialización de hacienda (próximamente).', default: true },
+  { key: 'module_academy', label: 'Academia', description: 'Cursos y capacitación (próximamente).', default: true },
 ] as const;
 
 export type FlagKey = (typeof FLAG_REGISTRY)[number]['key'];

@@ -110,19 +110,20 @@ describe('config — catálogos maestros', () => {
     await expect(svc.setParams({ unit_system: 'metric', default_locale: '', timezone: 'UTC' })).rejects.toMatchObject({ status: 400 });
   });
 
-  it('feature flags: default del registro, toggle por tenant e isEnabled', async () => {
+  it('feature flags de módulo: default visible (true), toggle por tenant e isEnabled', async () => {
     const initial: any[] = await flags.list();
-    const bench = initial.find((f) => f.key === 'regional_benchmarking');
-    expect(bench.enabled).toBe(false); // default del registro (sin fila)
-    expect(await flags.isEnabled('regional_benchmarking')).toBe(false);
+    const dairy = initial.find((f) => f.key === 'module_dairy');
+    expect(dairy.enabled).toBe(true); // módulos visibles por default (sin fila)
+    expect(await flags.isEnabled('module_dairy')).toBe(true);
 
-    const after: any[] = await flags.set({ key: 'regional_benchmarking', enabled: true });
-    expect(after.find((f) => f.key === 'regional_benchmarking').enabled).toBe(true);
-    expect(await flags.isEnabled('regional_benchmarking')).toBe(true);
+    // Apagar el módulo (una finca de carne oculta Tambo).
+    await flags.set({ key: 'module_dairy', enabled: false });
+    expect(await flags.isEnabled('module_dairy')).toBe(false);
 
-    // Upsert idempotente: apagar vuelve a false.
-    await flags.set({ key: 'regional_benchmarking', enabled: false });
-    expect(await flags.isEnabled('regional_benchmarking')).toBe(false);
+    // Upsert idempotente: volver a prender.
+    const after: any[] = await flags.set({ key: 'module_dairy', enabled: true });
+    expect(after.find((f) => f.key === 'module_dairy').enabled).toBe(true);
+    expect(await flags.isEnabled('module_dairy')).toBe(true);
 
     await expect(flags.set({ key: 'no_existe', enabled: true })).rejects.toMatchObject({ status: 400 });
   });

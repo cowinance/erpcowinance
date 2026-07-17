@@ -77,13 +77,12 @@ Los catálogos tienen dos modelos distintos en el esquema:
 
 ## 6-ter. Feature flags y parámetros (3ª entrega)
 
-- **Pestaña «Funciones» (feature flags):** registro de banderas conocidas (`FLAG_REGISTRY` en
+- **Pestaña «Funciones»/«Módulos» (feature flags):** registro de banderas conocidas (`FLAG_REGISTRY` en
   `feature-flags.service.ts` — fuente única de qué banderas existen y su default) con toggle por tenant.
   `GET /config/feature-flags` (estado resuelto: valor guardado o default) y `PUT /config/feature-flags`
   (upsert por tenant+flag_key). El código consumidor pregunta `isEnabled(key)`; `FeatureFlagsService`
-  se exporta del módulo para eso. Banderas iniciales: benchmarking regional, captura por voz, push,
-  acceso de asesores. **El gating de cada función sobre su bandera es incremental** (el mecanismo queda
-  listo; conectar cada pantalla es follow-up).
+  se exporta del módulo. **Las banderas son de MÓDULO** (`module_dairy`, `module_feedlot`, … 12
+  módulos opcionales), **default true** — el gating real está en la 5ª entrega (ver abajo).
 - **Pestaña «Parámetros»:** edita los parámetros operativos de la organización que la app ya lee —
   `unit_system` (métrico/imperial), `default_locale`, `timezone`. `GET/PUT /config/params`.
 - **Regla única (dominio):** `assertUnitSystem` (metric/imperial).
@@ -108,10 +107,24 @@ Los catálogos tienen dos modelos distintos en el esquema:
   entra con umbral 30, no con 10; desaparece si la regla se apaga) y en la web (apagar «Preñez vencida»
   bajó el contador de alertas 55 → 53 al auto-resolverse).
 
+## 6-quinquies. Gating real: módulos por tenant en el sidebar (5ª entrega)
+
+- Las feature flags (aspiracionales, sin superficie que gatear) se **reformularon a banderas de
+  MÓDULO** que controlan la visibilidad de cada módulo en el sidebar web — el uso real que el catálogo
+  describe ("módulos que se activan por tenant"). 12 módulos opcionales (Tambo, Engorde, Cría, Faena,
+  Genética, Laboratorio, Agricultura, Pastoreo, Maquinaria, Trazabilidad, Marketplace, Academia); el
+  core operativo (Animales, Lotes, Manga, Finanzas, etc.) siempre visible.
+- **Cableado:** el `layout.tsx` (server) trae `/config/feature-flags` en `sessionContext` y pasa
+  `moduleFlags` (key→enabled) al `Sidebar`; `MODULE_FLAG` (href→key) filtra los ítems; una sección que
+  queda vacía no se renderiza. Default true → nada desaparece hasta que el tenant apaga un módulo.
+- **Verificado en la web:** apagar «Genética» en Configuración → desaparece del sidebar (router.refresh
+  re-fetchea las flags); reactivar → vuelve. Round-trip completo.
+
 ## 7. Estado del roadmap
 
-**Configuración (A3) → COMPLETA en sus cinco partes:** catálogos maestros, moneda, parámetros de la
-organización, feature flags y motor de reglas declarativas. El módulo dejó de ser placeholder.
+**Configuración (A3) → COMPLETA:** catálogos maestros, moneda, parámetros de la organización, feature
+flags **de módulo que gatean el sidebar** y motor de reglas declarativas. El módulo dejó de ser
+placeholder.
 
 **Siguiente en A3 (a elección):** monedas y tipos de cambio (desbloquea multi-moneda de Tesorería),
 feature flags por tenant, o parámetros de negocio. También pendiente el hardening de RLS de los
