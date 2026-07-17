@@ -34,6 +34,39 @@ const SEX_ES: Record<string, string> = { F: 'Hembras', M: 'Machos' };
 const HIST_LABEL: Record<string, string> = { ingreso: 'Ingreso', salida: 'Salida', rotacion: 'Rotación de potrero', movimiento: 'Movimiento' };
 const HIST_TONE: Record<string, string> = { ingreso: 'bg-success', salida: 'bg-warning', rotacion: 'bg-info', movimiento: 'bg-ink-3' };
 
+// Métricas por propósito del lote (Etapa 4): qué campos mostrar y su etiqueta/unidad.
+const METRIC_CONFIG: Record<string, { key: string; label: string; unit?: string }[]> = {
+  fattening: [
+    { key: 'kg_gained', label: 'Kg ganados', unit: 'kg' }, { key: 'conversion', label: 'Conversión', unit: 'kg/kg' }, { key: 'cost_per_kg_gained', label: 'Costo/kg' },
+    { key: 'avg_adg', label: 'GDP', unit: 'kg/d' }, { key: 'feed_kg', label: 'Alimento', unit: 'kg' }, { key: 'days_to_finish', label: 'Días a terminar', unit: 'd' },
+  ],
+  breeding: [
+    { key: 'vientres', label: 'Vientres' }, { key: 'toros', label: 'Toros' }, { key: 'prenadas', label: 'Preñadas' },
+    { key: 'vacias', label: 'Vacías' }, { key: 'crias_al_pie', label: 'Crías al pie' },
+  ],
+  weaning: [
+    { key: 'peso_inicial', label: 'Peso inicial', unit: 'kg' }, { key: 'peso_actual', label: 'Peso actual', unit: 'kg' }, { key: 'gdp', label: 'GDP', unit: 'kg/d' }, { key: 'edad_prom_meses', label: 'Edad prom.', unit: 'm' },
+  ],
+  hospital: [
+    { key: 'dias_promedio', label: 'Días prom. en lote', unit: 'd' }, { key: 'tratamientos_vigentes', label: 'Tratam. vigentes' },
+  ],
+  quarantine: [
+    { key: 'fecha_ingreso', label: 'Ingreso' }, { key: 'dias', label: 'Días', unit: 'd' }, { key: 'fecha_liberacion', label: 'Liberación est.' },
+  ],
+  dairy: [
+    { key: 'litros_prom_dia', label: 'Litros/día', unit: 'l' }, { key: 'en_ordene', label: 'En ordeñe' }, { key: 'prenadas', label: 'Preñadas' },
+  ],
+};
+const PURPOSE_METRIC_TITLE: Record<string, string> = {
+  fattening: 'Métricas de engorde', breeding: 'Métricas de cría', weaning: 'Métricas de recría',
+  hospital: 'Métricas de hospital', quarantine: 'Métricas de cuarentena', dairy: 'Métricas del tambo',
+};
+const fmtMetric = (v: any): string => {
+  if (v == null) return '—';
+  if (typeof v === 'string') return v.slice(0, 10); // fechas AAAA-MM-DD
+  return Number(v).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+};
+
 export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddocks: Paddock[]; categories: Category[] }) {
   const router = useRouter();
   const [mode, setMode] = useState<'none' | 'new' | 'edit'>('none');
@@ -60,6 +93,8 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
   // historial del lote
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  // métricas por propósito
+  const [metrics, setMetrics] = useState<{ purpose: string | null; metrics: Record<string, any> | null } | null>(null);
   // acciones del lote: dividir / mover todo / fusionar
   const [actionsOpen, setActionsOpen] = useState(false);
   const [splitName, setSplitName] = useState('');
@@ -109,8 +144,14 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
     setSelectedId(id); setMode('none'); setError(''); setAdding(false); setResults([]); setSearch(''); setShowHistory(false);
     setFilters(EMPTY_FILTERS); setFiltersOpen(false);
     setActionsOpen(false); setSplitName(''); setMoveAllTarget(''); setMergeTarget(''); setConfirmMerge(false);
+    setMetrics(null);
     const d = await call('GET', `/lots/${id}`);
-    if (d) { setDetail(d); loadAnimals(id, EMPTY_FILTERS, null); call('GET', `/lots/${id}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[])); }
+    if (d) {
+      setDetail(d);
+      loadAnimals(id, EMPTY_FILTERS, null);
+      call('GET', `/lots/${id}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[]));
+      call('GET', `/lots/${id}/metrics`).then((m) => setMetrics(m ?? null));
+    }
   }
   function toggle(set: Set<string>, id: string): Set<string> {
     const next = new Set(set);
@@ -313,6 +354,23 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
                     )}
                   </div>
                   {confirmMerge && <p className="mt-1 text-caption text-warning">Se moverán todos los animales al lote elegido y este lote se archivará.</p>}
+                </div>
+              </div>
+            )}
+
+            {metrics?.metrics && METRIC_CONFIG[metrics.purpose ?? ''] && (
+              <div className="mt-4">
+                <div className="mb-1.5 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">{PURPOSE_METRIC_TITLE[metrics.purpose ?? ''] ?? 'Métricas'}</div>
+                <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-2">
+                  {METRIC_CONFIG[metrics.purpose ?? ''].map((m) => (
+                    <div key={m.key} className="rounded-md bg-sunken p-2">
+                      <div className="text-caption text-ink-3">{m.label}</div>
+                      <div className="tnum text-body font-semibold">
+                        {fmtMetric(metrics.metrics![m.key])}
+                        {m.unit && metrics.metrics![m.key] != null ? <span className="ml-0.5 text-caption font-normal text-ink-3">{m.unit}</span> : null}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

@@ -121,10 +121,18 @@ UNA transacción — sin update directo de `current_lot_id`. Idempotentes por `I
 Verificado en web: dividí Rodeo Cría 2 (9 → 6) en un lote nuevo «Vaquillonas 2026» (3); luego lo fusioné
 de vuelta (Rodeo Cría 2 → 9) y «Vaquillonas 2026» quedó archivado (fuera de la grilla).
 
+## 5-sexies. Métricas por propósito (6ª entrega — Etapa 4)
+
+`GET /lots/:id/metrics` deriva indicadores específicos según `lot.purpose`, reusando la infraestructura
+existente (nada nuevo de datos): **Engorde** reusa `computeFeedlotMetrics` (kg ganados, conversión,
+costo/kg, GDP, alimento, días a terminar con `?target=`); **Cría** vientres/toros/preñadas(open)/vacías/
+crías al pie; **Recría** peso inicial/actual/GDP/edad prom; **Hospital** días promedio en el lote
+(animal_movements) + tratamientos vigentes (retiros activos); **Cuarentena** ingreso/días/liberación
+(+21); **Tambo** litros/día prom (milk_production_daily 7d)/en ordeñe/preñadas. Web: tarjeta
+«Métricas de <propósito>». Test `lot-metrics`. Verificado en web: Rodeo Cría 1 → Vientres 18/Toros 2/
+Preñadas 11/Vacías 7; Engorde Otoño → Kg ganados 1.664/GDP 1,27.
+
 ## 6. Trabajo diferido (etapas siguientes del rediseño)
-- **Etapa 4:** **métricas por propósito** (engorde: conversión/costo/kg/terminación; cría: vientres/toros/
-  preñadas/vacías/crías; recría: peso inicial/actual/GDP/edad; hospital: motivo/días/tratamientos;
-  cuarentena: ingreso/liberación; tambo: producción/estado reproductivo).
 - **Etapa 5:** **alertas operativas** (sin potrero, sin pesaje reciente, sin identificación, mezcla
   inusual de categorías, vacío) y estado del lote (activo/vacío/archivado/con alertas).
 - **Etapa 6:** UX — tabla compacta, orden por cabezas/propósito/potrero/peso/estado, export/print.

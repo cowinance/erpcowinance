@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvalidLotError, validateLotInput } from '@cowinance/domain';
+import { InvalidLotError, computeFeedlotMetrics, validateLotInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
@@ -372,6 +372,104 @@ export class HerdService {
        WHERE l.tenant_id = $1 AND l.deleted_at IS NULL ORDER BY l.is_active DESC, l.name`,
       [this.db.tenant],
     );
+  }
+
+  /**
+   * Métricas específicas según el PROPÓSITO del lote (Etapa 4). Reusa la infraestructura existente:
+   * feedlot (computeFeedlotMetrics), pregnancies, v_weighings, animal_movements, milk_production_daily,
+   * treatments. Sobre los animales activos del lote; derivado, nada se persiste.
+   */
+  async lotMetrics(id: string, targetWeight?: number) {
+    const t = this.db.tenant;
+    const lot = await this.db.one<any>(`SELECT id, purpose FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+    const inLot = `a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL`;
+
+    switch (lot.purpose) {
+      case 'fattening': {
+        const [agg] = await this.db.query<any>(
+          `WITH per AS (
+             SELECT a.id,
+               (SELECT weight_kg FROM v_weighings w WHERE w.animal_id=a.id AND w.tenant_id=$2 ORDER BY weighed_at ASC, created_at ASC, id ASC LIMIT 1) AS first_w,
+               (SELECT weight_kg FROM v_weighings w WHERE w.animal_id=a.id AND w.tenant_id=$2 ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) AS last_w,
+               (SELECT adg_since_last FROM v_weighings w WHERE w.animal_id=a.id AND w.tenant_id=$2 ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) AS adg
+             FROM animals a WHERE ${inLot})
+           SELECT (SELECT count(*) FROM per)::int AS head,
+                  (SELECT avg(last_w) FROM per)::float AS avg_weight_kg,
+                  (SELECT avg(adg) FROM per WHERE adg IS NOT NULL)::float AS avg_adg,
+                  COALESCE((SELECT sum(last_w-first_w) FROM per WHERE last_w IS NOT NULL AND first_w IS NOT NULL),0)::float AS kg_gained,
+                  COALESCE((SELECT sum(quantity_kg) FROM feed_deliveries fd WHERE fd.lot_id=$1 AND fd.tenant_id=$2 AND fd.deleted_at IS NULL),0)::float AS feed_kg,
+                  COALESCE((SELECT sum(total_cost) FROM feed_deliveries fd WHERE fd.lot_id=$1 AND fd.tenant_id=$2 AND fd.deleted_at IS NULL),0)::float AS feed_cost`,
+          [id, t],
+        );
+        const m = computeFeedlotMetrics({ feedKg: agg.feed_kg, feedCost: agg.feed_cost, kgGained: agg.kg_gained, avgWeightKg: agg.avg_weight_kg, avgAdg: agg.avg_adg, targetWeightKg: targetWeight ?? null });
+        return { purpose: lot.purpose, metrics: { head: agg.head, feed_kg: agg.feed_kg, feed_cost: agg.feed_cost, kg_gained: agg.kg_gained, avg_weight_kg: agg.avg_weight_kg, avg_adg: agg.avg_adg, conversion: m.conversion, cost_per_kg_gained: m.costPerKgGained, days_to_finish: m.daysToFinish } };
+      }
+      case 'breeding': {
+        const [r] = await this.db.query<any>(
+          `SELECT count(*) FILTER (WHERE c.code IN ('vaca','vaquillona'))::int AS vientres,
+                  count(*) FILTER (WHERE c.code='toro')::int AS toros,
+                  count(*) FILTER (WHERE c.code IN ('ternero','ternera'))::int AS crias_al_pie,
+                  count(*) FILTER (WHERE c.code IN ('vaca','vaquillona') AND EXISTS(SELECT 1 FROM pregnancies pr WHERE pr.animal_id=a.id AND pr.status='open' AND pr.deleted_at IS NULL))::int AS prenadas
+           FROM animals a LEFT JOIN animal_categories c ON c.id=a.category_id WHERE ${inLot}`,
+          [id, t],
+        );
+        return { purpose: lot.purpose, metrics: { vientres: r.vientres, toros: r.toros, prenadas: r.prenadas, vacias: Math.max(0, r.vientres - r.prenadas), crias_al_pie: r.crias_al_pie } };
+      }
+      case 'weaning': {
+        const [r] = await this.db.query<any>(
+          `WITH per AS (
+             SELECT a.id, a.birth_date AS bd,
+               (SELECT weight_kg FROM v_weighings w WHERE w.animal_id=a.id AND w.tenant_id=$2 ORDER BY weighed_at ASC, created_at ASC, id ASC LIMIT 1) AS first_w,
+               (SELECT weight_kg FROM v_weighings w WHERE w.animal_id=a.id AND w.tenant_id=$2 ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) AS last_w,
+               (SELECT adg_since_last FROM v_weighings w WHERE w.animal_id=a.id AND w.tenant_id=$2 ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) AS adg
+             FROM animals a WHERE ${inLot})
+           SELECT count(*)::int AS head, round(avg(first_w))::int AS peso_inicial, round(avg(last_w))::int AS peso_actual,
+                  round(avg(adg)::numeric,2)::float AS gdp,
+                  round(avg((CURRENT_DATE - bd)/30.44)::numeric,1)::float AS edad_prom_meses FROM per`,
+          [id, t],
+        );
+        return { purpose: lot.purpose, metrics: r };
+      }
+      case 'hospital': {
+        const [r] = await this.db.query<any>(
+          `SELECT count(*)::int AS head,
+                  round(avg(CURRENT_DATE - entry.d)::numeric,0)::int AS dias_promedio,
+                  count(*) FILTER (WHERE EXISTS(SELECT 1 FROM treatments tr WHERE tr.animal_id=a.id AND tr.deleted_at IS NULL AND (tr.meat_withdrawal_until >= CURRENT_DATE OR tr.milk_withdrawal_until >= now())))::int AS tratamientos_vigentes
+           FROM animals a
+           LEFT JOIN LATERAL (SELECT max(moved_at)::date AS d FROM animal_movements m WHERE m.animal_id=a.id AND m.to_lot_id=$1 AND m.deleted_at IS NULL) entry ON true
+           WHERE ${inLot}`,
+          [id, t],
+        );
+        return { purpose: lot.purpose, metrics: r };
+      }
+      case 'quarantine': {
+        const [r] = await this.db.query<any>(
+          `WITH per AS (
+             SELECT (SELECT max(moved_at)::date FROM animal_movements m WHERE m.animal_id=a.id AND m.to_lot_id=$1 AND m.deleted_at IS NULL) AS d
+             FROM animals a WHERE ${inLot})
+           SELECT count(*)::int AS head, min(d)::text AS fecha_ingreso,
+                  (CURRENT_DATE - min(d))::int AS dias, (min(d) + 21)::text AS fecha_liberacion FROM per`,
+          [id, t],
+        );
+        return { purpose: lot.purpose, metrics: r };
+      }
+      case 'dairy': {
+        const [r] = await this.db.query<any>(
+          `SELECT count(*)::int AS head,
+                  round(avg(mp.liters)::numeric,1)::float AS litros_prom_dia,
+                  count(*) FILTER (WHERE mp.liters IS NOT NULL)::int AS en_ordene,
+                  count(*) FILTER (WHERE EXISTS(SELECT 1 FROM pregnancies pr WHERE pr.animal_id=a.id AND pr.status='open' AND pr.deleted_at IS NULL))::int AS prenadas
+           FROM animals a
+           LEFT JOIN LATERAL (SELECT avg(total_liters)::float AS liters FROM milk_production_daily md WHERE md.animal_id=a.id AND md.deleted_at IS NULL AND md.production_date >= CURRENT_DATE - 7) mp ON true
+           WHERE ${inLot}`,
+          [id, t],
+        );
+        return { purpose: lot.purpose, metrics: r };
+      }
+      default:
+        return { purpose: lot.purpose, metrics: null };
+    }
   }
 
   /** Detalle del lote: propósito, potrero, estado + composición (categoría/sexo) y agregados (peso, GDP). */
