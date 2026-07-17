@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvalidLotError, Sex, TagNumber, computeFeedlotMetrics, validateLotInput } from '@cowinance/domain';
+import { InvalidLotError, Sex, TagNumber, computeFeedlotMetrics, validateLotInput, validateWeighing } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
@@ -1051,8 +1051,9 @@ export class HerdService {
 
     if (body.type === 'weighing') {
       const kg = Number(body.weight_kg);
-      if (!kg || kg <= 0)
-        throw new BadRequestException({ code: 'weighing.invalid_weight', title: 'weight_kg debe ser positivo' });
+      // Errores DUROS de la regla única de dominio (vacío/no numérico/no positivo/absurdo).
+      const v = validateWeighing({ weightKg: kg });
+      if (!v.ok) throw new BadRequestException({ code: 'weighing.invalid_weight', title: v.error!.message });
       const inserted = await this.db.one<{ id: string }>(
         `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, body_condition)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,

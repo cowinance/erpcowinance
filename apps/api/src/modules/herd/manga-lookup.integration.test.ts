@@ -90,4 +90,14 @@ describe('HerdService.lookup — tarjeta robusta de manga (E1)', () => {
   it('404 si no existe', async () => {
     await expect(herd.lookup({ identifier: 'NOPE-999' })).rejects.toThrow();
   });
+
+  it('registerEvent aplica los errores duros de validateWeighing', async () => {
+    await expect(herd.registerEvent(animalId, { type: 'weighing', weight_kg: 0 })).rejects.toThrow();
+    await expect(herd.registerEvent(animalId, { type: 'weighing', weight_kg: -10 })).rejects.toThrow();
+    await expect(herd.registerEvent(animalId, { type: 'weighing', weight_kg: 2000 })).rejects.toThrow();
+    // Un peso válido se guarda y devuelve el GDP derivado.
+    const ev: any = await herd.registerEvent(animalId, { type: 'weighing', weight_kg: 445 });
+    expect(ev.event_type).toBe('weighing');
+    expect(ev).toHaveProperty('adg_since_last');
+  });
 });

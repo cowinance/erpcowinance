@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { validateWeighing } from '@cowinance/domain';
 import { API_URL, authHeaders } from '@/lib/api';
 
 interface Animal {
@@ -108,6 +109,8 @@ export default function MangaPage() {
   const [kg, setKg] = useState('');
   const [cc, setCc] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [warn, setWarn] = useState<string | null>(null);
+  const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
   const tagRef = useRef<HTMLInputElement>(null);
   const kgRef = useRef<HTMLInputElement>(null);
@@ -172,6 +175,24 @@ export default function MangaPage() {
   async function save() {
     if (!animal || !kg) return;
     setError('');
+    // Validación fuerte (regla única de dominio): errores duros bloquean; advertencias informan;
+    // cambio extremo vs último peso exige una segunda confirmación antes de enviar.
+    const v = validateWeighing({
+      weightKg: Number(kg),
+      lastWeightKg: animal.last_weight_kg ?? null,
+      daysSinceLast: animal.days_since_weighing ?? null,
+    });
+    if (!v.ok) {
+      setConfirmMsg(null);
+      return fail(v.error!.message.toUpperCase());
+    }
+    setWarn(v.warnings.length ? v.warnings.map((w) => w.message).join(' · ') : null);
+    if (v.requiresConfirm && confirmMsg !== v.confirm!.message) {
+      setConfirmMsg(v.confirm!.message);
+      soundError();
+      return; // esperar confirmación (segundo GUARDAR)
+    }
+    setConfirmMsg(null);
     try {
       const res = await fetch(`${API_URL}/animals/${animal.id}/events`, {
         method: 'POST',
@@ -190,6 +211,8 @@ export default function MangaPage() {
       setAnimal(null);
       setKg('');
       setCc(null);
+      setWarn(null);
+      setConfirmMsg(null);
     } catch {
       fail('SIN CONEXIÓN CON LA API');
     }
@@ -358,7 +381,7 @@ export default function MangaPage() {
               <input
                 ref={kgRef}
                 value={kg}
-                onChange={(e) => setKg(e.target.value)}
+                onChange={(e) => { setKg(e.target.value); setConfirmMsg(null); setWarn(null); }}
                 onKeyDown={(e) => e.key === 'Enter' && save()}
                 inputMode="decimal"
                 placeholder="0"
@@ -380,11 +403,21 @@ export default function MangaPage() {
             </div>
 
             {error && <div className="text-[20px] font-bold text-[#f87171]">{error}</div>}
+            {!error && warn && !confirmMsg && (
+              <div className="w-full max-w-md rounded-lg bg-[#facc15]/15 px-4 py-2 text-center text-[16px] font-bold text-[#facc15]">⚠ {warn}</div>
+            )}
+            {confirmMsg && (
+              <div className="w-full max-w-md rounded-lg bg-[#facc15] px-4 py-3 text-center text-[17px] font-bold text-black">⚠ {confirmMsg}</div>
+            )}
 
-            <button onClick={save} disabled={!kg} className="h-[72px] w-full max-w-md rounded-xl bg-[#4ade80] text-[24px] font-extrabold text-black disabled:opacity-30">
-              GUARDAR Y SIGUIENTE
+            <button
+              onClick={save}
+              disabled={!kg}
+              className={`h-[72px] w-full max-w-md rounded-xl text-[24px] font-extrabold text-black disabled:opacity-30 ${confirmMsg ? 'bg-[#facc15]' : 'bg-[#4ade80]'}`}
+            >
+              {confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}
             </button>
-            <button onClick={() => (setAnimal(null), setKg(''), setCc(null), setError(''))} className="text-[15px] text-white/50 underline">
+            <button onClick={() => (setAnimal(null), setKg(''), setCc(null), setError(''), setWarn(null), setConfirmMsg(null))} className="text-[15px] text-white/50 underline">
               Cambiar animal
             </button>
           </>
