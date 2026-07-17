@@ -109,6 +109,36 @@ panel «Próximos partos» y `ToPreparePanel` sueltos (ahora dentro del dashboar
 web: dashboard con KPIs, accesos rápidos y buckets con datos reales (diagnóstico pendiente 1, abiertas
 críticas 3, partos próximos 4); el acceso rápido «Diagnosticar» enfoca la pestaña de diagnóstico.
 
+---
+
+## Etapa 4 — Protocolos completos ✅
+
+**Esquema (migración idempotente, sin reset):** `repro_protocol_assignments` + `target_type`,
+`category_code`, `completed_steps jsonb`; tabla nueva `repro_protocol_assignment_animals` (snapshot de
+vientres del objetivo) + RLS.
+
+**Dominio:** `ProtocolStep` + `kind` (hormonal / device_removal / insemination / diagnosis / review /
+other) — define qué EVENTO REAL se registra al completar el paso. `validateProtocolSteps` lo valida.
+
+**Servicio (`repro.service`):**
+- `assignProtocol` reescrito: objetivo **lote / categoría / selección / todo el hato** (`resolveProtocolTargets`),
+  snapshotea los vientres, y **evita duplicados** (excluye animales ya en una asignación ACTIVA del mismo
+  protocolo; si todos están → 409). Genera una tarea por paso.
+- `completeStep(assignment, index)`: marca el paso y registra el **evento real por animal** según el
+  `kind` — `insemination` → servicio IATF (reusa `service`), `hormonal`/`device_removal` → evento
+  `synchronization`; idempotente por (asignación, paso, animal). Cierra la tarea del paso.
+- `assignmentProgress(assignment)`: pasos con estado (completado/pendiente) + fechas + kind.
+- Endpoints: `.../progress`, `.../steps/:index/complete`.
+
+**Web:** `ProtocolsManager` con **tipo de paso** por paso; `AssignmentsPanel` con **objetivo**
+(lote/categoría/hato) y expander **«Pasos»** con progreso + botón **Completar** por paso.
+
+**Tests (5 nuevos):** `protocol-complete.integration` — asigna a lote (snapshot), dedup → 409, completar
+hormonal → sincronización por animal (idempotente), completar inseminación → servicio IATF + progreso,
+asignar por selección. Test de asignaciones ajustado (objetivo vacío → 400). **754 tests** (749 → +5), 0
+ciclos. Verificado en web: asignación por categoría (8 vaquillonas), completar paso hormonal → 8 eventos
+de sincronización; página con objetivo/tipo-de-paso/progreso.
+
 ### Siguiente
-**Etapa 4 — Protocolos completos:** pasos que al completarse registran eventos reales (tratamiento
-hormonal, servicio, diagnóstico), aplicar a categoría/selección (no solo lote), y progreso por protocolo.
+**Etapa 5 — KPIs + reportes ampliados:** tasa de concepción, servicios por concepción, días abiertos,
+intervalo parto-concepción, por toro/semen, abiertas/repetidoras/diagnósticos-pendientes/abortos, CSV.

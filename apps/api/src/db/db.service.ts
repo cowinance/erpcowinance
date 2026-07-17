@@ -304,6 +304,19 @@ export class DbService implements OnModuleInit {
       deleted_at timestamptz
     );
     CREATE INDEX IF NOT EXISTS ix_repro_assignments_tenant ON repro_protocol_assignments (tenant_id, status);
+    -- Reproducción E4: objetivo (lote/categoría/selección/hato), snapshot de animales y pasos completados.
+    ALTER TABLE repro_protocol_assignments ADD COLUMN IF NOT EXISTS target_type varchar(16) NOT NULL DEFAULT 'lot';
+    ALTER TABLE repro_protocol_assignments ADD COLUMN IF NOT EXISTS category_code varchar(255);
+    ALTER TABLE repro_protocol_assignments ADD COLUMN IF NOT EXISTS completed_steps jsonb NOT NULL DEFAULT '[]';
+    CREATE TABLE IF NOT EXISTS repro_protocol_assignment_animals (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+      assignment_id uuid NOT NULL REFERENCES repro_protocol_assignments(id) ON DELETE CASCADE,
+      animal_id uuid NOT NULL REFERENCES animals(id) ON DELETE CASCADE,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (assignment_id, animal_id)
+    );
+    CREATE INDEX IF NOT EXISTS ix_repro_assignment_animals ON repro_protocol_assignment_animals (tenant_id, assignment_id);
   `;
 
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
@@ -327,6 +340,7 @@ export class DbService implements OnModuleInit {
     'weanings',
     'repro_protocols',
     'repro_protocol_assignments',
+    'repro_protocol_assignment_animals',
     'subscriptions',
     'inventory_categories',
     'inventory_items',

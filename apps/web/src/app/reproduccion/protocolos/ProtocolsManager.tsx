@@ -6,12 +6,22 @@ import { API_URL, authHeaders } from '@/lib/api';
 import { Card, CardTitle } from '@/components/ui';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
 import { Plus, Trash2 } from 'lucide-react';
 
 interface Step {
   day: number | string;
   action: string;
+  kind?: string;
 }
+const STEP_KINDS: [string, string][] = [
+  ['other', 'General'],
+  ['hormonal', 'Hormonal'],
+  ['device_removal', 'Retiro dispositivo'],
+  ['insemination', 'Inseminación (IATF)'],
+  ['diagnosis', 'Diagnóstico'],
+  ['review', 'Revisión'],
+];
 interface Protocol {
   id: string;
   name: string;
@@ -35,7 +45,7 @@ export function ProtocolsManager({ initial }: { initial: Protocol[] }) {
     setError('');
     const cleanSteps = steps
       .filter((s) => String(s.action).trim().length > 0)
-      .map((s) => ({ day: Number(s.day), action: String(s.action).trim() }));
+      .map((s) => ({ day: Number(s.day), action: String(s.action).trim(), kind: s.kind || undefined }));
     if (!name.trim()) {
       setError('El nombre es obligatorio.');
       return;
@@ -141,6 +151,9 @@ export function ProtocolsManager({ initial }: { initial: Protocol[] }) {
                 aria-label={`Acción del paso ${i + 1}`}
                 placeholder="Acción"
               />
+              <Select value={s.kind ?? 'other'} onChange={(e) => setStep(i, { kind: e.target.value })} controlSize="md" fullWidth={false} className="w-40 shrink-0" aria-label={`Tipo del paso ${i + 1}`}>
+                {STEP_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </Select>
               <button onClick={() => removeStep(i)} aria-label="Quitar paso" className="shrink-0 rounded-md p-1.5 text-ink-3 hover:bg-sunken hover:text-danger">
                 <Trash2 size={15} />
               </button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Card, CardTitle } from '@/components/ui';
@@ -35,20 +35,24 @@ function localToday(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function AssignmentsPanel({ protocols, lots, assignments }: { protocols: Protocol[]; lots: Lot[]; assignments: Assignment[] }) {
+export function AssignmentsPanel({ protocols, lots, assignments, categories = [] }: { protocols: Protocol[]; lots: Lot[]; assignments: Assignment[]; categories?: any[] }) {
   const router = useRouter();
   const activeProtocols = protocols.filter((p) => p.is_active);
   const today = localToday();
 
   const [protocolId, setProtocolId] = useState('');
+  const [targetType, setTargetType] = useState<'lot' | 'category' | 'all'>('lot');
   const [lotId, setLotId] = useState('');
+  const [categoryCode, setCategoryCode] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [confirmId, setConfirmId] = useState('');
+  const [progressFor, setProgressFor] = useState<string | null>(null);
+  const [progress, setProgress] = useState<any>(null);
 
-  const canAssign = activeProtocols.length > 0 && lots.length > 0;
+  const canAssign = activeProtocols.length > 0;
   const activeAssignments = assignments.filter((a) => a.status === 'active');
   const protocolsById = new Map<string, CalendarProtocol>(protocols.map((p) => [p.id, { id: p.id, name: p.name, steps: p.steps ?? [] }]));
   const calendar = buildProtocolCalendar(activeAssignments, protocolsById, today);
@@ -57,26 +61,29 @@ export function AssignmentsPanel({ protocols, lots, assignments }: { protocols: 
     if (busy) return;
     setError('');
     setFeedback('');
-    if (!protocolId || !lotId || !startDate) {
-      setError('Elegí protocolo, lote y fecha.');
+    if (!protocolId || !startDate || (targetType === 'lot' && !lotId) || (targetType === 'category' && !categoryCode)) {
+      setError('Completá protocolo, objetivo y fecha.');
       return;
     }
     setBusy(true);
     try {
+      const body: any = { protocol_id: protocolId, start_date: startDate };
+      if (targetType === 'lot') body.lot_id = lotId;
+      else if (targetType === 'category') body.category_code = categoryCode;
       const res = await fetch(`${API_URL}/reproduction/protocol-assignments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ protocol_id: protocolId, lot_id: lotId, start_date: startDate }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => null);
-        throw new Error(j?.title ?? `Error ${res.status}`);
+        throw new Error(j?.title ?? j?.message?.title ?? `Error ${res.status}`);
       }
       const j = await res.json();
-      const n = j?.tasks_created ?? 0;
-      setFeedback(n > 0 ? `Asignación creada — ${n} tarea${n === 1 ? '' : 's'} generada${n === 1 ? '' : 's'}.` : 'La asignación fue creada, pero el protocolo no generó tareas.');
+      setFeedback(`Asignación creada — ${j?.animals ?? 0} vientres, ${j?.tasks_created ?? 0} tareas${j?.skipped_in_protocol ? ` (${j.skipped_in_protocol} ya estaban)` : ''}.`);
       setProtocolId('');
       setLotId('');
+      setCategoryCode('');
       setStartDate(today);
       router.refresh();
     } catch (e: any) {
@@ -84,6 +91,28 @@ export function AssignmentsPanel({ protocols, lots, assignments }: { protocols: 
     } finally {
       setBusy(false);
     }
+  }
+
+  async function openProgress(id: string) {
+    if (progressFor === id) { setProgressFor(null); return; }
+    setProgressFor(id);
+    setProgress(null);
+    const p = await fetch(`${API_URL}/reproduction/protocol-assignments/${id}/progress`, { headers: authHeaders() }).then((r) => r.json()).catch(() => null);
+    setProgress(p);
+  }
+
+  async function completeStep(id: string, index: number) {
+    setBusy(true);
+    setError('');
+    const res = await fetch(`${API_URL}/reproduction/protocol-assignments/${id}/steps/${index}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: '{}' });
+    const j = await res.json().catch(() => null);
+    setBusy(false);
+    if (res.ok) {
+      setFeedback(`Paso completado — ${j?.events_created ?? 0} evento(s) registrado(s).`);
+      const p = await fetch(`${API_URL}/reproduction/protocol-assignments/${id}/progress`, { headers: authHeaders() }).then((r) => r.json()).catch(() => null);
+      setProgress(p);
+      router.refresh();
+    } else setError(j?.message?.title ?? 'No se pudo completar el paso.');
   }
 
   async function cancel(id: string) {
@@ -134,23 +163,36 @@ export function AssignmentsPanel({ protocols, lots, assignments }: { protocols: 
               <Select value={protocolId} onChange={(e) => setProtocolId(e.target.value)} controlSize="sm" fullWidth={false} className="mt-0.5 block" aria-label="Protocolo a asignar">
                 <option value="">Elegir…</option>
                 {activeProtocols.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </Select>
             </label>
             <label className="text-label text-ink-3">
-              Lote
-              <Select value={lotId} onChange={(e) => setLotId(e.target.value)} controlSize="sm" fullWidth={false} className="mt-0.5 block" aria-label="Lote destino">
-                <option value="">Elegir…</option>
-                {lots.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
+              Objetivo
+              <Select value={targetType} onChange={(e) => setTargetType(e.target.value as any)} controlSize="sm" fullWidth={false} className="mt-0.5 block" aria-label="Tipo de objetivo">
+                <option value="lot">Lote</option>
+                <option value="category">Categoría</option>
+                <option value="all">Todo el hato</option>
               </Select>
             </label>
+            {targetType === 'lot' && (
+              <label className="text-label text-ink-3">
+                Lote
+                <Select value={lotId} onChange={(e) => setLotId(e.target.value)} controlSize="sm" fullWidth={false} className="mt-0.5 block" aria-label="Lote destino">
+                  <option value="">Elegir…</option>
+                  {lots.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </Select>
+              </label>
+            )}
+            {targetType === 'category' && (
+              <label className="text-label text-ink-3">
+                Categoría
+                <Select value={categoryCode} onChange={(e) => setCategoryCode(e.target.value)} controlSize="sm" fullWidth={false} className="mt-0.5 block" aria-label="Categoría destino">
+                  <option value="">Elegir…</option>
+                  {categories.filter((c) => ['vaca', 'vaquillona'].includes(c.code)).map((c) => <option key={c.code} value={c.code}>{c.name} ({c.animal_count})</option>)}
+                </Select>
+              </label>
+            )}
             <label className="text-label text-ink-3">
               Inicio
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} controlSize="sm" fullWidth={false} className="mt-0.5 block" aria-label="Fecha de inicio" />
@@ -178,12 +220,14 @@ export function AssignmentsPanel({ protocols, lots, assignments }: { protocols: 
               </thead>
               <tbody>
                 {activeAssignments.map((a) => (
-                  <tr key={a.id} className="h-9 border-b border-subtle last:border-0">
+                  <Fragment key={a.id}>
+                  <tr className="h-9 border-b border-subtle last:border-0">
                     <td className="font-medium">{a.protocol_name ?? 'Protocolo no disponible'}</td>
                     <td className="text-ink-2">{a.lot_name ?? '—'}</td>
                     <td className="text-ink-2">{formatCalendarEs(String(a.start_date).slice(0, 10))}</td>
                     <td className="tnum text-right">{a.animal_count}</td>
                     <td className="pr-1 text-right">
+                      <button onClick={() => openProgress(a.id)} className="mr-2 text-label text-brand hover:underline">Pasos</button>
                       {confirmId === a.id ? (
                         <span className="inline-flex items-center gap-1">
                           <Button
@@ -212,6 +256,31 @@ export function AssignmentsPanel({ protocols, lots, assignments }: { protocols: 
                       )}
                     </td>
                   </tr>
+                  {progressFor === a.id && (
+                    <tr>
+                      <td colSpan={5} className="border-b border-subtle bg-sunken/40 px-3 py-2">
+                        {!progress ? (
+                          <p className="text-label text-ink-3">Cargando pasos…</p>
+                        ) : (
+                          <div className="space-y-1">
+                            <p className="mb-1 text-label text-ink-3">Progreso: {progress.steps_done}/{progress.steps_total} pasos</p>
+                            {(progress.steps ?? []).map((s: any) => (
+                              <div key={s.index} className="flex items-center gap-2 text-label">
+                                <span className="tnum w-24 shrink-0 text-ink-3">día {s.day} · {formatCalendarEs(s.due_date)}</span>
+                                <span className={`flex-1 ${s.completed ? 'text-ink-3 line-through' : 'text-ink-2'}`}>{s.action} <span className="text-caption text-ink-3">({s.kind})</span></span>
+                                {s.completed ? (
+                                  <span className="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-caption text-success">✓ hecho</span>
+                                ) : (
+                                  <Button size="sm" variant="secondary" loading={busy} onClick={() => completeStep(a.id, s.index)}>Completar</Button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

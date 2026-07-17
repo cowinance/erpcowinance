@@ -9,10 +9,11 @@ import { AssignmentsPanel } from './AssignmentsPanel';
  * previsto. Server Component para la carga; las mutaciones viven en las islas cliente.
  */
 export default async function ProtocolsPage() {
-  const [protocols, lots, assignments] = await Promise.all([
+  const [protocols, lots, assignments, categories] = await Promise.all([
     apiSafe<any[]>('/reproduction/protocols'),
     apiSafe<any[]>('/lots'),
     apiSafe<any[]>('/reproduction/protocol-assignments'),
+    apiSafe<any[]>('/catalogs/categories'),
   ]);
   if (protocols === null) {
     return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
@@ -33,7 +34,7 @@ export default async function ProtocolsPage() {
       <section>
         <h2 className="text-body font-semibold">Asignar protocolo y asignaciones activas</h2>
         <p className="mb-3 mt-0.5 text-label text-ink-3">Una asignación aplica una plantilla a un lote desde una fecha y genera las tareas del protocolo.</p>
-        <AssignmentsPanel protocols={protocols} lots={lots ?? []} assignments={assignments ?? []} />
+        <AssignmentsPanel protocols={protocols} lots={lots ?? []} assignments={assignments ?? []} categories={categories ?? []} />
       </section>
     </div>
   );

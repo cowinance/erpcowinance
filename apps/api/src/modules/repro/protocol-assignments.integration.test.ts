@@ -80,12 +80,11 @@ describe('repro asignaciones de protocolo', () => {
     expect(list.find((a: any) => a.id === res.assignment.id)?.status).toBe('canceled');
   });
 
-  it('protocolo sin pasos → 0 tareas; errores de validación', async () => {
+  it('objetivo vacío → 400; errores de validación', async () => {
     const empty = await repro.createProtocol({ name: 'Sin pasos', steps: [] });
     const lot = await mkLot(`Lote vacío ${Date.now()}`);
-    const res = await repro.assignProtocol({ protocol_id: empty.id, lot_id: lot, start_date: '2027-06-01' });
-    expect(res.tasks_created).toBe(0);
-    expect(res.assignment.animal_count).toBe(0);
+    // Lote sin vientres → no hay objetivo → 400 (antes creaba una asignación vacía).
+    await expect(repro.assignProtocol({ protocol_id: empty.id, lot_id: lot, start_date: '2027-06-01' })).rejects.toMatchObject({ status: 400 });
 
     await expect(repro.assignProtocol({ protocol_id: empty.id, lot_id: lot })).rejects.toMatchObject({ status: 400 });
     await expect(repro.assignProtocol({ protocol_id: '00000000-0000-0000-0000-000000000000', lot_id: lot, start_date: '2027-06-01' })).rejects.toMatchObject({ status: 404 });

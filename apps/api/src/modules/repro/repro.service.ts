@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError, computeReproStatus, DEFAULT_REPRO_CONFIG } from '@cowinance/domain';
 import type { ReproConfig, ReproFacts } from '@cowinance/domain';
@@ -61,9 +61,9 @@ export class ReproService {
     if (semenBatchId) await this.semen.adjustStraws(semenBatchId, -1, 'insemination');
     if (embryoId) await this.embryos.adjustStraws(embryoId, -1, 'transfer');
     const row = await this.db.one<any>(
-      `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, technician_id, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING RETURNING id, type, occurred_at`,
-      [id, this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.technician_id ?? null, body?.notes ?? null, this.db.user],
+      `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, technician_id, protocol_id, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING RETURNING id, type, occurred_at`,
+      [id, this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.technician_id ?? null, body?.protocol_id ?? null, body?.notes ?? null, this.db.user],
     );
     await insertAnimalEvent(
       this.db,
@@ -635,51 +635,171 @@ export class ReproService {
     return { id, deleted: true };
   }
 
-  // ── Asignación de protocolos a un lote (R-2.b.1) ─────────────────────────────
+  // ── Asignación de protocolos (R-2.b + E4: lote/categoría/selección/hato) ──────
+  /** Resuelve los vientres objetivo (vaca/vaquillona activos) del target de un protocolo. */
+  private async resolveProtocolTargets(body: any): Promise<{ targetType: string; label: string; ids: string[]; lotId: string | null; categoryCode: string | null }> {
+    const t = this.db.tenant;
+    const base = `FROM animals a JOIN animal_categories c ON c.id=a.category_id AND c.code IN ('vaca','vaquillona')
+                  WHERE a.tenant_id=$1 AND a.status='active' AND a.deleted_at IS NULL`;
+    if (Array.isArray(body?.animal_ids) && body.animal_ids.length) {
+      const rows = await this.db.query<{ id: string }>(`SELECT a.id ${base} AND a.id = ANY($2)`, [t, body.animal_ids]);
+      return { targetType: 'selection', label: `selección (${rows.length})`, ids: rows.map((r) => r.id), lotId: null, categoryCode: null };
+    }
+    if (body?.lot_id) {
+      const lot = await this.db.one<{ id: string; name: string }>(`SELECT id, name FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [body.lot_id, t]);
+      if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+      const rows = await this.db.query<{ id: string }>(`SELECT a.id ${base} AND a.current_lot_id=$2`, [t, lot.id]);
+      return { targetType: 'lot', label: lot.name, ids: rows.map((r) => r.id), lotId: lot.id, categoryCode: null };
+    }
+    if (body?.category_code) {
+      const rows = await this.db.query<{ id: string }>(`SELECT a.id ${base} AND c.code=$2`, [t, body.category_code]);
+      return { targetType: 'category', label: `categoría ${body.category_code}`, ids: rows.map((r) => r.id), lotId: null, categoryCode: body.category_code };
+    }
+    const rows = await this.db.query<{ id: string }>(`SELECT a.id ${base}`, [t]);
+    return { targetType: 'all', label: 'todo el hato', ids: rows.map((r) => r.id), lotId: null, categoryCode: null };
+  }
+
   /**
-   * Asigna un protocolo a los vientres activos de un lote desde `start_date`; genera UNA tarea por
-   * paso (nivel grupo) vía TaskService (server-authored → sincroniza + agenda). Atómico (db.tx).
+   * Asigna un protocolo a lote / categoría / selección / todo el hato desde `start_date`. Snapshotea los
+   * vientres objetivo (para progreso y eventos reales al completar pasos), genera UNA tarea por paso
+   * (nivel grupo) vía TaskService. Evita duplicados: no reasigna el mismo protocolo a un animal que ya
+   * está en una asignación ACTIVA. Atómico (db.tx).
    */
   async assignProtocol(body: any) {
     const startDate = String(body?.start_date ?? '').slice(0, 10);
-    if (!body?.protocol_id || !body?.lot_id || !startDate) {
-      throw new BadRequestException({ code: 'assignment.missing_fields', title: 'protocol_id, lot_id y start_date son obligatorios' });
-    }
-    if (Number.isNaN(new Date(`${startDate}T00:00:00.000Z`).getTime())) {
+    if (!body?.protocol_id || !startDate)
+      throw new BadRequestException({ code: 'assignment.missing_fields', title: 'protocol_id y start_date son obligatorios' });
+    if (Number.isNaN(new Date(`${startDate}T00:00:00.000Z`).getTime()))
       throw new BadRequestException({ code: 'assignment.invalid_date', title: `start_date inválida: ${startDate}` });
-    }
     const t = this.db.tenant;
     const protocol = await this.db.one<any>(`SELECT id, name, steps FROM repro_protocols WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [body.protocol_id, t]);
     if (!protocol) throw new NotFoundException({ code: 'protocol.not_found', title: 'Protocolo no encontrado' });
-    const lot = await this.db.one<{ id: string; name: string }>(`SELECT id, name FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [body.lot_id, t]);
-    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
-    const grp = await this.db.one<{ n: number }>(
-      `SELECT count(*)::int AS n FROM animals a JOIN animal_categories c ON c.id=a.category_id AND c.code IN ('vaca','vaquillona')
-       WHERE a.tenant_id=$1 AND a.status='active' AND a.deleted_at IS NULL AND a.current_lot_id=$2`,
-      [t, lot.id],
+
+    const target = await this.resolveProtocolTargets(body);
+    if (target.ids.length === 0) throw new BadRequestException({ code: 'assignment.no_targets', title: 'El objetivo no tiene vientres activos' });
+
+    // Dedup: animales ya en una asignación ACTIVA del MISMO protocolo → se excluyen (no se re-aplica).
+    const busy = await this.db.query<{ animal_id: string }>(
+      `SELECT aa.animal_id FROM repro_protocol_assignment_animals aa
+       JOIN repro_protocol_assignments pa ON pa.id = aa.assignment_id AND pa.status='active' AND pa.deleted_at IS NULL AND pa.protocol_id=$2
+       WHERE aa.tenant_id=$1 AND aa.animal_id = ANY($3)`,
+      [t, protocol.id, target.ids],
     );
-    const count = grp?.n ?? 0;
+    const busySet = new Set(busy.map((b) => b.animal_id));
+    const ids = target.ids.filter((id) => !busySet.has(id));
+    if (ids.length === 0) throw new ConflictException({ code: 'assignment.all_in_protocol', title: 'Todos los vientres ya están en este protocolo (activo)' });
     const steps: any[] = Array.isArray(protocol.steps) ? protocol.steps : [];
 
     return this.db.tx(async (q) => {
       const assignment = await q.one<any>(
-        `INSERT INTO repro_protocol_assignments (tenant_id, protocol_id, lot_id, start_date, animal_count, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, protocol_id, lot_id, start_date, animal_count, status, created_at`,
-        [t, protocol.id, lot.id, startDate, count, this.db.user],
+        `INSERT INTO repro_protocol_assignments (tenant_id, protocol_id, lot_id, target_type, category_code, start_date, animal_count, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, protocol_id, lot_id, target_type, start_date, animal_count, status, created_at`,
+        [t, protocol.id, target.lotId, target.targetType, target.categoryCode, startDate, ids.length, this.db.user],
       );
+      for (const animalId of ids)
+        await q.query(`INSERT INTO repro_protocol_assignment_animals (tenant_id, assignment_id, animal_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [t, assignment.id, animalId]);
+
       const farm = (await q.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`, [t]))?.id ?? null;
       let created = 0;
       for (const s of steps) {
         const due = new Date(new Date(`${startDate}T00:00:00.000Z`).getTime() + Number(s.day) * 86400000).toISOString();
         await this.tasks.createTask(
           q,
-          { title: `${s.action} — ${lot.name} (${count} vientres)`, type: 'breeding', dueDate: due, priority: 'normal', relatedType: 'protocol_assignment', relatedId: assignment.id, farmId: farm },
+          { title: `${s.action} — ${target.label} (${ids.length} vientres)`, type: 'breeding', dueDate: due, priority: 'normal', relatedType: 'protocol_assignment', relatedId: assignment.id, farmId: farm },
           { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user },
         );
         created++;
       }
-      return { assignment, tasks_created: created };
+      return { assignment, target_type: target.targetType, animals: ids.length, skipped_in_protocol: busySet.size, tasks_created: created };
     });
+  }
+
+  /**
+   * Completa un paso del protocolo para TODOS los animales de la asignación y registra el EVENTO REAL
+   * según el `kind` del paso (insemination → servicio IATF; hormonal/device_removal → sincronización).
+   * Idempotente por (assignment, step, animal); reaplicar no duplica. `diagnosis`/`review`/`other` solo
+   * marcan el paso. Cierra también la tarea de grupo del paso.
+   */
+  async completeStep(assignmentId: string, stepIndex: number, body: any = {}) {
+    const t = this.db.tenant;
+    const assignment = await this.db.one<any>(
+      `SELECT pa.id, pa.protocol_id, pa.status, pa.start_date::text AS start_date, pa.completed_steps, p.steps
+       FROM repro_protocol_assignments pa JOIN repro_protocols p ON p.id = pa.protocol_id
+       WHERE pa.id=$1 AND pa.tenant_id=$2 AND pa.deleted_at IS NULL`,
+      [assignmentId, t],
+    );
+    if (!assignment) throw new NotFoundException({ code: 'assignment.not_found', title: 'Asignación no encontrada' });
+    if (assignment.status !== 'active') throw new ConflictException({ code: 'assignment.not_active', title: 'La asignación no está activa' });
+    const steps: any[] = Array.isArray(assignment.steps) ? assignment.steps : [];
+    if (stepIndex < 0 || stepIndex >= steps.length) throw new BadRequestException({ code: 'assignment.invalid_step', title: 'Paso inválido' });
+    const step = steps[stepIndex];
+    const animals = await this.db.query<{ animal_id: string }>(`SELECT animal_id FROM repro_protocol_assignment_animals WHERE assignment_id=$1 AND tenant_id=$2`, [assignmentId, t]);
+    const occurredAt = (body.occurred_at ?? new Date().toISOString()).slice(0, 10);
+    const kind = step.kind ?? 'other';
+
+    let eventsCreated = 0;
+    for (const { animal_id } of animals) {
+      const opKey = `protocol:${assignmentId}:${stepIndex}`;
+      try {
+        if (kind === 'insemination') {
+          await this.service(animal_id, { method: 'ai', occurred_at: occurredAt, sire_id: body.sire_id, semen_batch_id: body.semen_batch_id, protocol_id: assignment.protocol_id }, this.deriveId(opKey, animal_id));
+          eventsCreated++;
+        } else if (kind === 'hormonal' || kind === 'device_removal') {
+          const id = this.deriveId(opKey, animal_id);
+          const exists = await this.db.one<any>(`SELECT id FROM breeding_events WHERE id=$1 AND tenant_id=$2`, [id, t]);
+          if (!exists) {
+            await this.db.query(
+              `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, protocol_id, notes, created_by)
+               VALUES ($1,$2,$3,'synchronization',$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+              [id, t, animal_id, occurredAt, assignment.protocol_id, step.action, this.db.user],
+            );
+            await insertAnimalEvent(this.db, animal_id, 'synchronization', { step: step.action, kind }, occurredAt);
+            eventsCreated++;
+          }
+        }
+      } catch (e) {
+        if (process.env.REPRO_DEBUG) throw e;
+        // un animal no apto (p. ej. macho por error, o sin saldo de semen) no aborta el resto.
+      }
+    }
+
+    const completed: number[] = Array.isArray(assignment.completed_steps) ? assignment.completed_steps : [];
+    if (!completed.includes(stepIndex)) completed.push(stepIndex);
+    await this.db.query(`UPDATE repro_protocol_assignments SET completed_steps=$3::jsonb, updated_at=now() WHERE id=$1 AND tenant_id=$2`, [assignmentId, t, JSON.stringify(completed)]);
+
+    // Cierra la tarea de grupo del paso (por título) si sigue pendiente.
+    await this.db.query(
+      `UPDATE tasks SET status='done', completed_at=now(), updated_at=now()
+       WHERE tenant_id=$1 AND related_type='protocol_assignment' AND related_id=$2 AND status='pending' AND deleted_at IS NULL AND title LIKE $3`,
+      [t, assignmentId, `${step.action} — %`],
+    );
+
+    return { assignment_id: assignmentId, step: stepIndex, kind, animals: animals.length, events_created: eventsCreated, completed_steps: completed };
+  }
+
+  /** Progreso de una asignación: pasos con estado (completado/pendiente) + cantidad de animales. */
+  async assignmentProgress(assignmentId: string) {
+    const t = this.db.tenant;
+    const a = await this.db.one<any>(
+      `SELECT pa.id, pa.status, pa.start_date::text AS start_date, pa.animal_count, pa.completed_steps,
+              p.name AS protocol_name, p.steps
+       FROM repro_protocol_assignments pa JOIN repro_protocols p ON p.id = pa.protocol_id
+       WHERE pa.id=$1 AND pa.tenant_id=$2 AND pa.deleted_at IS NULL`,
+      [assignmentId, t],
+    );
+    if (!a) throw new NotFoundException({ code: 'assignment.not_found', title: 'Asignación no encontrada' });
+    const steps: any[] = Array.isArray(a.steps) ? a.steps : [];
+    const done: number[] = Array.isArray(a.completed_steps) ? a.completed_steps : [];
+    const start = new Date(`${a.start_date}T00:00:00.000Z`).getTime();
+    return {
+      id: a.id, protocol_name: a.protocol_name, status: a.status, animal_count: a.animal_count,
+      steps_total: steps.length, steps_done: done.length,
+      steps: steps.map((s, i) => ({
+        index: i, day: s.day, action: s.action, kind: s.kind ?? 'other',
+        due_date: new Date(start + Number(s.day) * 86400000).toISOString().slice(0, 10),
+        completed: done.includes(i),
+      })),
+    };
   }
 
   /** Cancela una asignación activa y sus tareas `pending` (server-authored). Atómico. */

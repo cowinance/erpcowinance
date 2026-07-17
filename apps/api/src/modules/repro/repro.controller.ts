@@ -109,4 +109,14 @@ export class ReproController {
   cancelAssignment(@Param('id') id: string) {
     return this.repro.cancelAssignment(id);
   }
+
+  @Get('reproduction/protocol-assignments/:id/progress')
+  progress(@Param('id') id: string) {
+    return this.repro.assignmentProgress(id);
+  }
+
+  @Post('reproduction/protocol-assignments/:id/steps/:index/complete')
+  completeStep(@Param('id') id: string, @Param('index') index: string, @Body() body: any) {
+    return this.repro.completeStep(id, Number(index), body);
+  }
 }
