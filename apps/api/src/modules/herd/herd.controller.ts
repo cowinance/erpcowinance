@@ -58,6 +58,12 @@ export class HerdController {
     return this.herd.lookup(body);
   }
 
+  // Ruta estática ANTES de la paramétrica `animals/:id` (si no, `quality` cae en :id).
+  @Get('animals/quality')
+  quality(@Query('no_weighing_days') days?: string) {
+    return this.herd.qualityReport({ noWeighingDays: days ? Number(days) : undefined });
+  }
+
   @Get('animals/:id')
   get(@Param('id') id: string) {
     return this.herd.getAnimal(id);
@@ -76,6 +82,11 @@ export class HerdController {
   @Get('animals/:id/overview')
   overview(@Param('id') id: string) {
     return this.herd.animalOverview(id);
+  }
+
+  @Get('animals/:id/genealogy')
+  genealogy(@Param('id') id: string, @Query('depth') depth?: string) {
+    return this.herd.animalGenealogy(id, depth ? Number(depth) : undefined);
   }
 
   @Post('animals/:id/events')

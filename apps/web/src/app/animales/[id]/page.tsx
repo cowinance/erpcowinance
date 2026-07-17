@@ -19,7 +19,7 @@ const REPRO_LABELS: Record<string, string> = {
 
 export default async function AnimalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [animal, timeline, lots, categories, overview, reproStatus, catalogs] = await Promise.all([
+  const [animal, timeline, lots, categories, overview, reproStatus, catalogs, genealogy] = await Promise.all([
     apiSafe<any>(`/animals/${id}`),
     apiSafe<any[]>(`/animals/${id}/timeline`),
     apiSafe<any[]>('/lots'),
@@ -27,6 +27,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
     apiSafe<any>(`/animals/${id}/overview`),
     apiSafe<any>(`/reproduction/animals/${id}/status`),
     apiSafe<any>('/config/catalogs'),
+    apiSafe<any>(`/animals/${id}/genealogy`),
   ]);
   if (!animal) notFound();
 
@@ -152,7 +153,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
       </div>
 
       {/* Ficha 360: pestañas que componen las secciones (A360 E3) */}
-      <AnimalTabs animal={animal} timeline={timeline ?? []} overview={overview} reproStatus={reproStatus} />
+      <AnimalTabs animal={animal} timeline={timeline ?? []} overview={overview} reproStatus={reproStatus} genealogy={genealogy} />
     </div>
   );
 }

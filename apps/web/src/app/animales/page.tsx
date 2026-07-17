@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { apiSafe } from '@/lib/server-api';
 import { EmptyState } from '@/components/ui';
-import { Plus, Upload } from 'lucide-react';
+import { Plus, ShieldCheck, Upload } from 'lucide-react';
 import { AnimalsBrowser } from './AnimalsBrowser';
 
 export default async function AnimalsPage({
@@ -30,6 +30,12 @@ export default async function AnimalsPage({
           <p className="mt-0.5 text-body text-ink-3">Vista 360 del hato — buscá, filtrá y abrí la ficha de cada animal</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/animales/calidad"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken"
+          >
+            <ShieldCheck size={15} /> Calidad
+          </Link>
           <Link
             href="/animales/importar"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-strong px-3 text-body font-medium text-ink-2 hover:bg-sunken"

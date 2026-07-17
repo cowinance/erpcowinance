@@ -40,11 +40,13 @@ export function AnimalTabs({
   timeline,
   overview,
   reproStatus,
+  genealogy,
 }: {
   animal: any;
   timeline: any[];
   overview: any;
   reproStatus: any;
+  genealogy?: any;
 }) {
   const isFemale = animal.sex === 'F';
   const tabs = ['Resumen', 'Sanidad', ...(isFemale ? ['Reproducción'] : []), 'Movimientos', 'Genealogía'];
@@ -84,7 +86,7 @@ export function AnimalTabs({
       {tab === 'Sanidad' && <SanidadTab treatments={treatments} vaccinations={vaccinations} openCases={openCases} animalTag={animal.identifiers?.find((i: any) => i.type === 'visual')?.value} />}
       {tab === 'Reproducción' && isFemale && <ReproTab status={reproStatus} />}
       {tab === 'Movimientos' && <MovimientosTab movements={movements} daysInLot={overview?.days_in_current_lot} lotName={animal.lot_name} paddockName={animal.paddock_name} />}
-      {tab === 'Genealogía' && <GenealogiaTab animal={animal} milk={overview?.production?.milk_30d} calvings={overview?.production?.calvings} />}
+      {tab === 'Genealogía' && <GenealogiaTab animal={animal} genealogy={genealogy} milk={overview?.production?.milk_30d} calvings={overview?.production?.calvings} />}
     </div>
   );
 }
@@ -304,37 +306,64 @@ function MovimientosTab({ movements, daysInLot, lotName, paddockName }: { moveme
   );
 }
 
-function GenealogiaTab({ animal, milk, calvings }: { animal: any; milk: any; calvings: number }) {
+function GenealogiaTab({ animal, genealogy, milk, calvings }: { animal: any; genealogy?: any; milk: any; calvings: number }) {
   const g = animal.genealogy;
-  const offspring = animal.offspring ?? [];
+  const ancestors: any[] = genealogy?.ancestors ?? [];
+  const offspring: any[] = genealogy?.offspring ?? animal.offspring ?? [];
+  const byRelation = (rel: string) => ancestors.find((a) => a.relation === rel);
+  const visualTag = animal.identifiers?.find((i: any) => i.type === 'visual')?.value ?? '—';
+
+  // Nodo del árbol: caravana (link) + relación.
+  const Node = ({ node, muted }: { node: any; muted?: boolean }) =>
+    node ? (
+      <Link href={`/animales/${node.id}`} className={`inline-flex h-7 items-center rounded-md border px-2.5 font-mono text-label font-medium ${muted ? 'border-subtle text-ink-2' : 'border-brand/40 bg-brand-soft/40 text-brand'} hover:border-brand`}>
+        {node.tag ?? node.id.slice(0, 6)}
+      </Link>
+    ) : (
+      <span className="inline-flex h-7 items-center rounded-md border border-dashed border-strong px-2.5 text-label text-ink-3">—</span>
+    );
+
   return (
-    <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
+    <div className="space-y-4">
+      {/* Árbol de ancestros (hasta abuelos) */}
       <Card>
-        <CardTitle>Genealogía</CardTitle>
-        <dl className="mt-2 space-y-2">
-          <div className="flex items-center justify-between border-b border-subtle pb-1.5">
-            <dt className="text-label text-ink-2">Madre</dt>
-            <dd>{g?.dam_id ? <Link href={`/animales/${g.dam_id}`} className="font-mono text-brand hover:underline">{g.dam_tag ?? '—'}</Link> : <span className="text-ink-3">—</span>}</dd>
+        <CardTitle>Árbol genealógico</CardTitle>
+        <div className="mt-3 flex items-center gap-6 overflow-x-auto pb-1">
+          <div className="shrink-0">
+            <div className="mb-1 text-caption text-ink-3">Animal</div>
+            <span className="inline-flex h-8 items-center rounded-md border border-ink/20 bg-sunken px-3 font-mono text-body font-semibold">{visualTag}</span>
           </div>
-          <div className="flex items-center justify-between border-b border-subtle pb-1.5">
-            <dt className="text-label text-ink-2">Padre</dt>
-            <dd>{g?.sire_id ? <Link href={`/animales/${g.sire_id}`} className="font-mono text-brand hover:underline">{g.sire_tag ?? '—'}</Link> : <span className="text-ink-3">—</span>}</dd>
+          <div className="shrink-0">
+            <div className="mb-1 text-caption text-ink-3">Padres</div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-1.5"><span className="w-8 text-caption text-ink-3">♀</span> <Node node={byRelation('dam')} /></div>
+              <div className="flex items-center gap-1.5"><span className="w-8 text-caption text-ink-3">♂</span> <Node node={byRelation('sire')} /></div>
+            </div>
           </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-label text-ink-2">Crías registradas</dt>
-            <dd className="tnum font-medium">{offspring.length}{calvings ? ` · ${calvings} partos` : ''}</dd>
+          <div className="shrink-0">
+            <div className="mb-1 text-caption text-ink-3">Abuelos</div>
+            <div className="flex flex-col gap-1.5">
+              <Node node={byRelation('dam.dam')} muted /> <Node node={byRelation('dam.sire')} muted />
+              <Node node={byRelation('sire.dam')} muted /> <Node node={byRelation('sire.sire')} muted />
+            </div>
           </div>
-        </dl>
+        </div>
+        {!g?.dam_id && !g?.sire_id && <p className="mt-2 text-label text-ink-3">Sin padres registrados. Editá el animal para cargar la genealogía.</p>}
       </Card>
 
       <Card>
-        <CardTitle>Descendencia</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>Descendencia</CardTitle>
+          <span className="text-label text-ink-3">{offspring.length} cría{offspring.length === 1 ? '' : 's'}{calvings ? ` · ${calvings} partos` : ''}</span>
+        </div>
         {offspring.length ? (
-          <ul className="mt-2 space-y-1.5">
+          <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5 max-md:grid-cols-1">
             {offspring.map((o: any) => (
-              <li key={o.id} className="flex items-center justify-between text-body">
+              <li key={o.id} className="flex items-center justify-between border-b border-subtle pb-1.5 text-body">
                 <Link href={`/animales/${o.id}`} className="font-mono text-brand hover:underline">{o.tag ?? o.id.slice(0, 6)}</Link>
-                <span className="text-label text-ink-3">{o.sex === 'F' ? 'Hembra' : 'Macho'}{o.birth_date ? ` · ${ageFrom(o.birth_date)}` : ''}</span>
+                <span className="text-label text-ink-3">
+                  {o.sex === 'F' ? 'Hembra' : 'Macho'}{o.birth_date ? ` · ${ageFrom(o.birth_date)}` : ''}{o.status && o.status !== 'active' ? ` · ${o.status}` : ''}
+                </span>
               </li>
             ))}
           </ul>
