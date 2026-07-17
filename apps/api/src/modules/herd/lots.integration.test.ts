@@ -93,4 +93,21 @@ describe('HerdService — lotes (CRUD + composición)', () => {
     const list: any[] = await herd.lots();
     expect(list.some((x) => x.id === lot.id)).toBe(false);
   });
+
+  it('lista: expone avg_weight_kg y oculta archivados salvo include_archived', async () => {
+    const lot: any = await herd.createLot({ name: 'Rodeo Peso' });
+    await mkAnimal('F', vacaCat, lot.id, 400);
+    await mkAnimal('M', toroCat, lot.id, 600);
+    const active: any[] = await herd.lots();
+    const row = active.find((x) => x.id === lot.id);
+    expect(Number(row.avg_weight_kg)).toBe(500); // (400+600)/2
+    // archivar y confirmar que sólo aparece con include_archived
+    await db.query(`UPDATE animals SET current_lot_id=NULL WHERE current_lot_id=$1`, [lot.id]);
+    await herd.deleteLot(lot.id);
+    expect((await herd.lots()).some((x) => x.id === lot.id)).toBe(false);
+    const withArchived: any[] = await herd.lots(true);
+    const archived = withArchived.find((x) => x.id === lot.id);
+    expect(archived).toBeTruthy();
+    expect(archived.is_active).toBe(false);
+  });
 });

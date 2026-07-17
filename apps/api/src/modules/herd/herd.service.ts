@@ -383,22 +383,25 @@ export class HerdService {
     );
   }
 
-  async lots() {
+  async lots(includeArchived = false) {
     const rows = await this.db.query<any>(
       `SELECT l.id, l.name, l.purpose, l.is_active, l.current_paddock_id, p.name AS paddock_name,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS animal_count,
+              (SELECT round(avg(lw.weight_kg))::int FROM animals a
+                 LEFT JOIN LATERAL (SELECT weight_kg FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) lw ON true
+                 WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS avg_weight_kg,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL
                  AND NOT EXISTS(SELECT 1 FROM animal_identifiers ai WHERE ai.animal_id=a.id AND ai.type='visual' AND ai.deleted_at IS NULL)) AS sin_id,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL
                  AND NOT EXISTS(SELECT 1 FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90)) AS sin_pesaje,
               (SELECT count(DISTINCT a.category_id)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS categorias
        FROM lots l LEFT JOIN paddocks p ON p.id = l.current_paddock_id
-       WHERE l.tenant_id = $1 AND l.deleted_at IS NULL ORDER BY l.is_active DESC, l.name`,
-      [this.db.tenant],
+       WHERE l.tenant_id = $1 AND (l.deleted_at IS NULL OR $2) ORDER BY l.is_active DESC, l.name`,
+      [this.db.tenant, includeArchived],
     );
     return rows.map((l) => {
       const { status, alerts } = this.computeLotAlerts({ isActive: l.is_active, head: l.animal_count, paddockId: l.current_paddock_id, sinId: l.sin_id, sinPesaje: l.sin_pesaje, categorias: l.categorias });
-      return { id: l.id, name: l.name, purpose: l.purpose, is_active: l.is_active, paddock_name: l.paddock_name, animal_count: l.animal_count, status, alert_count: alerts.length };
+      return { id: l.id, name: l.name, purpose: l.purpose, is_active: l.is_active, paddock_name: l.paddock_name, animal_count: l.animal_count, avg_weight_kg: l.avg_weight_kg, status, alert_count: alerts.length };
     });
   }
 

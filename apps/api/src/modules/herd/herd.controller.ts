@@ -58,8 +58,8 @@ export class HerdController {
   }
 
   @Get('lots')
-  lots() {
-    return this.herd.lots();
+  lots(@Query('include_archived') includeArchived?: string) {
+    return this.herd.lots(includeArchived === 'true');
   }
 
   @Get('lots/:id')

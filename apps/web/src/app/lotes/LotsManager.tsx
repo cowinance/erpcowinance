@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { API_URL, authHeaders } from '@/lib/api';
@@ -9,7 +9,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
-interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number; status?: string; alert_count?: number }
+interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number; status?: string; alert_count?: number; avg_weight_kg?: number | null }
 interface LotAlert { code: string; label: string; severity: 'info' | 'warning' }
 interface Paddock { id: string; name: string }
 interface Category { code: string; name: string }
@@ -34,6 +34,8 @@ const PURPOSES: [string, string][] = [
 ];
 const PURPOSE_ES = Object.fromEntries(PURPOSES) as Record<string, string>;
 const SEX_ES: Record<string, string> = { F: 'Hembras', M: 'Machos' };
+const STATUS_ES: Record<string, string> = { active: 'Activo', empty: 'Vacío', alert: 'Con alertas', archived: 'Archivado' };
+const SORT_OPTIONS: [string, string][] = [['name', 'Nombre'], ['animals', 'Cabezas'], ['weight', 'Peso prom.'], ['purpose', 'Propósito'], ['paddock', 'Potrero'], ['status', 'Estado']];
 const HIST_LABEL: Record<string, string> = { ingreso: 'Ingreso', salida: 'Salida', rotacion: 'Rotación de potrero', movimiento: 'Movimiento' };
 const HIST_TONE: Record<string, string> = { ingreso: 'bg-success', salida: 'bg-warning', rotacion: 'bg-info', movimiento: 'bg-ink-3' };
 
@@ -64,6 +66,12 @@ const PURPOSE_METRIC_TITLE: Record<string, string> = {
   fattening: 'Métricas de engorde', breeding: 'Métricas de cría', weaning: 'Métricas de recría',
   hospital: 'Métricas de hospital', quarantine: 'Métricas de cuarentena', dairy: 'Métricas del tambo',
 };
+function LotStatusBadge({ l }: { l: Lot }) {
+  if (!l.is_active) return <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Archivado</span>;
+  if ((l.alert_count ?? 0) > 0) return <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-caption text-warning">⚠ {l.alert_count}</span>;
+  if (l.status === 'empty') return <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Vacío</span>;
+  return <span className="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-caption text-success">Activo</span>;
+}
 const fmtMetric = (v: any): string => {
   if (v == null) return '—';
   if (typeof v === 'string') return v.slice(0, 10); // fechas AAAA-MM-DD
@@ -72,6 +80,13 @@ const fmtMetric = (v: any): string => {
 
 export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddocks: Paddock[]; categories: Category[] }) {
   const router = useRouter();
+  // Listado: fuente propia (para poder mostrar archivados y refrescar). Se sincroniza con la prop del
+  // server (que refleja los lotes activos tras cada mutación) cuando NO se muestran archivados.
+  const [lotList, setLotList] = useState<Lot[]>(lots);
+  const [lotSearch, setLotSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'animals' | 'purpose' | 'paddock' | 'weight' | 'status'>('name');
+  const [view, setView] = useState<'cards' | 'table'>('cards');
+  const [showArchived, setShowArchived] = useState(false);
   const [mode, setMode] = useState<'none' | 'new' | 'edit'>('none');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -231,31 +246,103 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
 
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => k !== 'q' && v).length;
 
+  // El server (prop `lots`) trae los ACTIVOS; se sincronizan al listado salvo que se muestren archivados.
+  useEffect(() => { if (!showArchived) setLotList(lots); }, [lots, showArchived]);
+  async function toggleArchived() {
+    const next = !showArchived;
+    setShowArchived(next);
+    if (next) { const r = await call('GET', `/lots?include_archived=true`); if (r) setLotList(r as Lot[]); }
+    else setLotList(lots);
+  }
+
+  const displayed = useMemo(() => {
+    const q = lotSearch.trim().toLowerCase();
+    let arr = lotList.filter((l) => !q || l.name.toLowerCase().includes(q));
+    const purposeRank = (p: string | null) => PURPOSES.findIndex(([v]) => v === p);
+    const statusRank: Record<string, number> = { alert: 0, empty: 1, active: 2, archived: 3 };
+    arr = [...arr].sort((a, b) => {
+      switch (sortBy) {
+        case 'animals': return b.animal_count - a.animal_count;
+        case 'weight': return (b.avg_weight_kg ?? -1) - (a.avg_weight_kg ?? -1);
+        case 'purpose': return purposeRank(a.purpose) - purposeRank(b.purpose) || a.name.localeCompare(b.name);
+        case 'paddock': return (a.paddock_name ?? '~').localeCompare(b.paddock_name ?? '~');
+        case 'status': return (statusRank[a.status ?? 'active'] ?? 9) - (statusRank[b.status ?? 'active'] ?? 9) || a.name.localeCompare(b.name);
+        default: return a.name.localeCompare(b.name);
+      }
+    });
+    return arr;
+  }, [lotList, lotSearch, sortBy]);
+
+  function exportCsv() {
+    const rows = [['Lote', 'Propósito', 'Potrero', 'Cabezas', 'Peso prom (kg)', 'Estado', 'Alertas']];
+    for (const l of displayed) rows.push([l.name, PURPOSE_ES[l.purpose ?? ''] ?? l.purpose ?? '', l.paddock_name ?? '', String(l.animal_count), l.avg_weight_kg != null ? String(l.avg_weight_kg) : '', STATUS_ES[l.status ?? ''] ?? '', String(l.alert_count ?? 0)]);
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'lotes.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
       {/* Lista */}
       <div className="col-span-2 space-y-3 max-lg:col-span-1">
-        <div className="flex justify-end">
-          <Button size="sm" onClick={startNew}>+ Nuevo lote</Button>
+        {/* Toolbar del listado: búsqueda, orden, vista, archivados, export/print */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-40 flex-1"><Input value={lotSearch} onChange={(e) => setLotSearch(e.target.value)} placeholder="Buscar lote…" aria-label="Buscar lote" /></div>
+          <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} aria-label="Ordenar por" controlSize="sm" fullWidth={false}>
+            {SORT_OPTIONS.map(([v, l]) => <option key={v} value={v}>Orden: {l}</option>)}
+          </Select>
+          <div className="flex rounded-md bg-sunken p-0.5">
+            {(['cards', 'table'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`h-7 rounded px-2 text-label font-medium ${view === v ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2'}`}>{v === 'cards' ? 'Tarjetas' : 'Tabla'}</button>
+            ))}
+          </div>
+          <button onClick={toggleArchived} className={`h-8 rounded-md border px-2.5 text-label font-medium ${showArchived ? 'border-brand text-brand' : 'border-subtle text-ink-2'}`}>Archivados</button>
+          <button onClick={exportCsv} disabled={displayed.length === 0} className="h-8 rounded-md border border-subtle px-2.5 text-label font-medium text-ink-2 hover:bg-sunken">CSV</button>
+          <button onClick={() => window.print()} className="h-8 rounded-md border border-subtle px-2.5 text-label font-medium text-ink-2 hover:bg-sunken">Imprimir</button>
+          <Button size="sm" onClick={startNew}>+ Nuevo</Button>
         </div>
-        {lots.length === 0 ? (
-          <EmptyState title="Sin lotes todavía" body="Creá el primer rodeo o grupo de manejo de tu finca." />
+
+        {displayed.length === 0 ? (
+          <EmptyState title={lotSearch ? 'Sin lotes con ese nombre' : 'Sin lotes todavía'} body={lotSearch ? 'Probá otro término de búsqueda.' : 'Creá el primer rodeo o grupo de manejo de tu finca.'} />
+        ) : view === 'table' ? (
+          <div className="overflow-x-auto rounded-[10px] border border-subtle bg-surface shadow-[var(--shadow-1)]">
+            <table className="w-full text-body">
+              <thead>
+                <tr className="border-b border-subtle text-label text-ink-3">
+                  <th className="px-3 py-2 text-left font-medium">Lote</th>
+                  <th className="px-2 py-2 text-left font-medium">Propósito</th>
+                  <th className="px-2 py-2 text-left font-medium">Potrero</th>
+                  <th className="px-2 py-2 text-right font-medium">Cab.</th>
+                  <th className="px-2 py-2 text-right font-medium">Peso</th>
+                  <th className="px-3 py-2 text-left font-medium">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayed.map((l) => (
+                  <tr key={l.id} onClick={() => open(l.id)} className={`cursor-pointer border-b border-subtle/60 hover:bg-sunken ${selectedId === l.id ? 'bg-brand-soft' : ''} ${l.is_active ? '' : 'opacity-60'}`}>
+                    <td className="px-3 py-2 font-medium">{l.name}</td>
+                    <td className="px-2 py-2 text-ink-2">{PURPOSE_ES[l.purpose ?? ''] ?? l.purpose ?? '—'}</td>
+                    <td className="px-2 py-2 text-ink-3">{l.paddock_name ?? '—'}</td>
+                    <td className="tnum px-2 py-2 text-right">{l.animal_count}</td>
+                    <td className="tnum px-2 py-2 text-right text-ink-2">{l.avg_weight_kg ?? '—'}</td>
+                    <td className="px-3 py-2"><LotStatusBadge l={l} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
-            {lots.map((l) => (
+            {displayed.map((l) => (
               <button key={l.id} onClick={() => open(l.id)} className={`rounded-[10px] border bg-surface p-4 text-left shadow-[var(--shadow-1)] transition-colors ${selectedId === l.id ? 'border-brand' : 'border-subtle hover:border-strong'} ${l.is_active ? '' : 'opacity-60'}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-body font-semibold">{l.name}</span>
-                  {!l.is_active ? (
-                    <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Archivado</span>
-                  ) : (l.alert_count ?? 0) > 0 ? (
-                    <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-caption text-warning">⚠ {l.alert_count}</span>
-                  ) : l.status === 'empty' ? (
-                    <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Vacío</span>
-                  ) : null}
+                  <LotStatusBadge l={l} />
                 </div>
                 <div className="mt-0.5 text-label text-ink-3">{PURPOSE_ES[l.purpose ?? ''] ?? l.purpose ?? 'sin propósito'} · {l.paddock_name ?? 'sin potrero'}</div>
-                <div className="tnum mt-2 text-compat-22 font-semibold">{l.animal_count}<span className="ml-1 text-body font-normal text-ink-2">animales</span></div>
+                <div className="tnum mt-2 text-compat-22 font-semibold">{l.animal_count}<span className="ml-1 text-body font-normal text-ink-2">animales</span>{l.avg_weight_kg != null ? <span className="ml-2 text-label font-normal text-ink-3">· {l.avg_weight_kg} kg prom.</span> : null}</div>
               </button>
             ))}
           </div>

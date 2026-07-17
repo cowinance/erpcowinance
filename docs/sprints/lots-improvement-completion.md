@@ -149,12 +149,38 @@ Regla única `computeLotAlerts` (helper puro en herd.service), usada por el deta
 Verificado en web: Recría 2026 con badge «⚠ 1» y alerta «Mezcla inusual de categorías» (Vaquillona 8 /
 Ternero 5 / Ternera 4 = 3 categorías).
 
-## 6. Trabajo diferido (etapas siguientes del rediseño)
-- **Etapa 6:** UX — tabla compacta, orden por cabezas/propósito/potrero/peso/estado, export/print.
+## 5-octies. UX del listado (8ª entrega — Etapa 6, última)
+
+Cierre del rediseño: el listado de lotes pasó a ser una herramienta de trabajo diario, sin duplicar
+lógica de negocio (todo es presentación sobre `GET /lots`).
+
+- **Backend:** `GET /lots` ahora expone **`avg_weight_kg`** por lote (subconsulta sobre la última pesada
+  de `v_weighings`, misma regla de peso que el detalle) y acepta **`?include_archived=true`** para traer
+  también los archivados (por defecto sólo activos). `herd.lots(includeArchived=false)`.
+- **Web (`LotsManager`), barra de herramientas:** **búsqueda** de lote por nombre; **orden** por nombre /
+  cabezas / peso prom. / propósito / potrero / estado (`SORT_OPTIONS`); alternador **Tarjetas / Tabla**;
+  botón **Archivados** (activa `include_archived` y refetch); **CSV** (export con BOM y comillas, patrón
+  anti-inyección de P9) e **Imprimir** (`window.print()`). El filtrado + orden se hace en cliente
+  (`displayed` = `useMemo`), sobre la lista ya traída.
+- **Vista Tabla:** tabla compacta (Lote / Propósito / Potrero / Cab. / Peso / Estado) con fila clickeable
+  al detalle; badge de estado unificado (`LotStatusBadge`: Archivado / ⚠ N / Vacío / Activo), reusado por
+  tarjetas y tabla. Las tarjetas ahora también muestran **peso prom.**
+- **Test** (`lots.integration`, caso agregado): `avg_weight_kg` correcto ((400+600)/2 = 500) y visibilidad
+  por `include_archived` (archivado oculto por defecto, visible con el flag).
+
+Verificado en web: vista Tabla, orden «Cabezas» (20/17/12/9/1 desc), búsqueda «rodeo» (→ Rodeo Cría 1 y 2)
+y toggle Archivados (estado activo). Peso prom. visible en tarjetas y tabla.
+
+## 6. Rediseño COMPLETO (6 etapas)
+
+Las 6 etapas del rediseño a fondo están entregadas: (1) consistencia de movimientos + trazabilidad,
+(2) filtros + paginación, (3) dividir/fusionar/mover-todo, (4) métricas por propósito, (5) alertas +
+estado, (6) UX del listado. Total **676 tests**, 0 ciclos de dependencia.
 
 ## 7. Estado del roadmap
 
-**Lotes → mejora completa COMPLETA.** El módulo pasó a gestor con detalle y composición.
+**Lotes → mejora completa COMPLETA** (rediseño de 6 etapas cerrado). El módulo pasó a gestor con detalle,
+composición, movimientos trazables, métricas por propósito, alertas y una UX de trabajo diario.
 
 **Siguiente: por definir.** Candidatos: geocercas/GPS (D3), G2·Costos y rentabilidad, F3·CRM,
 G4·Facturación electrónica.
