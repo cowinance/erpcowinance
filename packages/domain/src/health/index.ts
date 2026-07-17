@@ -15,3 +15,5 @@ export {
   isOpenCaseStatus,
 } from './clinical-case';
 export type { ClinicalCaseStatus, ClinicalCaseSeverity, ClinicalCaseOutcome } from './clinical-case';
+export { ADMISSION_KINDS, InvalidAdmissionError, assertAdmissionKind, resolveAdmissionKind } from './admission';
+export type { AdmissionKind } from './admission';

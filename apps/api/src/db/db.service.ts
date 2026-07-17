@@ -415,6 +415,8 @@ export class DbService implements OnModuleInit {
     // Sanidad E2: casos clínicos + su timeline.
     'clinical_cases',
     'clinical_case_events',
+    // Sanidad E6: internaciones hospital/cuarentena.
+    'health_admissions',
     'alerts',
     'alert_rules',
     'notifications',

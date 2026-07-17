@@ -210,6 +210,9 @@ export async function seedDemo(db: PGlite) {
     ['Rodeo Cría 2', 'breeding', paddocks[3]],
     ['Recría 2026', 'weaning', paddocks[2]],
     ['Engorde Otoño', 'fattening', paddocks[5]],
+    // Sanidad E6: lotes de internación (vacíos), para enviar animales a hospital/cuarentena.
+    ['Hospital', 'hospital', paddocks[1]],
+    ['Cuarentena', 'quarantine', paddocks[4]],
   ];
   const lots: string[] = [];
   for (const [name, purpose, paddock] of lotDefs) {

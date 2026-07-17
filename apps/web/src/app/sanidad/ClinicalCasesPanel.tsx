@@ -32,8 +32,10 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`shrink-0 rounded px-1.5 py-0.5 text-caption ${STATUS_TONE[status] ?? 'bg-sunken text-ink-3'}`}>{STATUS_ES[status] ?? status}</span>;
 }
 
-export function ClinicalCasesPanel({ diagnoses = [] }: { diagnoses?: any[] }) {
+export function ClinicalCasesPanel({ diagnoses = [], lots = [] }: { diagnoses?: any[]; lots?: any[] }) {
   const router = useRouter();
+  const hospLots = lots.filter((l) => (l.purpose === 'hospital' || l.purpose === 'quarantine') && l.is_active !== false);
+  const [admitOpen, setAdmitOpen] = useState(false);
   const [cases, setCases] = useState<any[]>([]);
   const [filter, setFilter] = useState('open');
   const [loading, setLoading] = useState(true);
@@ -215,6 +217,7 @@ export function ClinicalCasesPanel({ diagnoses = [] }: { diagnoses?: any[] }) {
           </div>
 
           {detail.status !== 'closed' && (
+          <>
             <div className="flex flex-wrap items-end gap-2 border-t border-subtle pt-3">
               <label className="flex flex-1 flex-col gap-1">
                 <span className="text-compat-10 font-medium text-ink-2">Seguimiento</span>
@@ -244,6 +247,37 @@ export function ClinicalCasesPanel({ diagnoses = [] }: { diagnoses?: any[] }) {
                 act(`/clinical-cases/${detail.id}/close`, { outcome });
               }}>Cerrar caso</Button>
             </div>
+
+            {/* Enviar a hospital / cuarentena (Sanidad E6) */}
+            {hospLots.length > 0 && (
+              admitOpen ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-subtle pt-3">
+                  <span className="text-label text-ink-2">Internar en:</span>
+                  <Select id="adm_lot" controlSize="sm" fullWidth={false} defaultValue="">
+                    <option value="">Elegir lote…</option>
+                    {hospLots.map((l) => <option key={l.id} value={l.id}>{l.name} · {l.purpose === 'hospital' ? 'Hospital' : 'Cuarentena'}</option>)}
+                  </Select>
+                  <Button size="sm" loading={busy} onClick={async () => {
+                    const lotId = (document.getElementById('adm_lot') as HTMLSelectElement)?.value;
+                    if (!lotId) { setMsg('Elegí un lote'); return; }
+                    setBusy(true); setMsg('');
+                    const res = await fetch(`${API_URL}/health/admissions`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID(), ...authHeaders() },
+                      body: JSON.stringify({ animal_id: detail.animal_id, lot_id: lotId, case_id: detail.id, reason: detail.diagnosis ?? undefined }),
+                    });
+                    const j = await res.json().catch(() => null);
+                    setBusy(false); setAdmitOpen(false);
+                    if (res.ok) { await openDetail(detail.id); router.refresh(); }
+                    else setMsg(j?.message?.title ?? 'No se pudo internar');
+                  }}>Internar</Button>
+                  <button onClick={() => setAdmitOpen(false)} className="text-caption text-ink-3 hover:underline">cancelar</button>
+                </div>
+              ) : (
+                <button onClick={() => setAdmitOpen(true)} className="mt-2 text-label text-brand hover:underline">Enviar a hospital / cuarentena →</button>
+              )
+            )}
+          </>
           )}
           {msg && <p className="mt-2 text-label text-danger">{msg}</p>}
         </div>

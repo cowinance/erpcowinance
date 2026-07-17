@@ -829,6 +829,34 @@ CREATE TABLE "clinical_case_events" (
 CREATE INDEX "ix_clinical_case_events_tenant_id" ON "clinical_case_events" ("tenant_id");
 CREATE INDEX "ix_clinical_case_events_case_id" ON "clinical_case_events" ("case_id");
 
+-- Internaciones sanitarias (Sanidad E6): envío de un animal a un lote hospital/cuarentena, con el
+-- lote de origen para poder devolverlo en el alta. El MOVIMIENTO en sí lo hace la regla única de
+-- movimientos (animal_movements); esta tabla guarda el contexto clínico (motivo, fechas, estado, alta).
+CREATE TABLE "health_admissions" (
+  "id" uuid DEFAULT gen_random_uuid(),
+  "tenant_id" uuid NOT NULL,
+  "animal_id" uuid NOT NULL,
+  "case_id" uuid,
+  "kind" varchar(255) NOT NULL CHECK ("kind" IN ('hospital','quarantine')),
+  "from_lot_id" uuid,
+  "lot_id" uuid NOT NULL,
+  "reason" text,
+  "admitted_at" timestamptz NOT NULL,
+  "expected_discharge_at" date,
+  "health_status" varchar(255),
+  "status" varchar(255) DEFAULT 'admitted' NOT NULL CHECK ("status" IN ('admitted','discharged')),
+  "discharged_at" timestamptz,
+  "discharge_lot_id" uuid,
+  "notes" text,
+  "created_at" timestamptz DEFAULT now() NOT NULL,
+  "updated_at" timestamptz DEFAULT now() NOT NULL,
+  "created_by" uuid,
+  "deleted_at" timestamptz,
+  PRIMARY KEY ("id")
+);
+CREATE INDEX "ix_health_admissions_tenant_id" ON "health_admissions" ("tenant_id");
+CREATE INDEX "ix_health_admissions_animal_id" ON "health_admissions" ("animal_id");
+
 -- ============================================================================
 -- MÓDULO: Producción
 -- ============================================================================

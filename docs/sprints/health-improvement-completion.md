@@ -193,7 +193,42 @@ aplicación, stock insuficiente aborta (atómico), consumo, costo por lote, aler
 con stock. **712 tests** (705 → +7), 0 ciclos. Verificado en web: tratamiento dosis 4 → costo US$ 32
 (4 × $8), stock 50 → 46, consumo «Oxitetra E5 4 un · US$ 32», costo por mes formateado.
 
+---
+
+## Etapa 6 — Hospital / cuarentena ✅
+
+Integra sanidad con los lotes de propósito hospital/cuarentena, reusando la regla única de movimientos.
+
+**Esquema:** tabla nueva `health_admissions` (animal, caso, tipo, lote origen, lote hospital, motivo,
+fecha ingreso, alta estimada, estado sanitario, estado, alta, lote de alta) + RLS. El MOVIMIENTO en sí
+vive en `animal_movements` (regla única); la tabla guarda el contexto clínico y el **lote de origen para
+devolver** al animal en el alta.
+
+**Dominio (`admission.ts`):** `resolveAdmissionKind(lotPurpose, kind?)` — el tipo debe coincidir con el
+propósito del lote (hospital↔hospital, cuarentena↔cuarentena); si no viene, se infiere del propósito.
+
+**`HospitalizationService`** (inyecta `MovementService` de LandModule):
+- `admit`: valida animal activo + lote admisible; captura `from_lot_id` = lote actual; **mueve el animal
+  al lote hospital/cuarentena con `MovementService.recordMovement`** (NUNCA update directo); guarda la
+  internación; timeline `admission`; si viene `case_id`, agrega un evento al caso. Idempotente por
+  `Idempotency-Key`. Un animal no puede tener dos internaciones abiertas (409).
+- `discharge`: mueve al `discharge_lot_id` o, por defecto, de vuelta al `from_lot_id`; marca la
+  internación como dada de alta; timeline `discharge` + evento al caso. Idempotente (alta repetida = no-op).
+- `list`: internaciones abiertas con días internado y bandera de alta vencida.
+- Endpoints: `GET/POST /health/admissions`, `POST /health/admissions/:id/discharge`.
+
+**Web:** `HospitalPanel` (internados con tipo/lote/días/alta estimada + ingreso con lote hospital/
+cuarentena, motivo, alta estimada, estado + alta sanitaria «volver al lote anterior» o a otro lote); en
+el detalle del caso clínico, acción **«Enviar a hospital / cuarentena»** que interna al animal del caso.
+Seed: lotes **Hospital** y **Cuarentena** (vacíos) para que la función sea usable.
+
+**Tests (12 nuevos):** dominio (4: tipo vs propósito) + `hospitalization.integration` (8: ingreso mueve
+al hospital + fila en animal_movements, guarda origen, una internación abierta, lote no admisible, tipo
+que no coincide, alta devuelve al origen, alta a lote destino, idempotencia, ingreso desde caso).
+**724 tests** (712 → +12), 0 ciclos. Verificado en web: ingreso movió el animal al Hospital y el alta lo
+devolvió a su lote de origen.
+
 ### Siguiente
-**Etapa 6 — Hospital / cuarentena**: enviar un animal a un lote hospital/cuarentena desde un caso
-clínico (reusa `recordMovement`), con motivo de ingreso, fecha estimada de alta y alta sanitaria que
-devuelve el animal a su lote anterior o a uno destino.
+**Etapa 7 — Reportes + alertas sanitarias**: incidencia por diagnóstico, mortalidad por causa/lote/
+período, animales reincidentes, productos más usados, efectividad (recuperados vs abiertos/muertos),
+export CSV, y alerta de mortalidad anormal por lote/período.
