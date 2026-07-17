@@ -566,6 +566,33 @@ export class ReproService {
   }
 
   /**
+   * Estado reproductivo de UN vientre (para la ficha 360 del animal, A360 E3). Reusa la MISMA
+   * regla única `computeReproStatus` y los mismos hechos (reproFactsSql) que herdStatus — sin
+   * duplicar el estado. Devuelve null si el animal no es un vientre activo (macho / no vaca-vaquillona).
+   */
+  async animalStatus(animalId: string) {
+    const rows = await this.db.query<any>(`${this.reproFactsSql(' AND a.id = $2')}`, [this.db.tenant, animalId]);
+    if (!rows.length) return null;
+    const config = await this.reproConfig();
+    const today = new Date().toISOString().slice(0, 10);
+    const r = rows[0];
+    const state = computeReproStatus(this.factsOf(r), config, today);
+    return {
+      animal_id: r.animal_id,
+      tag: r.tag ?? null,
+      status: state.status,
+      days_postpartum: state.daysPostpartum,
+      days_open: state.daysOpen,
+      days_since_service: state.daysSinceService,
+      expected_due_date: state.expectedDueDate,
+      days_until: state.daysUntilDue,
+      eligible_for_service: state.eligibleForService,
+      last_calving: r.last_calving ? String(r.last_calving).slice(0, 10) : null,
+      last_service: r.last_service ? String(r.last_service).slice(0, 10) : null,
+    };
+  }
+
+  /**
    * Próximas vacas a preparar para servicio: vientres en postparto cuyos días postparto alcanzarán el
    * VWP dentro de `withinDays` (aún no lo cumplen). Fuente única de hechos + regla pura.
    */

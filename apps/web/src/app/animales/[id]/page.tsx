@@ -1,33 +1,30 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { apiSafe } from '@/lib/server-api';
-import { Card, CardTitle, StatusBadge, TagMono } from '@/components/ui';
-import { WeightChart } from '@/components/WeightChart';
-import { ageFrom, EVENT_LABELS, formatDate, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
-import { WeighingForm } from './WeighingForm';
-import { PhotoGallery } from './PhotoGallery';
+import { Card, StatusBadge, TagMono } from '@/components/ui';
+import { ageFrom, formatDate, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { MoveAction } from './MoveAction';
 import { EditAnimalButton } from './EditAnimalDialog';
+import { AnimalTabs } from './AnimalTabs';
 import { fileUrl } from '@/lib/api';
-import { ArrowLeft, Baby, Clock, Heart, Pencil, Scale, Stethoscope, Syringe, StickyNote } from 'lucide-react';
+import { ArrowLeft, Clock } from 'lucide-react';
 
-const EVENT_ICON: Record<string, any> = {
-  birth: Baby,
-  weighing: Scale,
-  treatment: Stethoscope,
-  vaccination: Syringe,
-  pregnancy_diagnosed: Heart,
-  note: StickyNote,
-  edit: Pencil,
+const REPRO_LABELS: Record<string, string> = {
+  pregnant: 'Preñada', due_soon: 'Próxima a parir', served: 'Servida', diagnosis_pending: 'Diag. pendiente',
+  in_protocol: 'En protocolo', aborted: 'Aborto reciente', postpartum_rest: 'Descanso postparto',
+  ready_for_review: 'Lista revisar', ready_for_service: 'Lista servicio', repeat_breeder: 'Repetidora',
+  open: 'Vacía', empty: 'Vacía', culled: 'Descartada',
 };
 
 export default async function AnimalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [animal, timeline, lots, categories] = await Promise.all([
+  const [animal, timeline, lots, categories, overview, reproStatus] = await Promise.all([
     apiSafe<any>(`/animals/${id}`),
     apiSafe<any[]>(`/animals/${id}/timeline`),
     apiSafe<any[]>('/lots'),
     apiSafe<any[]>('/catalogs/categories'),
+    apiSafe<any>(`/animals/${id}/overview`),
+    apiSafe<any>(`/reproduction/animals/${id}/status`),
   ]);
   if (!animal) notFound();
 
@@ -132,10 +129,16 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
         <Card>
           <div className="text-label text-ink-2">Estado reproductivo</div>
           <div className="mt-1 text-compat-26 font-semibold">
-            {animal.open_pregnancy ? 'Preñada' : animal.sex === 'F' ? 'Vacía' : '—'}
+            {reproStatus ? REPRO_LABELS[reproStatus.status] ?? reproStatus.status : animal.sex === 'F' ? 'Vacía' : '—'}
           </div>
           <div className="mt-0.5 text-label text-ink-3">
-            {animal.open_pregnancy ? `parto probable ${formatDate(animal.open_pregnancy.expected_due_date)}` : animal.sex === 'F' ? 'sin preñez abierta' : 'macho'}
+            {reproStatus?.expected_due_date
+              ? `parto probable ${formatDate(reproStatus.expected_due_date)}`
+              : reproStatus?.days_open != null
+                ? `${reproStatus.days_open} días abierta`
+                : animal.sex === 'F'
+                  ? 'sin preñez abierta'
+                  : 'macho'}
           </div>
         </Card>
         <Card>
@@ -145,70 +148,8 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
         </Card>
       </div>
 
-      <div className="grid grid-cols-5 gap-4 max-lg:grid-cols-1">
-        {/* Línea de tiempo (la promesa central del producto) */}
-        <Card className="col-span-3">
-          <CardTitle>Línea de tiempo</CardTitle>
-          <div className="relative ml-2 space-y-4 border-l border-subtle pl-5">
-            {(timeline ?? []).map((e: any) => {
-              const Icon = EVENT_ICON[e.event_type] ?? StickyNote;
-              return (
-                <div key={e.id} className="relative">
-                  <div className="absolute top-0.5 -left-[27.5px] flex size-5 items-center justify-center rounded-full border border-subtle bg-surface">
-                    <Icon size={11} strokeWidth={2} className="text-ink-2" />
-                  </div>
-                  <div className="text-body">
-                    <span className="font-medium">{EVENT_LABELS[e.event_type] ?? e.event_type}</span>
-                    <span className="ml-2 text-label text-ink-3">
-                      {formatDate(e.occurred_at)} · {relativeTime(e.occurred_at)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-label text-ink-2">
-                    {e.event_type === 'weighing' && e.payload?.weight_kg && (
-                      <span className="tnum">
-                        {e.payload.weight_kg} kg
-                        {e.payload.adg_since_last ? ` · GDP ${Number(e.payload.adg_since_last).toFixed(2)} kg/d` : ''}
-                      </span>
-                    )}
-                    {(e.event_type === 'treatment' || e.event_type === 'vaccination') && e.payload?.product}
-                    {e.event_type === 'pregnancy_diagnosed' &&
-                      `Ecografía · parto probable ${formatDate(e.payload?.expected_due_date)}`}
-                    {e.event_type === 'birth' && 'Alta en el sistema'}
-                    {e.event_type === 'note' && e.payload?.text}
-                    {e.event_type === 'edit' && `Se actualizó: ${(e.payload?.changes ?? []).join(', ')}`}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <div className="col-span-2 space-y-4 max-lg:col-span-3">
-          {/* Curva de peso */}
-          <Card>
-            <CardTitle>Curva de crecimiento</CardTitle>
-            <WeightChart
-              width={440}
-              points={(animal.weight_series ?? []).map((w: any) => ({
-                label: new Date(w.weighed_at).toLocaleDateString('es-AR', { month: 'short' }),
-                value: w.weight_kg,
-              }))}
-            />
-          </Card>
-
-          {/* Captura rápida de pesaje */}
-          <Card>
-            <CardTitle>Registrar pesaje</CardTitle>
-            <WeighingForm animalId={animal.id} />
-          </Card>
-
-          {/* Multimedia (Módulo Animales §11) */}
-          <Card>
-            <CardTitle>Multimedia</CardTitle>
-            <PhotoGallery animalId={animal.id} />
-          </Card>
-        </div>
-      </div>
+      {/* Ficha 360: pestañas que componen las secciones (A360 E3) */}
+      <AnimalTabs animal={animal} timeline={timeline ?? []} overview={overview} reproStatus={reproStatus} />
     </div>
   );
 }

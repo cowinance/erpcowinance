@@ -408,6 +408,104 @@ export class HerdService {
   }
 
   /**
+   * Vista 360 del animal (A360 E3) — COMPONE en una llamada las secciones de sanidad,
+   * movimientos y producción para la ficha. Son LECTURAS directas de las tablas reales
+   * (treatments/vaccinations/clinical_cases/animal_movements/calvings/milk_production_daily),
+   * no reimplementa reglas de negocio. El estado reproductivo (regla única computeReproStatus)
+   * lo sirve ReproService (GET /reproduction/animals/:id/status); la identidad/pesos/genealogía,
+   * getAnimal. La ficha compone estas fuentes.
+   */
+  async animalOverview(id: string) {
+    await this.assertAnimal(id);
+    const t = this.db.tenant;
+    const base = await this.db.one<any>(
+      `SELECT current_lot_id, created_at FROM animals WHERE id = $1 AND tenant_id = $2`,
+      [id, t],
+    );
+
+    const [movements, treatments, vaccinations, cases, calvings, milk, sinceInLot] = await Promise.all([
+      this.db.query<any>(
+        `SELECT m.movement_id, m.moved_at, m.reason, m.from_lot_id, m.to_lot_id, m.from_paddock_id, m.to_paddock_id,
+                fl.name AS from_lot, tl.name AS to_lot, fp.name AS from_paddock, tp.name AS to_paddock,
+                COALESCE(u.full_name, u.email) AS actor
+         FROM animal_movements m
+         LEFT JOIN lots fl ON fl.id = m.from_lot_id LEFT JOIN lots tl ON tl.id = m.to_lot_id
+         LEFT JOIN paddocks fp ON fp.id = m.from_paddock_id LEFT JOIN paddocks tp ON tp.id = m.to_paddock_id
+         LEFT JOIN users u ON u.id = m.created_by
+         WHERE m.animal_id = $1 AND m.tenant_id = $2 AND m.deleted_at IS NULL
+         ORDER BY m.moved_at DESC LIMIT 50`,
+        [id, t],
+      ),
+      this.db.query<any>(
+        `SELECT tr.id, tr.applied_at, tr.meat_withdrawal_until, tr.milk_withdrawal_until, tr.notes, pv.name AS product,
+                (tr.meat_withdrawal_until >= CURRENT_DATE OR tr.milk_withdrawal_until >= now()) AS withdrawal_active
+         FROM treatments tr LEFT JOIN products_veterinary pv ON pv.id = tr.product_id
+         WHERE tr.animal_id = $1 AND tr.deleted_at IS NULL ORDER BY tr.applied_at DESC LIMIT 15`,
+        [id],
+      ),
+      this.db.query<any>(
+        `SELECT v.id, v.applied_at, v.next_due_date, pv.name AS product,
+                (v.next_due_date IS NOT NULL AND v.next_due_date < CURRENT_DATE) AS overdue
+         FROM vaccinations v LEFT JOIN products_veterinary pv ON pv.id = v.product_id
+         WHERE v.animal_id = $1 AND v.deleted_at IS NULL ORDER BY v.applied_at DESC LIMIT 15`,
+        [id],
+      ),
+      this.db.query<any>(
+        `SELECT cc.id, cc.status, cc.severity, cc.started_at, (CURRENT_DATE - cc.started_at::date) AS days_open, d.name AS diagnosis
+         FROM clinical_cases cc LEFT JOIN diagnoses d ON d.id = cc.diagnosis_id
+         WHERE cc.animal_id = $1 AND cc.deleted_at IS NULL AND cc.status IN ('open','in_treatment','observation')
+         ORDER BY cc.started_at DESC`,
+        [id],
+      ),
+      this.db.one<any>(`SELECT count(*)::int AS n, max(calving_date)::text AS last FROM calvings WHERE dam_id = $1 AND deleted_at IS NULL`, [id]),
+      this.db.one<any>(
+        `SELECT count(*)::int AS days, round(sum(total_liters)::numeric, 1)::float AS total_liters,
+                round(avg(total_liters)::numeric, 1)::float AS avg_liters
+         FROM milk_production_daily WHERE animal_id = $1 AND deleted_at IS NULL AND production_date >= CURRENT_DATE - 30`,
+        [id],
+      ),
+      // Tiempo en el lote actual: primer ingreso al lote vigente (o el alta si nunca se movió).
+      base?.current_lot_id
+        ? this.db.one<any>(
+            `SELECT min(moved_at)::text AS since FROM animal_movements
+             WHERE animal_id = $1 AND to_lot_id = $2 AND deleted_at IS NULL`,
+            [id, base.current_lot_id],
+          )
+        : Promise.resolve(null),
+    ]);
+
+    const daysInLot = base?.current_lot_id
+      ? Math.max(0, Math.floor((Date.now() - new Date(sinceInLot?.since ?? base.created_at).getTime()) / 86400000))
+      : null;
+
+    return {
+      movements: movements.map((m: any) => {
+        const kind =
+          m.to_lot_id && m.from_lot_id !== m.to_lot_id && m.to_lot_id !== m.from_lot_id
+            ? m.from_lot_id
+              ? 'rotacion'
+              : 'ingreso'
+            : !m.to_lot_id
+              ? 'salida'
+              : 'rotacion';
+        return { ...m, kind };
+      }),
+      days_in_current_lot: daysInLot,
+      health: {
+        treatments,
+        vaccinations,
+        open_cases: cases,
+        vaccination_overdue: vaccinations.filter((v: any) => v.overdue).length,
+      },
+      production: {
+        calvings: calvings?.n ?? 0,
+        last_calving: calvings?.last ?? null,
+        milk_30d: (milk?.days ?? 0) > 0 ? milk : null,
+      },
+    };
+  }
+
+  /**
    * Edición completa del animal (A360 E2) — regla y escritura ÚNICAS. Diff-aware:
    * solo se escribe/versiona/propaga lo que REALMENTE cambia. Todo en una transacción:
    *   · valida (caravana duplicada excluyendo al propio, categoría existente y del mismo

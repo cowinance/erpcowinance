@@ -70,6 +70,11 @@ export class ReproController {
     return this.repro.herdStatus(lotId);
   }
 
+  @Get('reproduction/animals/:id/status')
+  animalStatus(@Param('id') id: string) {
+    return this.repro.animalStatus(id);
+  }
+
   @Get('reproduction/to-prepare')
   toPrepare(@Query('days') days?: string) {
     return this.repro.toPrepare(days ? Number(days) : undefined);

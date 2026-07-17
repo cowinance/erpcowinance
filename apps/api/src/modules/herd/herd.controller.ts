@@ -69,6 +69,11 @@ export class HerdController {
     return this.herd.timeline(id);
   }
 
+  @Get('animals/:id/overview')
+  overview(@Param('id') id: string) {
+    return this.herd.animalOverview(id);
+  }
+
   @Post('animals/:id/events')
   registerEvent(@Param('id') id: string, @Body() body: any) {
     return this.herd.registerEvent(id, body);
