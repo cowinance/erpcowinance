@@ -310,22 +310,49 @@ export class HerdService {
     };
   }
 
-  /** Resolver animal por caravana/RFID (confirmación de escaneo en manga). */
+  /**
+   * Resolver animal por caravana/RFID/oficial (confirmación de escaneo en manga, A-Manga E1).
+   * Devuelve la TARJETA ROBUSTA en UNA query: identidad + ubicación + último peso/CC/GDP +
+   * días desde pesaje + preñez/parto probable + retiro activo + caso clínico abierto. Datos que
+   * la UI necesita para mostrar contexto y derivar alertas rápidas sin llamadas extra. Lecturas
+   * directas de tablas reales (mismas fuentes que animalOverview), sin reimplementar reglas.
+   */
   async lookup(body: { identifier?: string }) {
     if (!body?.identifier)
       throw new BadRequestException({ code: 'lookup.missing_identifier', title: 'identifier es obligatorio' });
     const row = await this.db.one<any>(
-      `SELECT a.id, a.name, a.sex, a.status, c.name AS category, ai.value AS tag,
-              w.weight_kg::float AS last_weight_kg, w.weighed_at AS last_weighed_at
+      `SELECT a.id, a.name, a.sex, a.status, a.birth_date, a.current_lot_id AS lot_id,
+              c.name AS category, c.code AS category_code, c.min_age_months, c.max_age_months, c.sex AS category_sex,
+              l.name AS lot_name, p.name AS paddock_name,
+              ai.value AS tag,
+              w.weight_kg::float AS last_weight_kg, w.weighed_at AS last_weighed_at,
+              w.adg_since_last::float AS adg, w.body_condition::float AS last_body_condition,
+              CASE WHEN w.weighed_at IS NOT NULL THEN (CURRENT_DATE - w.weighed_at::date) END AS days_since_weighing,
+              preg.expected_due_date::text AS expected_due_date,
+              (wd.meat_until IS NOT NULL OR wd.milk_until IS NOT NULL) AS has_withdrawal,
+              wd.meat_until::text AS meat_withdrawal_until,
+              cc.open_cases::int AS open_cases, cc.max_severity AS case_severity
        FROM animal_identifiers i
        JOIN animals a ON a.id = i.animal_id AND a.deleted_at IS NULL
        LEFT JOIN animal_categories c ON c.id = a.category_id
+       LEFT JOIN lots l ON l.id = a.current_lot_id
+       LEFT JOIN paddocks p ON p.id = a.current_paddock_id
        LEFT JOIN LATERAL (
          SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL
          ORDER BY x.created_at DESC LIMIT 1) ai ON true
        LEFT JOIN LATERAL (
-         SELECT weight_kg, weighed_at FROM v_weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL
+         SELECT weight_kg, weighed_at, adg_since_last, body_condition FROM v_weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL
          ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) w ON true
+       LEFT JOIN LATERAL (
+         SELECT expected_due_date FROM pregnancies WHERE animal_id = a.id AND status='open' AND deleted_at IS NULL
+         ORDER BY diagnosis_date DESC LIMIT 1) preg ON true
+       LEFT JOIN LATERAL (
+         SELECT max(meat_withdrawal_until) AS meat_until, max(milk_withdrawal_until) AS milk_until
+         FROM treatments WHERE animal_id = a.id AND deleted_at IS NULL
+           AND (meat_withdrawal_until >= CURRENT_DATE OR milk_withdrawal_until >= now())) wd ON true
+       LEFT JOIN LATERAL (
+         SELECT count(*) AS open_cases, max(severity) AS max_severity
+         FROM clinical_cases WHERE animal_id = a.id AND deleted_at IS NULL AND status IN ('open','in_treatment','observation')) cc ON true
        WHERE i.tenant_id = $1 AND i.value = $2 AND i.deleted_at IS NULL AND i.retired_at IS NULL
        ORDER BY (a.status = 'active') DESC, i.created_at DESC LIMIT 1`,
       [this.db.tenant, body.identifier.trim()],

@@ -15,7 +15,40 @@ interface Animal {
   tag: string;
   name?: string;
   category?: string;
-  last_weight_kg?: number;
+  category_code?: string;
+  sex?: string;
+  status?: string;
+  lot_id?: string | null;
+  lot_name?: string | null;
+  paddock_name?: string | null;
+  last_weight_kg?: number | null;
+  last_weighed_at?: string | null;
+  days_since_weighing?: number | null;
+  adg?: number | null;
+  last_body_condition?: number | null;
+  expected_due_date?: string | null;
+  has_withdrawal?: boolean;
+  meat_withdrawal_until?: string | null;
+  open_cases?: number;
+  case_severity?: string | null;
+}
+
+/** Alertas rápidas derivadas de la tarjeta (máx 3, accionables). Amarillo/rojo por severidad. */
+function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning' }[] {
+  const out: { text: string; tone: 'danger' | 'warning' }[] = [];
+  if (a.has_withdrawal) out.push({ text: `RETIRO ACTIVO${a.meat_withdrawal_until ? ` hasta ${fmtDate(a.meat_withdrawal_until)}` : ''}`, tone: 'danger' });
+  if ((a.open_cases ?? 0) > 0) out.push({ text: `CASO CLÍNICO ABIERTO${a.case_severity === 'severe' ? ' (grave)' : ''}`, tone: 'danger' });
+  if (a.expected_due_date) {
+    const days = Math.round((new Date(a.expected_due_date).getTime() - Date.now()) / 86400000);
+    if (days <= 21 && days >= -10) out.push({ text: `PARTO PRÓXIMO (${days <= 0 ? 'vencido' : `${days} d`})`, tone: 'warning' });
+  }
+  if (!a.lot_id) out.push({ text: 'SIN LOTE', tone: 'warning' });
+  if (a.days_since_weighing == null || a.days_since_weighing > 90) out.push({ text: a.days_since_weighing == null ? 'SIN PESAJE' : 'SIN PESAJE RECIENTE', tone: 'warning' });
+  return out.slice(0, 3);
+}
+
+function fmtDate(d: string): string {
+  return new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
 }
 
 function beep(freq: number, ms = 120, when = 0) {
@@ -155,13 +188,22 @@ export default function MangaPage() {
         ) : (
           /* Paso 2: capturar peso y condición */
           <>
-            <div className="text-center">
-              <div className="font-mono text-[64px] leading-none font-bold text-[#4ade80]">{animal.tag}</div>
-              <div className="mt-2 text-[17px] text-white/60">
-                {animal.category}
-                {animal.last_weight_kg ? ` · último ${Math.round(animal.last_weight_kg)} kg` : ''}
-              </div>
-            </div>
+            <AnimalCard animal={animal} />
+            {(() => {
+              const alerts = cardAlerts(animal);
+              return alerts.length ? (
+                <div className="flex w-full max-w-2xl flex-wrap justify-center gap-2">
+                  {alerts.map((al) => (
+                    <span
+                      key={al.text}
+                      className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}
+                    >
+                      {al.text}
+                    </span>
+                  ))}
+                </div>
+              ) : null;
+            })()}
 
             <div className="flex items-end gap-3">
               <input
@@ -219,6 +261,49 @@ export default function MangaPage() {
           75% { transform: translateX(6px); }
         }
       `}</style>
+    </div>
+  );
+}
+
+/** Tarjeta robusta del animal escaneado (A-Manga E1): grande, legible, no saturada. */
+function AnimalCard({ animal }: { animal: Animal }) {
+  const facts: { label: string; value: string; strong?: boolean }[] = [];
+  if (animal.last_weight_kg != null)
+    facts.push({
+      label: 'Último peso',
+      value: `${Math.round(animal.last_weight_kg)} kg${animal.days_since_weighing != null ? ` · hace ${animal.days_since_weighing} d` : ''}`,
+      strong: true,
+    });
+  if (animal.adg != null) facts.push({ label: 'GDP', value: `${animal.adg.toFixed(2)} kg/d` });
+  if (animal.last_body_condition != null) facts.push({ label: 'Cond. corporal', value: String(animal.last_body_condition) });
+  facts.push({ label: 'Lote', value: animal.lot_name ?? 'sin lote' });
+  if (animal.paddock_name) facts.push({ label: 'Potrero', value: animal.paddock_name });
+  if (animal.sex === 'F' && animal.expected_due_date)
+    facts.push({ label: 'Preñada', value: `parto ~${fmtDate(animal.expected_due_date)}` });
+
+  return (
+    <div className="w-full max-w-2xl rounded-2xl border border-white/15 bg-white/[0.04] px-6 py-5">
+      <div className="flex items-baseline justify-between gap-4">
+        <div className="min-w-0">
+          <div className="font-mono text-[56px] leading-none font-bold text-[#4ade80]">{animal.tag}</div>
+          <div className="mt-1.5 truncate text-[18px] text-white/70">
+            {animal.name ? `${animal.name} · ` : ''}
+            {animal.category}
+            {animal.sex ? ` · ${animal.sex === 'F' ? 'Hembra' : 'Macho'}` : ''}
+          </div>
+        </div>
+        {animal.status && animal.status !== 'active' && (
+          <span className="shrink-0 rounded-lg bg-[#f87171] px-3 py-1.5 text-[14px] font-bold text-black uppercase">{animal.status}</span>
+        )}
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-3 max-sm:grid-cols-2">
+        {facts.map((f) => (
+          <div key={f.label}>
+            <div className="text-[12px] font-bold tracking-[0.1em] text-white/40 uppercase">{f.label}</div>
+            <div className={`mt-0.5 font-mono ${f.strong ? 'text-[24px] font-bold text-white' : 'text-[19px] text-white/85'}`}>{f.value}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

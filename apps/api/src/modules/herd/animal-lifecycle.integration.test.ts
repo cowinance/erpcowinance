@@ -47,8 +47,11 @@ describe('Animales — ciclo de vida + acciones masivas (E5)', () => {
     herd = new HerdService(db, writer, new BillingService(db));
     status = new AnimalStatusService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
-    speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
-    catVaca = (await db.query<{ id: string }>(`SELECT id FROM animal_categories WHERE code='vaca' LIMIT 1`))[0].id;
+    // Species DERIVADO de la categoría (vaca/vaquillona/toro comparten especie): evita el flake de
+    // `species LIMIT 1` sin ORDER BY vs el species de la categoría (bulkChangeCategory valida que coincidan).
+    const vaca = (await db.query<{ id: string; species_id: string }>(`SELECT id, species_id FROM animal_categories WHERE code='vaca' LIMIT 1`))[0];
+    speciesId = vaca.species_id;
+    catVaca = vaca.id;
     catVaquillona = (await db.query<{ id: string }>(`SELECT id FROM animal_categories WHERE code='vaquillona' LIMIT 1`))[0].id;
     catToro = (await db.query<{ id: string }>(`SELECT id FROM animal_categories WHERE code='toro' LIMIT 1`))[0].id;
   }, 120_000);
