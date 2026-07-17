@@ -1,12 +1,15 @@
 'use client';
 
 /**
- * Modo manga (doc diseño §12.3): captura masiva en campo.
- * Alto contraste AAA, targets gigantes operables con guantes, feedback
- * auditivo (nadie mira la pantalla fijo con una vaca empujando la manga).
+ * Modo manga (doc diseño §12.3): estación de captura rápida en campo.
+ * Alto contraste AAA, targets gigantes operables con guantes, feedback auditivo.
+ * Flujo de 2 pasos: identificar animal → registrar acción → guardar → siguiente.
  * El modo campo ignora el tema: negro puro + blanco puro + acentos saturados.
+ *
+ * A-Manga E2: envuelve la captura en una SESIÓN de trabajo (nombre/lote objetivo/inicio,
+ * contadores registrados+errores, últimos registros, estado de conexión, resumen al salir).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { API_URL, authHeaders } from '@/lib/api';
 
@@ -33,22 +36,13 @@ interface Animal {
   case_severity?: string | null;
 }
 
-/** Alertas rápidas derivadas de la tarjeta (máx 3, accionables). Amarillo/rojo por severidad. */
-function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning' }[] {
-  const out: { text: string; tone: 'danger' | 'warning' }[] = [];
-  if (a.has_withdrawal) out.push({ text: `RETIRO ACTIVO${a.meat_withdrawal_until ? ` hasta ${fmtDate(a.meat_withdrawal_until)}` : ''}`, tone: 'danger' });
-  if ((a.open_cases ?? 0) > 0) out.push({ text: `CASO CLÍNICO ABIERTO${a.case_severity === 'severe' ? ' (grave)' : ''}`, tone: 'danger' });
-  if (a.expected_due_date) {
-    const days = Math.round((new Date(a.expected_due_date).getTime() - Date.now()) / 86400000);
-    if (days <= 21 && days >= -10) out.push({ text: `PARTO PRÓXIMO (${days <= 0 ? 'vencido' : `${days} d`})`, tone: 'warning' });
-  }
-  if (!a.lot_id) out.push({ text: 'SIN LOTE', tone: 'warning' });
-  if (a.days_since_weighing == null || a.days_since_weighing > 90) out.push({ text: a.days_since_weighing == null ? 'SIN PESAJE' : 'SIN PESAJE RECIENTE', tone: 'warning' });
-  return out.slice(0, 3);
-}
-
-function fmtDate(d: string): string {
-  return new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
+interface SessionRecord {
+  key: string;
+  tag: string;
+  action: string;
+  detail: string;
+  at: number;
+  status: 'saved' | 'pending' | 'error';
 }
 
 function beep(freq: number, ms = 120, when = 0) {
@@ -78,27 +72,83 @@ const soundError = () => {
 
 const CC_OPTIONS = [2, 2.5, 3, 3.5, 4, 4.5];
 
+function fmtDate(d: string): string {
+  return new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
+}
+function fmtClock(t: number): string {
+  return new Date(t).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Alertas rápidas derivadas de la tarjeta (máx 3, accionables). */
+function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning' }[] {
+  const out: { text: string; tone: 'danger' | 'warning' }[] = [];
+  if (a.has_withdrawal) out.push({ text: `RETIRO ACTIVO${a.meat_withdrawal_until ? ` hasta ${fmtDate(a.meat_withdrawal_until)}` : ''}`, tone: 'danger' });
+  if ((a.open_cases ?? 0) > 0) out.push({ text: `CASO CLÍNICO ABIERTO${a.case_severity === 'severe' ? ' (grave)' : ''}`, tone: 'danger' });
+  if (a.sex === 'F' && a.expected_due_date) {
+    const days = Math.round((new Date(a.expected_due_date).getTime() - Date.now()) / 86400000);
+    if (days <= 21 && days >= -10) out.push({ text: `PARTO PRÓXIMO (${days <= 0 ? 'vencido' : `${days} d`})`, tone: 'warning' });
+  }
+  if (!a.lot_id) out.push({ text: 'SIN LOTE', tone: 'warning' });
+  if (a.days_since_weighing == null || a.days_since_weighing > 90) out.push({ text: a.days_since_weighing == null ? 'SIN PESAJE' : 'SIN PESAJE RECIENTE', tone: 'warning' });
+  return out.slice(0, 3);
+}
+
 export default function MangaPage() {
+  const [phase, setPhase] = useState<'setup' | 'capture' | 'summary'>('setup');
+  const [sessionName, setSessionName] = useState('');
+  const [targetLot, setTargetLot] = useState<{ id: string; name: string } | null>(null);
+  const [lots, setLots] = useState<{ id: string; name: string }[]>([]);
+  const [startedAt, setStartedAt] = useState<number>(0);
+  const [records, setRecords] = useState<SessionRecord[]>([]);
+  const [errors, setErrors] = useState(0);
+  const [online, setOnline] = useState(true);
+
   const [animal, setAnimal] = useState<Animal | null>(null);
   const [tag, setTag] = useState('');
   const [kg, setKg] = useState('');
   const [cc, setCc] = useState<number | null>(null);
-  const [count, setCount] = useState(0);
-  const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
   const tagRef = useRef<HTMLInputElement>(null);
   const kgRef = useRef<HTMLInputElement>(null);
 
+  // Estado de conexión (para el indicador de la barra).
   useEffect(() => {
-    (animal ? kgRef : tagRef).current?.focus();
-  }, [animal]);
+    const upd = () => setOnline(navigator.onLine);
+    upd();
+    window.addEventListener('online', upd);
+    window.addEventListener('offline', upd);
+    return () => {
+      window.removeEventListener('online', upd);
+      window.removeEventListener('offline', upd);
+    };
+  }, []);
 
-  function fail(msg: string) {
+  // Catálogo de lotes (para el lote objetivo de la sesión).
+  useEffect(() => {
+    fetch(`${API_URL}/lots`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setLots(Array.isArray(d) ? d.map((l: any) => ({ id: l.id, name: l.name })) : []))
+      .catch(() => setLots([]));
+  }, []);
+
+  useEffect(() => {
+    if (phase === 'capture') (animal ? kgRef : tagRef).current?.focus();
+  }, [animal, phase]);
+
+  const fail = useCallback((msg: string) => {
     setError(msg);
     soundError();
     setShake(true);
+    setErrors((e) => e + 1);
     setTimeout(() => setShake(false), 400);
+  }, []);
+
+  function startSession() {
+    setStartedAt(Date.now());
+    setRecords([]);
+    setErrors(0);
+    setPhase('capture');
   }
 
   async function lookup() {
@@ -133,8 +183,10 @@ export default function MangaPage() {
         return fail(b?.message?.title ?? 'ERROR AL GUARDAR');
       }
       soundSaved();
-      setCount((c) => c + 1);
-      setLastSaved(`${animal.tag} · ${kg} kg`);
+      setRecords((r) => [
+        { key: crypto.randomUUID(), tag: animal.tag, action: 'Pesaje', detail: `${kg} kg${cc ? ` · CC ${cc}` : ''}`, at: Date.now(), status: 'saved' },
+        ...r,
+      ]);
       setAnimal(null);
       setKg('');
       setCc(null);
@@ -143,20 +195,111 @@ export default function MangaPage() {
     }
   }
 
+  const saved = records.filter((r) => r.status === 'saved').length;
+
+  // ── Pantalla de inicio de sesión ──
+  if (phase === 'setup') {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-7 bg-black px-6 text-white select-none">
+        <div className="text-center">
+          <div className="text-[13px] font-bold tracking-[0.3em] text-white/40">MODO MANGA</div>
+          <div className="mt-2 text-[30px] font-extrabold">Nueva sesión de trabajo</div>
+        </div>
+        <div className="w-full max-w-md space-y-4">
+          <div>
+            <label className="mb-1.5 block text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Nombre (opcional)</label>
+            <input
+              value={sessionName}
+              onChange={(e) => setSessionName(e.target.value)}
+              placeholder="Ej. Pesada recría — mañana"
+              className="h-14 w-full rounded-xl border border-white/20 bg-white/[0.04] px-4 text-[20px] outline-none placeholder:text-white/25 focus:border-[#4ade80]"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Lote objetivo (opcional)</label>
+            <select
+              value={targetLot?.id ?? ''}
+              onChange={(e) => setTargetLot(e.target.value ? { id: e.target.value, name: lots.find((l) => l.id === e.target.value)?.name ?? '' } : null)}
+              className="h-14 w-full rounded-xl border border-white/20 bg-white/[0.04] px-4 text-[20px] outline-none focus:border-[#4ade80]"
+            >
+              <option value="">Todos los animales</option>
+              {lots.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="mb-1.5 text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Modo</div>
+            <div className="h-14 rounded-xl bg-[#4ade80] text-center text-[20px] font-extrabold leading-[56px] text-black">PESAJE</div>
+          </div>
+        </div>
+        <button onClick={startSession} className="h-[72px] w-full max-w-md rounded-xl bg-white text-[24px] font-extrabold text-black">
+          EMPEZAR
+        </button>
+        <Link href="/" className="text-[15px] text-white/40 underline">Cancelar</Link>
+      </div>
+    );
+  }
+
+  // ── Resumen final ──
+  if (phase === 'summary') {
+    const mins = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black px-6 text-white select-none">
+        <div className="text-center">
+          <div className="text-[13px] font-bold tracking-[0.3em] text-white/40">RESUMEN DE SESIÓN</div>
+          {sessionName && <div className="mt-1 text-[22px] font-bold">{sessionName}</div>}
+          <div className="mt-1 text-[15px] text-white/50">
+            {targetLot ? `${targetLot.name} · ` : ''}{mins} min · desde {fmtClock(startedAt)}
+          </div>
+        </div>
+        <div className="grid w-full max-w-md grid-cols-2 gap-3">
+          <SummaryStat label="Procesados" value={saved} tone="ok" />
+          <SummaryStat label="Errores" value={errors} tone={errors ? 'error' : 'muted'} />
+          <SummaryStat label="Pesos registrados" value={records.filter((r) => r.action === 'Pesaje').length} tone="muted" />
+          <SummaryStat label="Pendientes de sync" value={records.filter((r) => r.status === 'pending').length} tone="muted" />
+        </div>
+        {records.length > 0 && (
+          <div className="w-full max-w-md">
+            <div className="mb-2 text-[12px] font-bold tracking-[0.15em] text-white/40 uppercase">Últimos registros</div>
+            <div className="max-h-48 space-y-1 overflow-y-auto">
+              {records.slice(0, 20).map((r) => (
+                <div key={r.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-[15px]">
+                  <span className="font-mono font-bold text-[#4ade80]">{r.tag}</span>
+                  <span className="text-white/70">{r.detail}</span>
+                  <span className="text-white/40">{fmtClock(r.at)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex w-full max-w-md gap-3">
+          <button onClick={() => setPhase('setup')} className="h-[64px] flex-1 rounded-xl bg-white/10 text-[18px] font-bold text-white">Nueva sesión</button>
+          <Link href="/" className="flex h-[64px] flex-1 items-center justify-center rounded-xl bg-white text-[18px] font-extrabold text-black">Salir</Link>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Captura ──
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black text-white select-none">
-      {/* Barra superior: progreso siempre visible */}
-      <div className="flex h-14 items-center justify-between border-b border-white/20 px-5">
-        <span className="text-[13px] font-bold tracking-[0.2em] text-white/60">MODO MANGA</span>
-        <span className="font-mono text-[20px] font-bold text-[#4ade80]">
-          {count} {count === 1 ? 'registrado' : 'registrados'}
+      {/* Barra superior: sesión + progreso + conexión, siempre visible */}
+      <div className="flex h-14 items-center justify-between gap-3 border-b border-white/20 px-5">
+        <span className="flex items-center gap-2 text-[13px] font-bold tracking-[0.15em] text-white/60">
+          <span className={`inline-block size-2.5 rounded-full ${online ? 'bg-[#4ade80]' : 'bg-[#f87171]'}`} title={online ? 'Conectado' : 'Sin conexión'} />
+          {sessionName ? <span className="max-w-[180px] truncate normal-case tracking-normal text-white/80">{sessionName}</span> : 'MODO MANGA'}
         </span>
-        <Link href="/" className="rounded border border-white/30 px-3 py-1.5 text-[13px] text-white/70 hover:text-white">
+        <span className="flex items-center gap-4 font-mono text-[18px] font-bold">
+          <span className="text-[#4ade80]">{saved} <span className="text-[12px] font-normal text-white/40">reg</span></span>
+          <span className={errors ? 'text-[#f87171]' : 'text-white/30'}>{errors} <span className="text-[12px] font-normal text-white/40">err</span></span>
+        </span>
+        <button onClick={() => setPhase('summary')} className="rounded border border-white/30 px-3 py-1.5 text-[13px] text-white/70 hover:text-white">
           Salir
-        </Link>
+        </button>
       </div>
 
-      <div className={`flex flex-1 flex-col items-center justify-center gap-6 px-6 ${shake ? 'animate-[shake_0.4s]' : ''}`}>
+      <div className={`flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-6 py-6 ${shake ? 'animate-[shake_0.4s]' : ''}`}>
         {!animal ? (
           /* Paso 1: identificar el animal */
           <>
@@ -172,11 +315,6 @@ export default function MangaPage() {
               aria-label="Caravana del animal"
             />
             {error && <div className="text-[22px] font-bold text-[#f87171]">{error}</div>}
-            {lastSaved && !error && (
-              <div className="text-[15px] text-white/50">
-                Último guardado: <span className="font-mono text-[#4ade80]">{lastSaved}</span>
-              </div>
-            )}
             <button
               onClick={lookup}
               disabled={!tag.trim()}
@@ -184,6 +322,20 @@ export default function MangaPage() {
             >
               BUSCAR
             </button>
+            {records.length > 0 && (
+              <div className="w-full max-w-md">
+                <div className="mb-2 text-center text-[12px] font-bold tracking-[0.15em] text-white/40 uppercase">Últimos registros</div>
+                <div className="space-y-1">
+                  {records.slice(0, 4).map((r) => (
+                    <div key={r.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-[15px]">
+                      <span className="font-mono font-bold text-[#4ade80]">{r.tag}</span>
+                      <span className="text-white/60">{r.action} · {r.detail}</span>
+                      <span className="text-white/35">{fmtClock(r.at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           /* Paso 2: capturar peso y condición */
@@ -194,10 +346,7 @@ export default function MangaPage() {
               return alerts.length ? (
                 <div className="flex w-full max-w-2xl flex-wrap justify-center gap-2">
                   {alerts.map((al) => (
-                    <span
-                      key={al.text}
-                      className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}
-                    >
+                    <span key={al.text} className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}>
                       {al.text}
                     </span>
                   ))}
@@ -220,18 +369,10 @@ export default function MangaPage() {
             </div>
 
             <div className="w-full max-w-md">
-              <div className="mb-2 text-center text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">
-                Condición corporal
-              </div>
+              <div className="mb-2 text-center text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Condición corporal</div>
               <div className="grid grid-cols-6 gap-2">
                 {CC_OPTIONS.map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setCc(cc === v ? null : v)}
-                    className={`h-14 rounded-lg text-[20px] font-bold ${
-                      cc === v ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/80'
-                    }`}
-                  >
+                  <button key={v} onClick={() => setCc(cc === v ? null : v)} className={`h-14 rounded-lg text-[20px] font-bold ${cc === v ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/80'}`}>
                     {v}
                   </button>
                 ))}
@@ -240,11 +381,7 @@ export default function MangaPage() {
 
             {error && <div className="text-[20px] font-bold text-[#f87171]">{error}</div>}
 
-            <button
-              onClick={save}
-              disabled={!kg}
-              className="h-[72px] w-full max-w-md rounded-xl bg-[#4ade80] text-[24px] font-extrabold text-black disabled:opacity-30"
-            >
+            <button onClick={save} disabled={!kg} className="h-[72px] w-full max-w-md rounded-xl bg-[#4ade80] text-[24px] font-extrabold text-black disabled:opacity-30">
               GUARDAR Y SIGUIENTE
             </button>
             <button onClick={() => (setAnimal(null), setKg(''), setCc(null), setError(''))} className="text-[15px] text-white/50 underline">
@@ -265,6 +402,16 @@ export default function MangaPage() {
   );
 }
 
+function SummaryStat({ label, value, tone }: { label: string; value: number; tone: 'ok' | 'error' | 'muted' }) {
+  const color = tone === 'ok' ? 'text-[#4ade80]' : tone === 'error' ? 'text-[#f87171]' : 'text-white';
+  return (
+    <div className="rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3">
+      <div className={`font-mono text-[36px] font-bold ${color}`}>{value}</div>
+      <div className="text-[13px] text-white/50">{label}</div>
+    </div>
+  );
+}
+
 /** Tarjeta robusta del animal escaneado (A-Manga E1): grande, legible, no saturada. */
 function AnimalCard({ animal }: { animal: Animal }) {
   const facts: { label: string; value: string; strong?: boolean }[] = [];
@@ -278,8 +425,7 @@ function AnimalCard({ animal }: { animal: Animal }) {
   if (animal.last_body_condition != null) facts.push({ label: 'Cond. corporal', value: String(animal.last_body_condition) });
   facts.push({ label: 'Lote', value: animal.lot_name ?? 'sin lote' });
   if (animal.paddock_name) facts.push({ label: 'Potrero', value: animal.paddock_name });
-  if (animal.sex === 'F' && animal.expected_due_date)
-    facts.push({ label: 'Preñada', value: `parto ~${fmtDate(animal.expected_due_date)}` });
+  if (animal.sex === 'F' && animal.expected_due_date) facts.push({ label: 'Preñada', value: `parto ~${fmtDate(animal.expected_due_date)}` });
 
   return (
     <div className="w-full max-w-2xl rounded-2xl border border-white/15 bg-white/[0.04] px-6 py-5">
