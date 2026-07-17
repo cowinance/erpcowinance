@@ -16,6 +16,11 @@ export interface ListAnimalsParams {
   category?: string;
   lot?: string;
   q?: string;
+  sex?: string;
+  minWeight?: number;
+  maxWeight?: number;
+  minAgeMonths?: number;
+  maxAgeMonths?: number;
   limit?: number;
   cursor?: string;
 }
@@ -48,6 +53,28 @@ export class HerdService {
     if (params.q) {
       args.push(`%${params.q}%`);
       where.push(`(t.value ILIKE $${args.length} OR a.name ILIKE $${args.length})`);
+    }
+    if (params.sex) {
+      args.push(params.sex);
+      where.push(`a.sex = $${args.length}`);
+    }
+    // Peso: sobre la última pesada (v_weighings). Sin pesada → excluido del rango.
+    if (params.minWeight != null) {
+      args.push(params.minWeight);
+      where.push(`w.weight_kg >= $${args.length}`);
+    }
+    if (params.maxWeight != null) {
+      args.push(params.maxWeight);
+      where.push(`w.weight_kg <= $${args.length}`);
+    }
+    // Edad en meses (desde birth_date). Sin fecha → excluido del rango.
+    if (params.minAgeMonths != null) {
+      args.push(params.minAgeMonths);
+      where.push(`a.birth_date IS NOT NULL AND a.birth_date <= CURRENT_DATE - ($${args.length}::int * INTERVAL '1 month')`);
+    }
+    if (params.maxAgeMonths != null) {
+      args.push(params.maxAgeMonths);
+      where.push(`a.birth_date IS NOT NULL AND a.birth_date >= CURRENT_DATE - ($${args.length}::int * INTERVAL '1 month')`);
     }
     if (params.cursor) {
       try {

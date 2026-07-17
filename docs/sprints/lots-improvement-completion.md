@@ -84,10 +84,22 @@ Jose Montilla», además de ingresos/salidas previos.
 **Criterio clave respetado:** nunca se actualiza `current_lot_id`/`current_paddock_id` desde la UI ni
 por edición de campo; todo pasa por `recordMovement` (regla única, con transacción y trazabilidad).
 
+## 5-quater. Filtros + paginación de animales (4ª entrega — Etapa 2)
+
+- **Backend:** `GET /animals` (`listAnimals`) se extendió con filtros **sexo**, **peso** (min/max, sobre
+  la última pesada de `v_weighings`) y **edad** (min/max meses, desde `birth_date`), sumados a los que ya
+  tenía (estado, categoría, lote, búsqueda por caravana/nombre) y a la **paginación por cursor**
+  (`{data, next_cursor}`). No se duplicó lógica: es el mismo endpoint que ya usaba la lista de animales.
+- **Web (lista de animales del lote):** barra de **búsqueda** (caravana/nombre) + panel **«Filtros»**
+  (categoría, sexo, peso ≥/≤, edad ≥/≤ con badge de cantidad activa y «Limpiar»), **peso** visible en
+  cada fila, y **«Cargar más»** (paginación por cursor) para lotes grandes.
+- **Test** (`animals-filters`): sexo, peso (min/max), edad (min/max) y paginación con cursor (dos
+  páginas sin solapamiento).
+- Verificado en web: en Rodeo Cría 1 (20), filtrar Sexo = Machos dejó 2 (los toros, con su peso), con el
+  badge «Filtros (1)».
+
 ## 6. Trabajo diferido (etapas siguientes del rediseño)
 
-- **Etapa 2:** filtros (caravana/nombre/categoría/sexo/peso/edad/estado) + paginación de la lista de
-  animales del lote.
 - **Etapa 3:** acciones **dividir** lote, **fusionar** lotes y **mover TODO** el lote.
 - **Etapa 4:** **métricas por propósito** (engorde: conversión/costo/kg/terminación; cría: vientres/toros/
   preñadas/vacías/crías; recría: peso inicial/actual/GDP/edad; hospital: motivo/días/tratamientos;

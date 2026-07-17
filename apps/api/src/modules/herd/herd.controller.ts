@@ -11,10 +11,20 @@ export class HerdController {
     @Query('category') category?: string,
     @Query('lot') lot?: string,
     @Query('q') q?: string,
+    @Query('sex') sex?: string,
+    @Query('min_weight') minWeight?: string,
+    @Query('max_weight') maxWeight?: string,
+    @Query('min_age') minAge?: string,
+    @Query('max_age') maxAge?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
-    return this.herd.listAnimals({ status, category, lot, q, limit: limit ? Number(limit) : undefined, cursor });
+    const num = (v?: string) => (v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : undefined);
+    return this.herd.listAnimals({
+      status, category, lot, q, sex,
+      minWeight: num(minWeight), maxWeight: num(maxWeight), minAgeMonths: num(minAge), maxAgeMonths: num(maxAge),
+      limit: limit ? Number(limit) : undefined, cursor,
+    });
   }
 
   @Post('animals')

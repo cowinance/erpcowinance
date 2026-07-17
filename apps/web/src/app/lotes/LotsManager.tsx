@@ -11,7 +11,10 @@ import { Select } from '@/components/Select';
 
 interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number }
 interface Paddock { id: string; name: string }
-interface AnimalRow { id: string; tag: string | null; name: string | null; category: string | null; sex: string; lot_id: string | null; lot_name: string | null }
+interface Category { code: string; name: string }
+interface AnimalFilters { q: string; category: string; sex: string; minWeight: string; maxWeight: string; minAge: string; maxAge: string }
+const EMPTY_FILTERS: AnimalFilters = { q: '', category: '', sex: '', minWeight: '', maxWeight: '', minAge: '', maxAge: '' };
+interface AnimalRow { id: string; tag: string | null; name: string | null; category: string | null; sex: string; lot_id: string | null; lot_name: string | null; last_weight_kg: number | null; birth_date: string | null }
 interface HistoryEvent { movement_id: string; moved_at: string; kind: 'ingreso' | 'salida' | 'rotacion' | 'movimiento'; animals: number; reason: string | null; actor: string | null; from_lot: string | null; to_lot: string | null; from_paddock: string | null; to_paddock: string | null }
 interface Detail extends Lot {
   current_paddock_id: string | null;
@@ -31,7 +34,7 @@ const SEX_ES: Record<string, string> = { F: 'Hembras', M: 'Machos' };
 const HIST_LABEL: Record<string, string> = { ingreso: 'Ingreso', salida: 'Salida', rotacion: 'Rotación de potrero', movimiento: 'Movimiento' };
 const HIST_TONE: Record<string, string> = { ingreso: 'bg-success', salida: 'bg-warning', rotacion: 'bg-info', movimiento: 'bg-ink-3' };
 
-export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock[] }) {
+export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddocks: Paddock[]; categories: Category[] }) {
   const router = useRouter();
   const [mode, setMode] = useState<'none' | 'new' | 'edit'>('none');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -43,8 +46,11 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
   const [purpose, setPurpose] = useState('');
   const [paddockId, setPaddockId] = useState('');
   const [active, setActive] = useState(true);
-  // animales del lote + selección + agregado
+  // animales del lote + selección + agregado + filtros/paginación
   const [animals, setAnimals] = useState<AnimalRow[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [filters, setFilters] = useState<AnimalFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [moveTarget, setMoveTarget] = useState('');
   const [adding, setAdding] = useState(false);
@@ -69,15 +75,35 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
     finally { setBusy(false); }
   }
 
-  async function loadAnimals(lotId: string) {
-    const r = await call('GET', `/animals?lot=${lotId}&status=active&limit=300`);
-    setAnimals((r?.data ?? []) as AnimalRow[]);
-    setSel(new Set());
+  function filterQuery(f: AnimalFilters): string {
+    const p = new URLSearchParams({ status: 'active', limit: '40' });
+    if (f.q.trim()) p.set('q', f.q.trim());
+    if (f.category) p.set('category', f.category);
+    if (f.sex) p.set('sex', f.sex);
+    if (f.minWeight) p.set('min_weight', f.minWeight);
+    if (f.maxWeight) p.set('max_weight', f.maxWeight);
+    if (f.minAge) p.set('min_age', f.minAge);
+    if (f.maxAge) p.set('max_age', f.maxAge);
+    return p.toString();
+  }
+  /** Carga (o pagina) los animales del lote con los filtros actuales. `reset` reemplaza; si no, agrega. */
+  async function loadAnimals(lotId: string, f: AnimalFilters, next?: string | null) {
+    const q = filterQuery(f) + (next ? `&cursor=${next}` : '');
+    const r = await call('GET', `/animals?lot=${lotId}&${q}`);
+    const page = (r?.data ?? []) as AnimalRow[];
+    setAnimals((prev) => (next ? [...prev, ...page] : page));
+    setCursor(r?.next_cursor ?? null);
+    if (!next) setSel(new Set());
+  }
+  function applyFilters(f: AnimalFilters) {
+    setFilters(f);
+    if (selectedId) loadAnimals(selectedId, f, null);
   }
   async function open(id: string) {
     setSelectedId(id); setMode('none'); setError(''); setAdding(false); setResults([]); setSearch(''); setShowHistory(false);
+    setFilters(EMPTY_FILTERS); setFiltersOpen(false);
     const d = await call('GET', `/lots/${id}`);
-    if (d) { setDetail(d); loadAnimals(id); call('GET', `/lots/${id}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[])); }
+    if (d) { setDetail(d); loadAnimals(id, EMPTY_FILTERS, null); call('GET', `/lots/${id}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[])); }
   }
   function toggle(set: Set<string>, id: string): Set<string> {
     const next = new Set(set);
@@ -88,7 +114,7 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
   async function moveSelected(target: string | null) {
     if (!selectedId || sel.size === 0) return;
     const r = await call('POST', '/movements', { animal_ids: [...sel], lot_id: target, reason: target ? 'reasignación de lote' : 'salida de lote' });
-    if (r) { setMoveTarget(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId); }
+    if (r) { setMoveTarget(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId, filters, null); }
   }
   async function runSearch(q: string) {
     setSearch(q);
@@ -98,7 +124,7 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
   async function addSelected() {
     if (!selectedId || addSel.size === 0) return;
     const r = await call('POST', '/movements', { animal_ids: [...addSel], lot_id: selectedId, reason: 'ingreso al lote' });
-    if (r) { setAdding(false); setAddSel(new Set()); setResults([]); setSearch(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId); }
+    if (r) { setAdding(false); setAddSel(new Set()); setResults([]); setSearch(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId, filters, null); }
   }
   function startNew() { setMode('new'); setSelectedId(null); setDetail(null); setName(''); setPurpose(''); setError(''); }
   function startEdit() {
@@ -126,6 +152,8 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
     const r = await call('DELETE', `/lots/${selectedId}`);
     if (r) { setSelectedId(null); setDetail(null); router.refresh(); }
   }
+
+  const activeFilterCount = Object.entries(filters).filter(([k, v]) => k !== 'q' && v).length;
 
   return (
     <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
@@ -246,6 +274,39 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
                 </button>
               </div>
 
+              {/* Filtros de la lista de animales del lote */}
+              <div className="mb-2 space-y-1.5">
+                <div className="flex gap-1.5">
+                  <Input value={filters.q} onChange={(e) => applyFilters({ ...filters, q: e.target.value })} placeholder="Caravana o nombre…" aria-label="Buscar en el lote" />
+                  <button
+                    onClick={() => setFiltersOpen((v) => !v)}
+                    className={`shrink-0 rounded-md border px-2.5 text-label font-medium ${activeFilterCount ? 'border-brand text-brand' : 'border-subtle text-ink-2'}`}
+                  >
+                    Filtros{activeFilterCount ? ` (${activeFilterCount})` : ''}
+                  </button>
+                </div>
+                {filtersOpen && (
+                  <div className="space-y-1.5 rounded-md border border-subtle bg-sunken p-2">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Select value={filters.category} onChange={(e) => applyFilters({ ...filters, category: e.target.value })} aria-label="Categoría">
+                        <option value="">Categoría</option>
+                        {categories.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+                      </Select>
+                      <Select value={filters.sex} onChange={(e) => applyFilters({ ...filters, sex: e.target.value })} aria-label="Sexo">
+                        <option value="">Sexo</option>
+                        <option value="F">Hembras</option>
+                        <option value="M">Machos</option>
+                      </Select>
+                      <Input type="number" value={filters.minWeight} onChange={(e) => applyFilters({ ...filters, minWeight: e.target.value })} placeholder="Peso ≥ kg" aria-label="Peso mínimo" />
+                      <Input type="number" value={filters.maxWeight} onChange={(e) => applyFilters({ ...filters, maxWeight: e.target.value })} placeholder="Peso ≤ kg" aria-label="Peso máximo" />
+                      <Input type="number" value={filters.minAge} onChange={(e) => applyFilters({ ...filters, minAge: e.target.value })} placeholder="Edad ≥ meses" aria-label="Edad mínima" />
+                      <Input type="number" value={filters.maxAge} onChange={(e) => applyFilters({ ...filters, maxAge: e.target.value })} placeholder="Edad ≤ meses" aria-label="Edad máxima" />
+                    </div>
+                    {activeFilterCount > 0 && <button onClick={() => applyFilters(EMPTY_FILTERS)} className="text-label text-brand hover:underline">Limpiar filtros</button>}
+                  </div>
+                )}
+              </div>
+
               {adding && (
                 <div className="mb-3 rounded-md border border-subtle bg-sunken p-2">
                   <Input value={search} onChange={(e) => runSearch(e.target.value)} placeholder="Buscar animales por caravana o nombre…" aria-label="Buscar animales" />
@@ -265,7 +326,7 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
               )}
 
               {animals.length === 0 ? (
-                <p className="text-body text-ink-3">Sin animales en el lote.</p>
+                <p className="text-body text-ink-3">{activeFilterCount || filters.q ? 'Sin animales con esos filtros.' : 'Sin animales en el lote.'}</p>
               ) : (
                 <>
                   <div className="max-h-56 space-y-0.5 overflow-y-auto">
@@ -273,10 +334,15 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
                       <label key={a.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-label hover:bg-sunken">
                         <input type="checkbox" checked={sel.has(a.id)} onChange={() => setSel((s) => toggle(s, a.id))} />
                         <span className="font-medium">{a.tag ?? a.name ?? a.id.slice(0, 6)}</span>
-                        <span className="text-ink-3">{a.category ?? ''} · {SEX_ES[a.sex] ?? a.sex}</span>
+                        <span className="text-ink-3">{a.category ?? ''} · {SEX_ES[a.sex] ?? a.sex}{a.last_weight_kg != null ? ` · ${a.last_weight_kg} kg` : ''}</span>
                       </label>
                     ))}
                   </div>
+                  {cursor && (
+                    <button onClick={() => selectedId && loadAnimals(selectedId, filters, cursor)} disabled={busy} className="mt-1.5 w-full rounded-md border border-subtle py-1 text-label font-medium text-ink-2 hover:bg-sunken">
+                      Cargar más
+                    </button>
+                  )}
                   {sel.size > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-sunken p-2">
                       <span className="text-label font-medium text-ink-2">{sel.size} seleccionados</span>
