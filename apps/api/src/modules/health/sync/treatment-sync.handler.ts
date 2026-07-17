@@ -1,26 +1,26 @@
 import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
-import { computeWithdrawal } from '@cowinance/domain';
+import { HealthApplicationError } from '@cowinance/domain';
 import type { Op } from '@cowinance/sync-core';
 import { DbService, Q } from '../../../db/db.service';
 import type { SyncHandler, SyncConflict } from '../../sync/contracts/sync-handler.interface';
 import { SyncConflictWriter } from '../../sync/registry/sync-conflict.writer';
 import { SyncHandlerRegistry } from '../../sync/registry/sync-handler.registry';
+import { TreatmentService, HealthApplicationLookupError } from '../treatment.service';
 
 /**
- * treatments: evento inmutable (insert-once, ON CONFLICT DO NOTHING — sin
- * LWW, sin sync_row_state). Server Authority (F4.4/ADR-0007):
- * meat_withdrawal_until/milk_withdrawal_until son derivados por regla de
- * dominio, no una preferencia del cliente — el servidor los recalcula y, si
- * difieren, usa su valor y deja traza (sin tolerancia: inocuidad alimentaria).
+ * treatments: canal de sync ENTRANTE de la aplicación de tratamiento. El móvil
+ * captura offline y lo emite como UNA sola intención `event` (event-only); este handler
+ * la mapea a la REGLA ÚNICA `TreatmentService.recordTreatment` (origin='sync') — que en
+ * una sola tx escribe la fila `treatments` con el retiro DERIVADO, el timeline y el evento
+ * de dominio. Ya no reimplementa `computeWithdrawal` ni queda sin línea de tiempo.
  *
- * Vive en `health/` (ADR-0008), no en `sync/`: es la misma regla de sanidad
- * que `health.service.ts`/`computeWithdrawal`, solo que llega por el canal
- * de sync en vez de REST. Se auto-registra en `SyncHandlerRegistry` al
- * arrancar (`OnModuleInit`) — `sync/` nunca importa este módulo.
+ * Server Authority (F4.4/ADR-0007): el retiro que persiste es el del servidor; si difiere
+ * del propuesto por el cliente, `recordTreatment` lo reporta en `withdrawalMismatch` y acá se
+ * registra como conflicto semántico auto-resuelto (inocuidad alimentaria, sin tolerancia).
  *
- * Piloto de F6 (ver docs/sprints — análisis F6 §5): el candidato más simple
- * con lógica real, para probar el contrato del registry sin mezclarlo
- * todavía con la complejidad de LWW (animals, pregnancies quedan pendientes).
+ * Idempotente por `treatmentId = op.rowId`. Rechazos de dominio (animal no activo, animal/
+ * producto inexistente) → conflicto semántico SIN persistencia parcial. Vive en `health/`
+ * (ADR-0008); se auto-registra en `SyncHandlerRegistry` al arrancar.
  */
 @Injectable()
 export class TreatmentSyncHandler implements SyncHandler, OnModuleInit {
@@ -30,6 +30,7 @@ export class TreatmentSyncHandler implements SyncHandler, OnModuleInit {
     private readonly db: DbService,
     private readonly conflictWriter: SyncConflictWriter,
     private readonly registry: SyncHandlerRegistry,
+    private readonly treatments: TreatmentService,
   ) {}
 
   onModuleInit(): void {
@@ -43,58 +44,39 @@ export class TreatmentSyncHandler implements SyncHandler, OnModuleInit {
         title: `Operación no soportada en v0: ${op.kind} sobre ${op.table}`,
       });
     }
-    const t = this.db.tenant;
     const row = op.row;
     const conflicts: SyncConflict[] = [];
 
-    let meatWithdrawalUntil = (row['meat_withdrawal_until'] as string | null) ?? null;
-    let milkWithdrawalUntil = (row['milk_withdrawal_until'] as string | null) ?? null;
-    const product = await q.one<any>(
-      `SELECT withdrawal_meat_days, withdrawal_milk_hours FROM products_veterinary
-       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
-      [row['product_id'], t],
-    );
-    if (product) {
-      const appliedAt = new Date((row['applied_at'] as string) ?? new Date().toISOString());
-      const computed = computeWithdrawal(appliedAt, product.withdrawal_meat_days, product.withdrawal_milk_hours);
-      if (computed.meatWithdrawalUntil !== meatWithdrawalUntil) {
+    try {
+      const res = await this.treatments.recordTreatment(q, {
+        animalId: row['animal_id'] as string,
+        productId: row['product_id'] as string,
+        appliedAt: (row['applied_at'] as string) ?? undefined,
+        dose: (row['dose'] as number | null) ?? null,
+        doseUnit: (row['dose_unit'] as string | null) ?? null,
+        route: (row['route'] as string | null) ?? null,
+        diagnosisId: (row['diagnosis_id'] as string | null) ?? null,
+        cost: (row['cost'] as number | null) ?? null,
+        notes: (row['notes'] as string | null) ?? null,
+        actorUserId: this.db.user,
+        origin: 'sync',
+        treatmentId: op.rowId,
+        clientMeatWithdrawalUntil: (row['meat_withdrawal_until'] as string | null) ?? null,
+        clientMilkWithdrawalUntil: (row['milk_withdrawal_until'] as string | null) ?? null,
+      });
+      for (const m of res.withdrawalMismatch) {
         conflicts.push({
-          type: 'semantic',
-          entity_id: op.rowId,
-          detail: `Server recomputation mismatch: meat_withdrawal_until client=${meatWithdrawalUntil ?? 'null'} server=${computed.meatWithdrawalUntil ?? 'null'}`,
-          autoResolved: true,
+          type: 'semantic', entity_id: op.rowId, autoResolved: true,
+          detail: `Server recomputation mismatch: ${m.field} client=${m.client ?? 'null'} server=${m.server ?? 'null'}`,
         });
       }
-      if (computed.milkWithdrawalUntil !== milkWithdrawalUntil) {
-        conflicts.push({
-          type: 'semantic',
-          entity_id: op.rowId,
-          detail: `Server recomputation mismatch: milk_withdrawal_until client=${milkWithdrawalUntil ?? 'null'} server=${computed.milkWithdrawalUntil ?? 'null'}`,
-          autoResolved: true,
-        });
+    } catch (e) {
+      if (e instanceof HealthApplicationError || e instanceof HealthApplicationLookupError) {
+        conflicts.push({ type: 'semantic', entity_id: op.rowId, autoResolved: false, detail: `${e.code}: ${e.reason}` });
+      } else {
+        throw e;
       }
-      meatWithdrawalUntil = computed.meatWithdrawalUntil;
-      milkWithdrawalUntil = computed.milkWithdrawalUntil;
     }
-
-    await q.query(
-      `INSERT INTO treatments (id, tenant_id, animal_id, product_id, applied_at, dose, dose_unit, route, meat_withdrawal_until, milk_withdrawal_until, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
-      [
-        op.rowId,
-        t,
-        row['animal_id'],
-        row['product_id'],
-        row['applied_at'] ?? new Date().toISOString(),
-        row['dose'] ?? null,
-        row['dose_unit'] ?? null,
-        row['route'] ?? null,
-        meatWithdrawalUntil,
-        milkWithdrawalUntil,
-        row['notes'] ?? null,
-        this.db.user,
-      ],
-    );
 
     await this.conflictWriter.write(q, changesetDbId, this.table, conflicts);
     // autoResolved es una instrucción de persistencia (SyncConflictWriter),

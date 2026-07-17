@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
 import { HealthService } from './health.service';
 
 @Controller()
@@ -16,13 +16,13 @@ export class HealthController {
   }
 
   @Post('vaccinations')
-  vaccinate(@Body() body: any) {
-    return this.health.vaccinate(body);
+  vaccinate(@Body() body: any, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.health.vaccinate(body, idempotencyKey);
   }
 
   @Post('treatments')
-  treat(@Body() body: any) {
-    return this.health.treat(body);
+  treat(@Body() body: any, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.health.treat(body, idempotencyKey);
   }
 
   @Post('health-events')

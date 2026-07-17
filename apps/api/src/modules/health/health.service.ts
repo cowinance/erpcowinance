@@ -1,20 +1,31 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-import { computeWithdrawal, TREATMENT_APPLIED } from '@cowinance/domain';
-import type { TreatmentApplied } from '@cowinance/domain';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash, randomUUID } from 'crypto';
+import { HealthApplicationError } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
-import { EVENT_PUBLISHER } from '../../application/ports/event-publisher.port';
-import type { EventPublisher } from '../../application/ports/event-publisher.port';
 import { MortalityService } from './mortality.service';
+import { TreatmentService, HealthApplicationLookupError } from './treatment.service';
+import { VaccinationService } from './vaccination.service';
+import type { RecordVaccinationResult } from './vaccination.service';
 
 @Injectable()
 export class HealthService {
   constructor(
     private readonly db: DbService,
-    @Inject(EVENT_PUBLISHER) private readonly events: EventPublisher,
     private readonly mortalities: MortalityService,
+    private readonly treatments: TreatmentService,
+    private readonly vaccinations: VaccinationService,
   ) {}
+
+  /** Traduce los errores de dominio/lookup de los núcleos neutrales a HTTP. */
+  private mapHealthError(e: unknown): never {
+    if (e instanceof HealthApplicationError) throw new ConflictException({ code: e.code, title: e.reason });
+    if (e instanceof HealthApplicationLookupError) {
+      if (e.code === 'product.wrong_type') throw new BadRequestException({ code: e.code, title: e.reason });
+      throw new NotFoundException({ code: e.code, title: e.reason });
+    }
+    throw e;
+  }
 
   async products() {
     return this.db.query(
@@ -34,77 +45,65 @@ export class HealthService {
     );
   }
 
-  /** Vacunación (individual o de lote). Calcula el próximo refuerzo. */
-  async vaccinate(body: any) {
+  /**
+   * Vacunación (individual o de lote) — adaptador REST sobre la regla única
+   * `VaccinationService`. Cada animal es UNA operación idempotente por su propio id
+   * (derivado del `Idempotency-Key` de la request); reintentar la request no duplica.
+   */
+  async vaccinate(body: any, idempotencyKey?: string) {
     const animalIds: string[] = body?.animal_ids ?? (body?.animal_id ? [body.animal_id] : []);
     if (!animalIds.length || !body?.product_id)
       throw new BadRequestException({ code: 'vaccination.missing_fields', title: 'animal_id(s) y product_id son obligatorios' });
-    const product = await this.requireProduct(body.product_id, 'vaccine');
     const appliedAt = body.applied_at ?? new Date().toISOString();
     const nextDue = body.next_due_days
       ? new Date(new Date(appliedAt).getTime() + Number(body.next_due_days) * 86400000).toISOString().slice(0, 10)
-      : null;
+      : (body.next_due_date ?? null);
+    const baseKey = idempotencyKey ?? randomUUID();
 
-    const results: Record<string, unknown>[] = [];
-    for (const animalId of animalIds) {
-      const animal = await requireAnimal(this.db, animalId);
-      if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: `Animal ${animalId} no encontrado` });
-      const row = await this.db.one<any>(
-        `INSERT INTO vaccinations (tenant_id, animal_id, product_id, applied_at, dose, dose_unit, batch_number, next_due_date, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, applied_at, next_due_date`,
-        [this.db.tenant, animalId, body.product_id, appliedAt, body.dose ?? null, body.dose_unit ?? null, body.batch_number ?? null, nextDue, this.db.user],
-      );
-      await insertAnimalEvent(this.db, animalId, 'vaccination', { product: product.name, dose: body.dose, batch: body.batch_number }, appliedAt);
-      results.push({ animal_id: animalId, tag: animal.tag, ...row });
+    try {
+      return await this.db.tx(async (q) => {
+        const results: RecordVaccinationResult[] = [];
+        for (const animalId of animalIds) {
+          // id determinista por (key, animal): la misma request reaplicada no duplica ninguna fila.
+          const vaccinationId = this.deriveId(baseKey, animalId);
+          results.push(await this.vaccinations.recordVaccination(q, {
+            animalId, productId: body.product_id, appliedAt, dose: body.dose ?? null, doseUnit: body.dose_unit ?? null,
+            batchNumber: body.batch_number ?? null, nextDueDate: nextDue, planId: body.plan_id ?? null,
+            actorUserId: this.db.user, origin: 'rest', vaccinationId,
+          }));
+        }
+        return { applied: results.length, results };
+      });
+    } catch (e) {
+      this.mapHealthError(e);
     }
-    return { applied: results.length, results };
   }
 
-  /** Tratamiento con cálculo automático de retiros según el producto. */
-  async treat(body: any) {
+  /**
+   * Tratamiento — adaptador REST sobre la regla única `TreatmentService` (retiro derivado
+   * por dominio, timeline, evento de dominio, idempotente por id). Valida animal activo.
+   */
+  async treat(body: any, idempotencyKey?: string) {
     if (!body?.animal_id || !body?.product_id)
       throw new BadRequestException({ code: 'treatment.missing_fields', title: 'animal_id y product_id son obligatorios' });
-    const animal = await requireAnimal(this.db, body.animal_id);
-    if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
-    const product = await this.requireProduct(body.product_id);
-    const appliedAt = new Date(body.applied_at ?? Date.now());
+    try {
+      return await this.db.tx((q) =>
+        this.treatments.recordTreatment(q, {
+          animalId: body.animal_id, productId: body.product_id, appliedAt: body.applied_at, dose: body.dose ?? null,
+          doseUnit: body.dose_unit ?? null, route: body.route ?? null, diagnosisId: body.diagnosis_id ?? null,
+          cost: body.cost ?? null, notes: body.notes ?? null, actorUserId: this.db.user, origin: 'rest',
+          treatmentId: idempotencyKey ?? randomUUID(),
+        }),
+      );
+    } catch (e) {
+      this.mapHealthError(e);
+    }
+  }
 
-    const { meatWithdrawalUntil: meatUntil, milkWithdrawalUntil: milkUntil } = computeWithdrawal(
-      appliedAt,
-      product.withdrawal_meat_days,
-      product.withdrawal_milk_hours,
-    );
-
-    const row = await this.db.one<any>(
-      `INSERT INTO treatments (tenant_id, animal_id, product_id, applied_at, dose, dose_unit, route, meat_withdrawal_until, milk_withdrawal_until, notes, cost, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       RETURNING id, applied_at, meat_withdrawal_until, milk_withdrawal_until`,
-      [this.db.tenant, body.animal_id, body.product_id, appliedAt.toISOString(), body.dose ?? null, body.dose_unit ?? null, body.route ?? null, meatUntil, milkUntil, body.notes ?? null, body.cost ?? null, this.db.user],
-    );
-    await insertAnimalEvent(
-      this.db,
-      body.animal_id,
-      'treatment',
-      { product: product.name, dose: body.dose, withdrawal_meat_until: meatUntil, withdrawal_milk_until: milkUntil },
-      appliedAt.toISOString(),
-    );
-
-    // Evento de dominio (F5, ADR-0005): se registra en el outbox dentro de la
-    // MISMA tx que el tratamiento — atómico. El relay lo publica post-commit.
-    const event: TreatmentApplied = {
-      eventId: randomUUID(),
-      type: TREATMENT_APPLIED,
-      occurredAt: appliedAt.toISOString(),
-      treatmentId: row.id,
-      animalId: body.animal_id,
-      productId: body.product_id,
-      appliedAt: appliedAt.toISOString(),
-      meatWithdrawalUntil: meatUntil,
-      milkWithdrawalUntil: milkUntil,
-    };
-    await this.events.publish(event);
-
-    return { ...row, tag: animal.tag, product: product.name };
+  /** id determinista uuid v5-like a partir de (key, animal), sin dependencias externas. */
+  private deriveId(baseKey: string, animalId: string): string {
+    const h = createHash('sha1').update(`${baseKey}:${animalId}`).digest('hex');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
   }
 
   /** Diagnóstico / evento clínico. */
@@ -223,17 +222,5 @@ export class HealthService {
       },
       vaccinations_due_45d: upcoming?.n ?? 0,
     };
-  }
-
-  private async requireProduct(id: string, expectedType?: string) {
-    const p = await this.db.one<any>(
-      `SELECT id, name, type, withdrawal_meat_days, withdrawal_milk_hours FROM products_veterinary
-       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
-      [id, this.db.tenant],
-    );
-    if (!p) throw new NotFoundException({ code: 'product.not_found', title: 'Producto veterinario no encontrado' });
-    if (expectedType && p.type !== expectedType && expectedType === 'vaccine' && p.type !== 'vaccine')
-      throw new BadRequestException({ code: 'product.wrong_type', title: `El producto '${p.name}' no es una vacuna` });
-    return p;
   }
 }
