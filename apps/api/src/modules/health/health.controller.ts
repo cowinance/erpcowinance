@@ -49,4 +49,14 @@ export class HealthController {
   kpis() {
     return this.health.kpis();
   }
+
+  @Get('health/critical-animals')
+  criticalAnimals(@Query('limit') limit?: string) {
+    return this.health.criticalAnimals(limit ? Number(limit) : undefined);
+  }
+
+  @Get('health/by-lot')
+  byLot() {
+    return this.health.lotHealth();
+  }
 }

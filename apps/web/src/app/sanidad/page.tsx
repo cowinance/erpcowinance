@@ -6,6 +6,7 @@ import { SanidadCapture } from './SanidadCapture';
 import { HealthPlansPanel } from './HealthPlansPanel';
 import { MedicationsPanel } from './MedicationsPanel';
 import { ClinicalCasesPanel } from './ClinicalCasesPanel';
+import { ControlPanel } from './ControlPanel';
 import { Clock, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
@@ -26,19 +27,31 @@ export default async function SanidadPage() {
       <h1 className="text-xl font-semibold">Sanidad</h1>
       <p className="mt-0.5 mb-5 text-body text-ink-3">Vacunaciones, tratamientos, retiros y mortalidad</p>
 
-      <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
+      <div className="grid grid-cols-6 gap-4 max-lg:grid-cols-3 max-md:grid-cols-2">
         <KpiCard
-          label="Cobertura de vacunación (12 m)"
+          label="Cobertura vacunación (12 m)"
           value={kpis.vaccination_coverage_pct != null ? `${kpis.vaccination_coverage_pct}%` : '—'}
           hint="animales activos vacunados"
           tone={kpis.vaccination_coverage_pct >= 90 ? 'success' : 'warning'}
+        />
+        <KpiCard
+          label="Casos abiertos"
+          value={kpis.clinical_cases_open ?? 0}
+          hint={kpis.clinical_cases_open ? 'requieren seguimiento' : 'sin casos'}
+          tone={kpis.clinical_cases_open ? 'warning' : 'success'}
         />
         <KpiCard label="En tratamiento (30 d)" value={kpis.animals_in_treatment_30d} hint="animales tratados" />
         <KpiCard
           label="Retiros activos"
           value={kpis.active_withdrawals}
-          hint={kpis.active_withdrawals ? 'bloqueados para faena/leche' : 'sin bloqueos'}
+          hint={kpis.active_withdrawals ? 'bloqueados faena/leche' : 'sin bloqueos'}
           tone={kpis.active_withdrawals ? 'warning' : 'success'}
+        />
+        <KpiCard
+          label="Vacunas vencidas"
+          value={kpis.vaccinations_overdue ?? 0}
+          hint={kpis.vaccinations_due_45d ? `${kpis.vaccinations_due_45d} próximas (45 d)` : 'al día'}
+          tone={kpis.vaccinations_overdue ? 'danger' : 'success'}
         />
         <KpiCard
           label="Mortalidad (12 m)"
@@ -48,8 +61,10 @@ export default async function SanidadPage() {
         />
       </div>
 
+      <ControlPanel />
+
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
-        <div className="col-span-3 space-y-4">
+        <div id="retiros" className="col-span-3 space-y-4 scroll-mt-4">
           <Card>
             <CardTitle action={<span className="text-label text-ink-3">{(withdrawals ?? []).length} activos</span>}>
               Retiros activos
@@ -117,17 +132,23 @@ export default async function SanidadPage() {
           </Card>
         </div>
 
-        <Card className="col-span-2 self-start max-lg:col-span-3">
-          <CardTitle>Captura rápida</CardTitle>
-          <SanidadCapture products={products ?? []} diagnoses={diagnoses} />
-        </Card>
+        <div id="captura" className="col-span-2 self-start scroll-mt-4 max-lg:col-span-3">
+          <Card>
+            <CardTitle>Captura rápida</CardTitle>
+            <SanidadCapture products={products ?? []} diagnoses={diagnoses} />
+          </Card>
+        </div>
       </div>
 
-      <ClinicalCasesPanel diagnoses={diagnoses} />
+      <div id="casos" className="scroll-mt-4">
+        <ClinicalCasesPanel diagnoses={diagnoses} />
+      </div>
 
       <MedicationsPanel products={products ?? []} />
 
-      <HealthPlansPanel lots={lots ?? []} categories={categories ?? []} />
+      <div id="planes" className="scroll-mt-4">
+        <HealthPlansPanel lots={lots ?? []} categories={categories ?? []} />
+      </div>
     </div>
   );
 }

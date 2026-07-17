@@ -103,6 +103,36 @@ de vida, transición inválida → 409, idempotencia, diagnóstico en mortalidad
 0 ciclos. Verificado en web: catálogo de 12 diagnósticos en el selector; caso creado → seguimiento →
 transición `in_treatment` → timeline `[opened, status_change]` end-to-end.
 
+---
+
+## Etapa 3 — UI de control (panel sanitario) ✅
+
+De "solo captura" a centro de control. Sin tablas nuevas: son vistas derivadas sobre lo existente.
+
+**Backend (`health.service`):**
+- `kpis()` ampliado: agrega `clinical_cases_open` (casos en open/in_treatment/observation) y
+  `vaccinations_overdue`. **Regla única de "vacuna vencida"** (`OVERDUE_VACC_WHERE`): `next_due_date`
+  en el pasado SIN una dosis posterior del mismo producto (una dosis repetida ya la renovó) — reusada
+  por KPI, animales críticos y sanidad por lote.
+- `GET /health/critical-animals`: un renglón por animal activo con al menos un motivo (caso abierto /
+  retiro activo / vacuna vencida), con flags, severidad/diagnóstico del caso y un **puntaje** para
+  ordenar por urgencia (severe 5 / moderate 3 / mild 2 + retiro 2 + vacuna vencida 1).
+- `GET /health/by-lot`: agrega por lote casos abiertos, en tratamiento (30 d), retiros activos, vacunas
+  vencidas y muertes (90 d), con `problem_score` para rankear los lotes más comprometidos.
+
+**Web (`/sanidad`):**
+- **6 KPIs**: cobertura, casos abiertos, en tratamiento, retiros, vacunas vencidas (+ próximas 45 d),
+  mortalidad.
+- **`ControlPanel`** (client): accesos rápidos (Vacunar / Tratar / Diagnosticar / Registrar muerte /
+  Aplicar plan / Ver retiros) que enfocan la captura en la pestaña correcta (evento desacoplado
+  `sanidad:capture` que escucha `SanidadCapture`) o hacen scroll a la sección; **Animales críticos**
+  con búsqueda (caravana/lote/diagnóstico) y badges de motivo; **Sanidad por lote** rankeada.
+
+**Tests (4 nuevos):** `health-control.integration` — KPIs ampliados, animales críticos (motivos +
+puntaje + orden), vacuna renovada que NO cuenta como vencida, y agregado por lote rankeado. **699
+tests** (695 → +4), 0 ciclos. Verificado en web: 6 KPIs; críticos 8 → filtro «Engorde» deja 4; sanidad
+por lote rankea 3 lotes; acceso rápido «Tratar» cambia la captura a la pestaña Tratamiento.
+
 ### Siguiente
-**Etapa 3 — UI de control**: panel sanitario con KPIs ampliados, animales críticos, vista por lote,
-accesos rápidos, y vistas con búsqueda/filtros (no solo captura).
+**Etapa 4 — Aplicación masiva**: vacunar/tratar por lote, categoría, selección o todo el hato (reusa los
+núcleos neutrales con idempotencia por operación) + cobertura por lote/categoría/producto.

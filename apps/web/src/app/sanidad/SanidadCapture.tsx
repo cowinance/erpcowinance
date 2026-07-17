@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimalPicker, PickedAnimal, SubmitFeedback, Tabs, useSubmit } from '@/components/capture';
 import { AddProductForm } from './AddProductForm';
@@ -20,6 +20,16 @@ export function SanidadCapture({ products, diagnoses = [] }: { products: any[]; 
 
   const vaccines = products.filter((p) => p.type === 'vaccine');
   const drugs = products.filter((p) => p.type !== 'vaccine');
+
+  // Accesos rápidos del panel de control: enfocan una pestaña concreta de la captura.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const t = (e as CustomEvent).detail;
+      if (typeof t === 'string') changeTab(t);
+    };
+    window.addEventListener('sanidad:capture', onFocus);
+    return () => window.removeEventListener('sanidad:capture', onFocus);
+  }, []);
 
   const DiagnosisPicker = ({ label }: { label: string }) => (
     <Field label={label} htmlFor="diagnosis_id">

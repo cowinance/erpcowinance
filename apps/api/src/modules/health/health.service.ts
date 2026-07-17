@@ -193,7 +193,7 @@ export class HealthService {
 
   async kpis() {
     const t = this.db.tenant;
-    const [coverage, inTreatment, withdrawals, mortality, upcoming] = await Promise.all([
+    const [coverage, inTreatment, withdrawals, mortality, upcoming, openCases, overdueVacc] = await Promise.all([
       this.db.one<any>(
         `SELECT
            (SELECT count(DISTINCT v.animal_id) FROM vaccinations v
@@ -224,6 +224,12 @@ export class HealthService {
          WHERE v.tenant_id = $1 AND v.next_due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 45 AND v.deleted_at IS NULL`,
         [t],
       ),
+      this.db.one<any>(
+        `SELECT count(*)::int AS n FROM clinical_cases cc JOIN animals a ON a.id = cc.animal_id
+         WHERE cc.tenant_id = $1 AND cc.deleted_at IS NULL AND cc.status IN ('open','in_treatment','observation')`,
+        [t],
+      ),
+      this.db.one<any>(`SELECT count(DISTINCT v.animal_id)::int AS n FROM vaccinations v ${HealthService.OVERDUE_VACC_JOIN} WHERE ${HealthService.OVERDUE_VACC_WHERE}`, [t]),
     ]);
     return {
       vaccination_coverage_pct: coverage?.pct != null ? +Number(coverage.pct).toFixed(1) : null,
@@ -234,6 +240,92 @@ export class HealthService {
         rate_pct: mortality?.herd ? +(((mortality.deaths ?? 0) / mortality.herd) * 100).toFixed(1) : null,
       },
       vaccinations_due_45d: upcoming?.n ?? 0,
+      clinical_cases_open: openCases?.n ?? 0,
+      vaccinations_overdue: overdueVacc?.n ?? 0,
     };
+  }
+
+  /**
+   * Predicado de "vacuna vencida" (regla única, reusada por KPI/animales críticos/sanidad por lote):
+   * una vacunación con `next_due_date` en el pasado para un animal activo, SIN una vacunación posterior
+   * del mismo producto (que ya la habría renovado). Así no se cuenta como vencida una dosis ya repetida.
+   */
+  private static readonly OVERDUE_VACC_JOIN = `JOIN animals a ON a.id = v.animal_id AND a.status='active' AND a.deleted_at IS NULL`;
+  private static readonly OVERDUE_VACC_WHERE = `v.tenant_id = $1 AND v.deleted_at IS NULL AND v.next_due_date < CURRENT_DATE
+     AND NOT EXISTS (SELECT 1 FROM vaccinations v2 WHERE v2.animal_id = v.animal_id AND v2.product_id = v.product_id
+                     AND v2.deleted_at IS NULL AND v2.applied_at > v.applied_at)`;
+
+  /**
+   * Animales críticos: los que requieren atención sanitaria por al menos un motivo — caso clínico
+   * abierto, retiro activo (carne/leche) o vacuna vencida. Un renglón por animal con sus motivos y un
+   * puntaje para ordenar los más urgentes primero.
+   */
+  async criticalAnimals(limit = 50) {
+    const t = this.db.tenant;
+    return this.db.query(
+      `WITH open_case AS (
+         SELECT cc.animal_id, cc.severity, d.name AS diagnosis
+         FROM clinical_cases cc LEFT JOIN diagnoses d ON d.id = cc.diagnosis_id
+         WHERE cc.tenant_id = $1 AND cc.deleted_at IS NULL AND cc.status IN ('open','in_treatment','observation')
+       ),
+       wd AS (
+         SELECT DISTINCT tr.animal_id FROM treatments tr
+         WHERE tr.tenant_id = $1 AND tr.deleted_at IS NULL
+           AND (tr.meat_withdrawal_until >= CURRENT_DATE OR tr.milk_withdrawal_until >= now())
+       ),
+       ov AS (SELECT DISTINCT v.animal_id FROM vaccinations v ${HealthService.OVERDUE_VACC_JOIN} WHERE ${HealthService.OVERDUE_VACC_WHERE})
+       SELECT a.id AS animal_id, ai.value AS tag, c.name AS category, l.name AS lot_name,
+              (oc.animal_id IS NOT NULL) AS has_open_case, oc.severity AS case_severity, oc.diagnosis,
+              (wd.animal_id IS NOT NULL) AS has_withdrawal,
+              (ov.animal_id IS NOT NULL) AS has_overdue_vaccination,
+              (CASE WHEN oc.animal_id IS NOT NULL THEN (CASE oc.severity WHEN 'severe' THEN 5 WHEN 'moderate' THEN 3 ELSE 2 END) ELSE 0 END
+               + CASE WHEN wd.animal_id IS NOT NULL THEN 2 ELSE 0 END
+               + CASE WHEN ov.animal_id IS NOT NULL THEN 1 ELSE 0 END)::int AS score
+       FROM animals a
+       LEFT JOIN open_case oc ON oc.animal_id = a.id
+       LEFT JOIN wd ON wd.animal_id = a.id
+       LEFT JOIN ov ON ov.animal_id = a.id
+       LEFT JOIN animal_categories c ON c.id = a.category_id
+       LEFT JOIN lots l ON l.id = a.current_lot_id
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+       WHERE a.tenant_id = $1 AND a.status = 'active' AND a.deleted_at IS NULL
+         AND (oc.animal_id IS NOT NULL OR wd.animal_id IS NOT NULL OR ov.animal_id IS NOT NULL)
+       ORDER BY score DESC, tag LIMIT $2`,
+      [t, limit],
+    );
+  }
+
+  /**
+   * Sanidad por lote: qué lotes concentran más problemas sanitarios. Agrega por lote los casos
+   * abiertos, animales en tratamiento (30 d), retiros activos, vacunas vencidas y muertes (90 d),
+   * con un puntaje de problema para rankear los lotes más comprometidos.
+   */
+  async lotHealth() {
+    const t = this.db.tenant;
+    return this.db.query(
+      `SELECT l.id AS lot_id, l.name AS lot_name, l.purpose,
+              count(DISTINCT a.id)::int AS head,
+              count(DISTINCT oc.id)::int AS open_cases,
+              count(DISTINCT tr.animal_id) FILTER (WHERE tr.applied_at >= now() - interval '30 days')::int AS in_treatment,
+              count(DISTINCT wd.animal_id)::int AS active_withdrawals,
+              count(DISTINCT ov.animal_id)::int AS overdue_vaccinations,
+              (SELECT count(*)::int FROM mortalities m JOIN animals ma ON ma.id = m.animal_id
+                WHERE m.tenant_id = $1 AND m.deleted_at IS NULL AND m.died_at >= now() - interval '90 days'
+                  AND ma.current_lot_id = l.id) AS deaths_90d,
+              (count(DISTINCT oc.id) * 3 + count(DISTINCT wd.animal_id) + count(DISTINCT ov.animal_id))::int AS problem_score
+       FROM lots l
+       JOIN animals a ON a.current_lot_id = l.id AND a.status = 'active' AND a.deleted_at IS NULL
+       LEFT JOIN clinical_cases oc ON oc.animal_id = a.id AND oc.deleted_at IS NULL AND oc.status IN ('open','in_treatment','observation')
+       LEFT JOIN treatments tr ON tr.animal_id = a.id AND tr.deleted_at IS NULL
+       LEFT JOIN treatments wd ON wd.animal_id = a.id AND wd.deleted_at IS NULL
+             AND (wd.meat_withdrawal_until >= CURRENT_DATE OR wd.milk_withdrawal_until >= now())
+       LEFT JOIN vaccinations ov ON ov.animal_id = a.id AND ov.deleted_at IS NULL AND ov.next_due_date < CURRENT_DATE
+             AND NOT EXISTS (SELECT 1 FROM vaccinations v2 WHERE v2.animal_id = ov.animal_id AND v2.product_id = ov.product_id
+                             AND v2.deleted_at IS NULL AND v2.applied_at > ov.applied_at)
+       WHERE l.tenant_id = $1 AND l.deleted_at IS NULL
+       GROUP BY l.id, l.name, l.purpose
+       ORDER BY problem_score DESC, head DESC`,
+      [t],
+    );
   }
 }
