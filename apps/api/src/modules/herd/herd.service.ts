@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvalidLotError, computeFeedlotMetrics, validateLotInput } from '@cowinance/domain';
+import { InvalidLotError, Sex, TagNumber, computeFeedlotMetrics, validateLotInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
@@ -405,6 +405,184 @@ export class HerdService {
       if (syncOp) await this.writer.emitServerOrigin(q, [syncOp], `rest:animal:${animalId}`);
       return this.getAnimal(animalId);
     });
+  }
+
+  /**
+   * Edición completa del animal (A360 E2) — regla y escritura ÚNICAS. Diff-aware:
+   * solo se escribe/versiona/propaga lo que REALMENTE cambia. Todo en una transacción:
+   *   · valida (caravana duplicada excluyendo al propio, categoría existente y del mismo
+   *     species, sexo compatible con categoría, sexo no rompe vínculos F/M vigentes,
+   *     madre hembra / padre macho / sin autorreferencia / sin ciclo);
+   *   · aplica columnas de `animals` + rename del identificador visual;
+   *   · proyecta al canal de sync (LWW, actor server) y emite changeset de origen servidor;
+   *   · deja un hecho `edit` en el timeline con el resumen de cambios importantes.
+   * NUNCA toca current_lot_id/current_paddock_id (eso viaja por el servicio de movimientos).
+   */
+  async updateAnimal(id: string, body: any) {
+    const cur = await this.db.one<any>(
+      `SELECT a.id, a.species_id, a.sex, a.status, a.origin, a.birth_date, a.birth_date_estimated,
+              a.acquisition_date, a.coat_color, a.name, a.notes, a.dam_id, a.sire_id, a.category_id,
+              c.code AS category_code, c.sex AS category_sex
+       FROM animals a LEFT JOIN animal_categories c ON c.id = a.category_id
+       WHERE a.id = $1 AND a.tenant_id = $2 AND a.deleted_at IS NULL`,
+      [id, this.db.tenant],
+    );
+    if (!cur) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
+
+    const bad = (code: string, title: string) => new BadRequestException({ code, title });
+    const dateStr = (d: any) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+
+    await this.db.tx(async (q) => {
+      const setCols: string[] = [];
+      const setArgs: unknown[] = [];
+      const sync: Record<string, unknown> = {}; // campos lógicos para la proyección de sync
+      const changes: string[] = []; // resumen de cambios IMPORTANTES para el timeline
+      const col = (name: string, val: unknown) => {
+        setArgs.push(val);
+        setCols.push(`${name} = $${setArgs.length}`);
+      };
+
+      if (body.name !== undefined) {
+        const v = typeof body.name === 'string' && body.name.trim() === '' ? null : body.name ?? null;
+        if (v !== cur.name) { col('name', v); sync.name = v; changes.push('nombre'); }
+      }
+      if (body.coat_color !== undefined) {
+        const v = typeof body.coat_color === 'string' && body.coat_color.trim() === '' ? null : body.coat_color ?? null;
+        if (v !== cur.coat_color) { col('coat_color', v); sync.coat_color = v; }
+      }
+      if (body.notes !== undefined) {
+        const v = typeof body.notes === 'string' && body.notes.trim() === '' ? null : body.notes ?? null;
+        if (v !== cur.notes) { col('notes', v); sync.notes = v; }
+      }
+      if (body.origin !== undefined && body.origin !== cur.origin) {
+        if (!['born', 'purchased', 'transferred'].includes(body.origin)) throw bad('animal.invalid_origin', 'Origen inválido');
+        col('origin', body.origin);
+        changes.push('origen');
+      }
+      if (body.birth_date !== undefined) {
+        const v = body.birth_date === '' ? null : body.birth_date ?? null;
+        if (v != null) {
+          if (Number.isNaN(Date.parse(v))) throw bad('animal.invalid_birth_date', 'Fecha de nacimiento inválida');
+          if (new Date(v) > new Date()) throw bad('animal.birth_date_future', 'La fecha de nacimiento no puede ser futura');
+        }
+        if (v !== dateStr(cur.birth_date)) { col('birth_date', v); sync.birth_date = v; changes.push('fecha de nacimiento'); }
+      }
+      if (body.birth_date_estimated !== undefined && !!body.birth_date_estimated !== !!cur.birth_date_estimated) {
+        col('birth_date_estimated', !!body.birth_date_estimated);
+      }
+      if (body.acquisition_date !== undefined) {
+        const v = body.acquisition_date === '' ? null : body.acquisition_date ?? null;
+        if (v != null && Number.isNaN(Date.parse(v))) throw bad('animal.invalid_acquisition_date', 'Fecha de adquisición inválida');
+        if (v !== dateStr(cur.acquisition_date)) col('acquisition_date', v);
+      }
+
+      // Sexo/categoría: se resuelve el efectivo y se exige compatibilidad (category.sex ∈ {any, sexo}).
+      let effSex: string = cur.sex;
+      let effCatSex: string | null = cur.category_sex;
+
+      if (body.category_code !== undefined && body.category_code !== cur.category_code) {
+        const cat = await q.one<{ id: string; species_id: string; sex: string | null }>(
+          `SELECT id, species_id, sex FROM animal_categories WHERE code = $1`,
+          [body.category_code],
+        );
+        if (!cat) throw bad('animal.invalid_category', 'Categoría inexistente');
+        if (cat.species_id !== cur.species_id) throw bad('animal.category_species_mismatch', 'La categoría es de otra especie');
+        col('category_id', cat.id);
+        sync.category_code = body.category_code;
+        effCatSex = cat.sex;
+        changes.push('categoría');
+      }
+
+      if (body.sex !== undefined && body.sex !== cur.sex) {
+        if (!Sex.isValid(body.sex)) throw bad('animal.invalid_sex', "Sexo inválido: se esperaba 'F' o 'M'");
+        // No cambiar el sexo si rompe vínculos genealógicos vigentes (madre debe ser F, padre M).
+        const refs = await q.one<{ as_dam: number; as_sire: number }>(
+          `SELECT count(*) FILTER (WHERE dam_id = $1)::int AS as_dam, count(*) FILTER (WHERE sire_id = $1)::int AS as_sire
+           FROM animals WHERE tenant_id = $2 AND deleted_at IS NULL`,
+          [id, this.db.tenant],
+        );
+        if (body.sex === 'M' && (refs?.as_dam ?? 0) > 0) throw bad('animal.sex_conflict_dam', 'Es madre de otros animales; no puede pasar a macho');
+        if (body.sex === 'F' && (refs?.as_sire ?? 0) > 0) throw bad('animal.sex_conflict_sire', 'Es padre de otros animales; no puede pasar a hembra');
+        col('sex', body.sex);
+        sync.sex = body.sex;
+        effSex = body.sex;
+        changes.push('sexo');
+      }
+
+      if (effCatSex && effCatSex !== 'any' && effCatSex !== effSex)
+        throw bad('animal.sex_category_mismatch', `La categoría requiere sexo ${effCatSex === 'F' ? 'hembra' : 'macho'}`);
+
+      // Genealogía (madre/padre): existe, sexo correcto, sin autorreferencia, sin ciclo.
+      for (const [field, colName, reqSex] of [
+        ['dam_id', 'dam_id', 'F'],
+        ['sire_id', 'sire_id', 'M'],
+      ] as const) {
+        if (body[field] === undefined) continue;
+        const v = body[field] === '' || body[field] === null ? null : body[field];
+        if (v === cur[colName]) continue;
+        if (v != null) {
+          if (v === id) throw bad('animal.genealogy_self_ref', 'Un animal no puede ser su propio progenitor');
+          const parent = await q.one<{ sex: string }>(
+            `SELECT sex FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+            [v, this.db.tenant],
+          );
+          if (!parent) throw bad(`animal.${field === 'dam_id' ? 'dam' : 'sire'}_not_found`, 'Progenitor no encontrado');
+          if (parent.sex !== reqSex)
+            throw bad(`animal.${field === 'dam_id' ? 'dam_not_female' : 'sire_not_male'}`, field === 'dam_id' ? 'La madre debe ser hembra' : 'El padre debe ser macho');
+          const cyc = await this.writer.detectCycles(q, [{ childId: id, parentId: v }]);
+          if (cyc.get(`${id}|${v}`) !== 'ok') throw bad('animal.genealogy_cycle', 'El vínculo crearía un ciclo genealógico');
+        }
+        col(colName, v);
+        sync[colName] = v;
+        changes.push(field === 'dam_id' ? 'madre' : 'padre');
+      }
+
+      // Rename de la caravana visual (identificador) — duplicado activo excluyendo al propio.
+      if (body.visual_tag !== undefined && body.visual_tag !== null && String(body.visual_tag).trim() !== '') {
+        if (!TagNumber.isValid(body.visual_tag)) throw bad('animal.invalid_tag', 'Caravana inválida');
+        const tag = TagNumber.of(body.visual_tag);
+        const curVisual = await q.one<{ id: string; value: string }>(
+          `SELECT id, value FROM animal_identifiers WHERE animal_id = $1 AND type = 'visual' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+          [id],
+        );
+        if (!curVisual || curVisual.value !== tag) {
+          const dup = await q.one(
+            `SELECT 1 FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
+             WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = $2 AND ai.deleted_at IS NULL AND a.status = 'active' AND a.id <> $3`,
+            [this.db.tenant, tag, id],
+          );
+          if (dup) throw bad('animal.duplicate_tag', `Ya existe un animal activo con caravana ${tag}`);
+          if (curVisual) await q.query(`UPDATE animal_identifiers SET value = $1, updated_at = now() WHERE id = $2`, [tag, curVisual.id]);
+          else await q.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`, [this.db.tenant, id, tag]);
+          sync.visual_tag = tag;
+          changes.push('caravana');
+        }
+      }
+
+      if (setCols.length) {
+        setArgs.push(id, this.db.tenant);
+        await q.query(
+          `UPDATE animals SET ${setCols.join(', ')}, updated_at = now() WHERE id = $${setArgs.length - 1} AND tenant_id = $${setArgs.length}`,
+          setArgs,
+        );
+      }
+
+      // Proyección server-origin: cada campo cambiado se versiona con un tick genuino del
+      // actor server. `hlc` (único por tick) es el discriminador del originRef → dos ediciones
+      // distintas NUNCA colisionan en el dedup.
+      const op = await this.writer.projectAnimalUpdate(q, id, sync);
+      if (op) await this.writer.emitServerOrigin(q, [op], `rest:animal:update:${id}:${op.hlc}`);
+
+      if (changes.length)
+        await q.query(
+          `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
+           VALUES ($1,$2,'edit',$3,now(),now(),'manual')`,
+          [this.db.tenant, id, JSON.stringify({ changes })],
+        );
+    });
+
+    // getAnimal fuera de la tx (usa this.db): evita bloquear la conexión única de PGlite.
+    return this.getAnimal(id);
   }
 
   /** Evento polimórfico (POST /animals/:id/events) — como en el doc de APIs. */

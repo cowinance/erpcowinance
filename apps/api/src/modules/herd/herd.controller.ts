@@ -59,6 +59,11 @@ export class HerdController {
     return this.herd.getAnimal(id);
   }
 
+  @Put('animals/:id')
+  update(@Param('id') id: string, @Body() body: any) {
+    return this.herd.updateAnimal(id, body);
+  }
+
   @Get('animals/:id/timeline')
   timeline(@Param('id') id: string) {
     return this.herd.timeline(id);

@@ -7,8 +7,9 @@ import { ageFrom, EVENT_LABELS, formatDate, formatKg, relativeTime, STATUS_LABEL
 import { WeighingForm } from './WeighingForm';
 import { PhotoGallery } from './PhotoGallery';
 import { MoveAction } from './MoveAction';
+import { EditAnimalButton } from './EditAnimalDialog';
 import { fileUrl } from '@/lib/api';
-import { ArrowLeft, Baby, Clock, Heart, Scale, Stethoscope, Syringe, StickyNote } from 'lucide-react';
+import { ArrowLeft, Baby, Clock, Heart, Pencil, Scale, Stethoscope, Syringe, StickyNote } from 'lucide-react';
 
 const EVENT_ICON: Record<string, any> = {
   birth: Baby,
@@ -17,14 +18,16 @@ const EVENT_ICON: Record<string, any> = {
   vaccination: Syringe,
   pregnancy_diagnosed: Heart,
   note: StickyNote,
+  edit: Pencil,
 };
 
 export default async function AnimalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [animal, timeline, lots] = await Promise.all([
+  const [animal, timeline, lots, categories] = await Promise.all([
     apiSafe<any>(`/animals/${id}`),
     apiSafe<any[]>(`/animals/${id}/timeline`),
     apiSafe<any[]>('/lots'),
+    apiSafe<any[]>('/catalogs/categories'),
   ]);
   if (!animal) notFound();
 
@@ -106,7 +109,10 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
           </p>
           </div>
         </div>
-        <MoveAction animalId={id} lots={lots ?? []} />
+        <div className="flex shrink-0 items-center gap-2">
+          <EditAnimalButton animal={animal} categories={categories ?? []} />
+          <MoveAction animalId={id} lots={lots ?? []} />
+        </div>
       </div>
 
       {/* Vitales */}
@@ -169,6 +175,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
                       `Ecografía · parto probable ${formatDate(e.payload?.expected_due_date)}`}
                     {e.event_type === 'birth' && 'Alta en el sistema'}
                     {e.event_type === 'note' && e.payload?.text}
+                    {e.event_type === 'edit' && `Se actualizó: ${(e.payload?.changes ?? []).join(', ')}`}
                   </div>
                 </div>
               );

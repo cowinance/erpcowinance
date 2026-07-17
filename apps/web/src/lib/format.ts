@@ -43,6 +43,7 @@ export const EVENT_LABELS: Record<string, string> = {
   pregnancy_diagnosed: 'Diagnóstico de preñez',
   movement: 'Movimiento',
   note: 'Nota',
+  edit: 'Edición de ficha',
 };
 
 export const STATUS_LABELS: Record<string, string> = {

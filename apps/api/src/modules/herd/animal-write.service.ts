@@ -252,6 +252,24 @@ export class AnimalWriteService {
   }
 
   /**
+   * Proyecta al canal de sync los campos LÓGICOS que cambian en una EDICIÓN (A360 E2):
+   * versiona cada campo con un tick genuino del actor `server` (LWW) y devuelve el `put`
+   * para emitir como changeset de origen servidor. `fields` son campos lógicos del cliente
+   * (`visual_tag`/`category_code`) o syncables reales (ANIMAL_SYNCABLE_FIELDS) — NUNCA
+   * `current_lot_id`/`current_paddock_id` (esos viajan por el servicio de movimientos).
+   * Regla única de proyección de escritura de `animals`, hermana de persistNewAnimal/applyGenealogyLink.
+   */
+  async projectAnimalUpdate(q: Q, animalId: string, fields: Record<string, unknown>): Promise<PutOp | null> {
+    const cols = Object.keys(fields);
+    if (!cols.length) return null;
+    const hlc = this.serverClock.tick();
+    const existing = (await this.versions.read(q, 'animals', animalId)) ?? {};
+    const merged = { ...existing, ...Object.fromEntries(cols.map((c) => [c, hlc])) };
+    await this.versions.write(q, 'animals', animalId, merged);
+    return { kind: 'put', table: 'animals', rowId: animalId, fields, hlc };
+  }
+
+  /**
    * Contexto de validación en LOTE para el preview de importación (P2 3.5): en
    * DOS queries resuelve, para todo el batch, qué códigos de categoría existen y
    * qué caravanas están activas (→ animalId). Evita el N+1 de `checkAgainstDb`
