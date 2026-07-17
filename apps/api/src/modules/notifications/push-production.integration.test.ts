@@ -27,7 +27,7 @@ describe('NotificationService · producción push (P7-3.a)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    notifications = new NotificationService(db, new AlertsService(db));
+    notifications = new NotificationService(db, new AlertsService(db, { statusAlerts: async () => [] } as any));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
   }, 120_000);

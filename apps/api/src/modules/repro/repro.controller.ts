@@ -50,6 +50,11 @@ export class ReproController {
     return this.repro.herdStatus(lotId);
   }
 
+  @Get('reproduction/to-prepare')
+  toPrepare(@Query('days') days?: string) {
+    return this.repro.toPrepare(days ? Number(days) : undefined);
+  }
+
   @Get('reproduction/protocols')
   listProtocols() {
     return this.repro.listProtocols();

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { ReproService } from '../repro/repro.service';
 
 /**
  * Motor de alertas (doc Catálogo A5). Reglas declarativas condición→severidad
@@ -28,6 +29,11 @@ const RULES: RuleDef[] = [
   { code: 'health_task_due', name: 'Tarea sanitaria programada', category: 'health', severity: 'info', defaultDays: 15, paramLabel: 'Días de anticipación' },
   { code: 'calving_soon', name: 'Parto próximo', category: 'reproduction', severity: 'info', defaultDays: 15, paramLabel: 'Días de anticipación' },
   { code: 'pregnancy_overdue', name: 'Preñez vencida', category: 'reproduction', severity: 'warning' },
+  { code: 'vwp_ready', name: 'Lista para servicio (VWP)', category: 'reproduction', severity: 'info', defaultDays: 60, paramLabel: 'Días voluntarios de espera' },
+  { code: 'service_prep_due', name: 'Próxima a preparar para servicio', category: 'reproduction', severity: 'info', defaultDays: 7, paramLabel: 'Días de anticipación' },
+  { code: 'diagnosis_due', name: 'Diagnóstico pendiente', category: 'reproduction', severity: 'warning', defaultDays: 45, paramLabel: 'Días tras el servicio' },
+  { code: 'open_too_long', name: 'Vaca abierta demasiado tiempo', category: 'reproduction', severity: 'warning', defaultDays: 90, paramLabel: 'Días abiertos' },
+  { code: 'repeat_breeder', name: 'Repetidora', category: 'reproduction', severity: 'warning', defaultDays: 3, paramLabel: 'Servicios sin preñez' },
   { code: 'sync_device_stale', name: 'Dispositivo sin sincronizar', category: 'task', severity: 'info', defaultDays: 7, paramLabel: 'Días sin sincronizar' },
   { code: 'sync_conflicts', name: 'Conflictos de sincronización', category: 'task', severity: 'warning' },
 ];
@@ -73,7 +79,10 @@ const AGENDA_ACTION: Record<string, AgendaItemDto['action']> = {
 
 @Injectable()
 export class AlertsService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly repro: ReproService,
+  ) {}
 
   /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente.
    *  `precomputed` evita recomputar cuando el caller ya tiene los hechos (agenda, P4-1). */
@@ -450,6 +459,12 @@ export class AlertsService {
         tag: o.tag ?? null,
       });
     }
+
+    // Alertas de estado reproductivo (VWP, diagnóstico pendiente, abierta, repetidora, próximas a
+    // preparar) — DERIVADAS de la regla única `computeReproStatus` en ReproService (no se re-implementa
+    // el estado en SQL acá). El motor filtra por regla activa/umbral configurable.
+    const reproAlerts = await this.repro.statusAlerts();
+    for (const a of reproAlerts) if (cfg.get(a.code)?.active) out.push(a);
 
     // Dispositivos sin sincronizar
     if (cfg.get('sync_device_stale')!.active) {

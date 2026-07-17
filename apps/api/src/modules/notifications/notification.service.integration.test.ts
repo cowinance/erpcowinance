@@ -28,7 +28,7 @@ describe('NotificationService · integración', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    notifications = new NotificationService(db, new AlertsService(db));
+    notifications = new NotificationService(db, new AlertsService(db, { statusAlerts: async () => [] } as any));
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
   }, 120_000);
 

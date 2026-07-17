@@ -32,7 +32,7 @@ describe('alerts — motor de reglas configurable', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    svc = new AlertsService(db);
+    svc = new AlertsService(db, { statusAlerts: async () => [] } as any);
     const t = db.tenant;
     const farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [t]))[0].id;
     const speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
@@ -51,9 +51,10 @@ describe('alerts — motor de reglas configurable', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('listRules expone las 7 reglas con estado y umbral', async () => {
+  it('listRules expone las reglas con estado y umbral', async () => {
     const rules: any[] = await svc.listRules();
-    expect(rules).toHaveLength(7);
+    expect(rules.length).toBeGreaterThanOrEqual(12); // health/sync + reproducción (E1: +5)
+    expect(rules.find((r) => r.code === 'vwp_ready')?.days).toBe(60); // VWP configurable
     const vac = rules.find((r) => r.code === 'vaccination_due');
     expect(vac.is_active).toBe(true);
     expect(vac.days).toBe(30);

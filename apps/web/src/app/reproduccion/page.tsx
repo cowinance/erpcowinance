@@ -4,6 +4,7 @@ import { Card, CardTitle, EmptyState, KpiCard, TagMono } from '@/components/ui';
 import { formatDate } from '@/lib/format';
 import { ReproCapture } from './ReproCapture';
 import { HerdStatus } from './HerdStatus';
+import { ToPreparePanel } from './ToPreparePanel';
 import { Baby } from 'lucide-react';
 
 const DIAG_METHOD: Record<string, string> = { ultrasound: 'Ecografía', palpation: 'Palpación', blood: 'Sangre', visual: 'Visual' };
@@ -92,6 +93,10 @@ export default async function ReproPage() {
           <CardTitle>Captura rápida</CardTitle>
           <ReproCapture bulls={bullsRes?.data ?? []} />
         </Card>
+      </div>
+
+      <div className="mt-4">
+        <ToPreparePanel />
       </div>
 
       <div className="mt-4">

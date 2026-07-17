@@ -14,5 +14,6 @@ import { WeaningSyncHandler } from './sync/weaning-sync.handler';
   imports: [TasksModule, GeneticsModule],
   controllers: [ReproController],
   providers: [ReproService, WeaningService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler, PregnancySyncHandler, WeaningSyncHandler],
+  exports: [ReproService], // AlertsModule reusa `statusAlerts` (mismas reglas de estado, sin duplicar SQL).
 })
 export class ReproModule {}
