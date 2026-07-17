@@ -5,12 +5,14 @@ import { PostingController } from './posting.controller';
 import { InvoicesController } from './invoices.controller';
 import { PaymentsController } from './payments.controller';
 import { BudgetsController } from './budgets.controller';
+import { TreasuryController } from './treasury.controller';
 import { AccountsService } from './accounts.service';
 import { LedgerService } from './ledger.service';
 import { PostingService } from './posting.service';
 import { InvoicesService } from './invoices.service';
 import { PaymentsService } from './payments.service';
 import { BudgetsService } from './budgets.service';
+import { TreasuryService } from './treasury.service';
 import { CommerceModule } from '../commerce/commerce.module';
 
 /**
@@ -20,8 +22,8 @@ import { CommerceModule } from '../commerce/commerce.module';
  */
 @Module({
   imports: [CommerceModule],
-  controllers: [FinanceController, LedgerController, PostingController, InvoicesController, PaymentsController, BudgetsController],
-  providers: [AccountsService, LedgerService, PostingService, InvoicesService, PaymentsService, BudgetsService],
+  controllers: [FinanceController, LedgerController, PostingController, InvoicesController, PaymentsController, BudgetsController, TreasuryController],
+  providers: [AccountsService, LedgerService, PostingService, InvoicesService, PaymentsService, BudgetsService, TreasuryService],
   exports: [AccountsService, LedgerService, PostingService], // HR (H-2) reusa el mapa de posteo + el mayor.
 })
 export class FinanceModule {}
