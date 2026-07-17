@@ -73,6 +73,16 @@ const soundError = () => {
   beep(220, 160);
   beep(180, 200, 180);
 };
+/** Vibración háptica (móvil web) — no-op en desktop. */
+const vibrate = (pattern: number | number[]) => {
+  try {
+    navigator.vibrate?.(pattern);
+  } catch {
+    /* sin vibración */
+  }
+};
+/** Anti-rebote del lector: ignora el MISMO identificador re-escaneado dentro de esta ventana (ms). */
+const SCAN_DEBOUNCE_MS = 1500;
 
 const CC_OPTIONS = [2, 2.5, 3, 3.5, 4, 4.5];
 
@@ -83,17 +93,17 @@ function fmtClock(t: number): string {
   return new Date(t).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Alertas rápidas derivadas de la tarjeta (máx 3, accionables). */
-function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning' }[] {
-  const out: { text: string; tone: 'danger' | 'warning' }[] = [];
+/** Alertas rápidas derivadas de la tarjeta (máx 3). `mode` → tocar la alerta salta a ese modo. */
+function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning'; mode?: MangaMode }[] {
+  const out: { text: string; tone: 'danger' | 'warning'; mode?: MangaMode }[] = [];
   if (a.has_withdrawal) out.push({ text: `RETIRO ACTIVO${a.meat_withdrawal_until ? ` hasta ${fmtDate(a.meat_withdrawal_until)}` : ''}`, tone: 'danger' });
-  if ((a.open_cases ?? 0) > 0) out.push({ text: `CASO CLÍNICO ABIERTO${a.case_severity === 'severe' ? ' (grave)' : ''}`, tone: 'danger' });
+  if ((a.open_cases ?? 0) > 0) out.push({ text: `CASO ABIERTO${a.case_severity === 'severe' ? ' (grave)' : ''} · tratar`, tone: 'danger', mode: 'Tratamiento' });
   if (a.sex === 'F' && a.expected_due_date) {
     const days = Math.round((new Date(a.expected_due_date).getTime() - Date.now()) / 86400000);
-    if (days <= 21 && days >= -10) out.push({ text: `PARTO PRÓXIMO (${days <= 0 ? 'vencido' : `${days} d`})`, tone: 'warning' });
+    if (days <= 21 && days >= -10) out.push({ text: `PARTO PRÓXIMO (${days <= 0 ? 'vencido' : `${days} d`})`, tone: 'warning', mode: 'Reproducción' });
   }
-  if (!a.lot_id) out.push({ text: 'SIN LOTE', tone: 'warning' });
-  if (a.days_since_weighing == null || a.days_since_weighing > 90) out.push({ text: a.days_since_weighing == null ? 'SIN PESAJE' : 'SIN PESAJE RECIENTE', tone: 'warning' });
+  if (!a.lot_id) out.push({ text: 'SIN LOTE · mover', tone: 'warning', mode: 'Movimiento' });
+  if (a.days_since_weighing == null || a.days_since_weighing > 90) out.push({ text: a.days_since_weighing == null ? 'SIN PESAJE · pesar' : 'SIN PESAJE RECIENTE · pesar', tone: 'warning', mode: 'Pesaje' });
   return out.slice(0, 3);
 }
 
@@ -118,8 +128,11 @@ export default function MangaPage() {
   const [warn, setWarn] = useState<string | null>(null);
   const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  const [saving, setSaving] = useState(false);
   const tagRef = useRef<HTMLInputElement>(null);
   const kgRef = useRef<HTMLInputElement>(null);
+  const lastScanRef = useRef<{ v: string; at: number }>({ v: '', at: 0 });
+  const lookingRef = useRef(false);
 
   // Estado de conexión (para el indicador de la barra).
   useEffect(() => {
@@ -156,6 +169,7 @@ export default function MangaPage() {
   const fail = useCallback((msg: string) => {
     setError(msg);
     soundError();
+    vibrate([80, 60, 80]);
     setShake(true);
     setErrors((e) => e + 1);
     setTimeout(() => setShake(false), 400);
@@ -169,25 +183,39 @@ export default function MangaPage() {
   }
 
   async function lookup() {
-    if (!tag.trim()) return;
+    const id = tag.trim();
+    if (!id) return;
+    // Anti-rebote del lector: el MISMO identificador re-escaneado enseguida (doble lectura por
+    // rebote del RFID/scanner) se ignora sin error. Guard de concurrencia por si dispara 2 veces.
+    const now = Date.now();
+    if (lookingRef.current) return;
+    if (lastScanRef.current.v === id.toUpperCase() && now - lastScanRef.current.at < SCAN_DEBOUNCE_MS) {
+      setTag('');
+      return;
+    }
+    lastScanRef.current = { v: id.toUpperCase(), at: now };
+    lookingRef.current = true;
     setError('');
     try {
       const res = await fetch(`${API_URL}/animals/lookup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ identifier: tag.trim() }),
+        body: JSON.stringify({ identifier: id }),
       });
-      if (!res.ok) return fail(`SIN ANIMAL ${tag.trim().toUpperCase()}`);
+      if (!res.ok) return fail(`SIN ANIMAL ${id.toUpperCase()}`);
       setAnimal(await res.json());
       setTag('');
       soundOk();
+      vibrate(40);
     } catch {
       fail('SIN CONEXIÓN CON LA API');
+    } finally {
+      lookingRef.current = false;
     }
   }
 
   async function save() {
-    if (!animal || !kg) return;
+    if (!animal || !kg || saving) return;
     setError('');
     // Validación fuerte (regla única de dominio): errores duros bloquean; advertencias informan;
     // cambio extremo vs último peso exige una segunda confirmación antes de enviar.
@@ -207,6 +235,7 @@ export default function MangaPage() {
       return; // esperar confirmación (segundo GUARDAR)
     }
     setConfirmMsg(null);
+    setSaving(true);
     try {
       const res = await fetch(`${API_URL}/animals/${animal.id}/events`, {
         method: 'POST',
@@ -218,6 +247,7 @@ export default function MangaPage() {
         return fail(b?.message?.title ?? 'ERROR AL GUARDAR');
       }
       soundSaved();
+      vibrate(60);
       setRecords((r) => [
         { key: crypto.randomUUID(), tag: animal.tag, action: 'Pesaje', detail: `${kg} kg${cc ? ` · CC ${cc}` : ''}`, at: Date.now(), status: 'saved' },
         ...r,
@@ -229,6 +259,8 @@ export default function MangaPage() {
       setConfirmMsg(null);
     } catch {
       fail('SIN CONEXIÓN CON LA API');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -404,11 +436,22 @@ export default function MangaPage() {
               const alerts = cardAlerts(animal);
               return alerts.length ? (
                 <div className="flex w-full max-w-2xl flex-wrap justify-center gap-2">
-                  {alerts.map((al) => (
-                    <span key={al.text} className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}>
-                      {al.text}
-                    </span>
-                  ))}
+                  {alerts.map((al) =>
+                    al.mode ? (
+                      <button
+                        key={al.text}
+                        onClick={() => setMode(al.mode!)}
+                        className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'} ${mode === al.mode ? 'ring-2 ring-white' : ''}`}
+                        title={`Ir a ${al.mode}`}
+                      >
+                        {al.text} →
+                      </button>
+                    ) : (
+                      <span key={al.text} className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}>
+                        {al.text}
+                      </span>
+                    ),
+                  )}
                 </div>
               ) : null;
             })()}
@@ -450,10 +493,10 @@ export default function MangaPage() {
 
                 <button
                   onClick={save}
-                  disabled={!kg}
+                  disabled={!kg || saving}
                   className={`h-[72px] w-full max-w-md rounded-xl text-[24px] font-extrabold text-black disabled:opacity-30 ${confirmMsg ? 'bg-[#facc15]' : 'bg-[#4ade80]'}`}
                 >
-                  {confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}
+                  {saving ? 'GUARDANDO…' : confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}
                 </button>
                 <button onClick={() => (setAnimal(null), setKg(''), setCc(null), setError(''), setWarn(null), setConfirmMsg(null))} className="text-[15px] text-white/50 underline">
                   Cambiar animal
