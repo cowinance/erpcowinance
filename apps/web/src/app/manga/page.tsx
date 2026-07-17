@@ -13,6 +13,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { validateWeighing } from '@cowinance/domain';
 import { API_URL, authHeaders } from '@/lib/api';
+import { MangaCapture, type MangaMode } from './MangaCapture';
+
+const MODES: MangaMode[] = ['Pesaje', 'Revisión', 'Nota', 'Tratamiento', 'Vacunación', 'Movimiento', 'Reproducción'];
 
 interface Animal {
   id: string;
@@ -96,9 +99,12 @@ function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning' }[] {
 
 export default function MangaPage() {
   const [phase, setPhase] = useState<'setup' | 'capture' | 'summary'>('setup');
+  const [mode, setMode] = useState<MangaMode>('Pesaje');
   const [sessionName, setSessionName] = useState('');
   const [targetLot, setTargetLot] = useState<{ id: string; name: string } | null>(null);
   const [lots, setLots] = useState<{ id: string; name: string }[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [bulls, setBulls] = useState<any[]>([]);
   const [startedAt, setStartedAt] = useState<number>(0);
   const [records, setRecords] = useState<SessionRecord[]>([]);
   const [errors, setErrors] = useState(0);
@@ -127,12 +133,20 @@ export default function MangaPage() {
     };
   }, []);
 
-  // Catálogo de lotes (para el lote objetivo de la sesión).
+  // Catálogos: lotes (lote objetivo + modo Movimiento), vademécum (Tratamiento/Vacunación), toros (Servicio).
   useEffect(() => {
     fetch(`${API_URL}/lots`, { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => setLots(Array.isArray(d) ? d.map((l: any) => ({ id: l.id, name: l.name })) : []))
       .catch(() => setLots([]));
+    fetch(`${API_URL}/products-veterinary`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setProducts(Array.isArray(d) ? d : []))
+      .catch(() => setProducts([]));
+    fetch(`${API_URL}/animals?category=toro&limit=100`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setBulls(d?.data ?? []))
+      .catch(() => setBulls([]));
   }, []);
 
   useEffect(() => {
@@ -253,7 +267,17 @@ export default function MangaPage() {
           </div>
           <div>
             <div className="mb-1.5 text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Modo</div>
-            <div className="h-14 rounded-xl bg-[#4ade80] text-center text-[20px] font-extrabold leading-[56px] text-black">PESAJE</div>
+            <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-2">
+              {MODES.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`h-12 rounded-xl text-[16px] font-bold ${mode === m ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/80'}`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <button onClick={startSession} className="h-[72px] w-full max-w-md rounded-xl bg-white text-[24px] font-extrabold text-black">
@@ -311,7 +335,8 @@ export default function MangaPage() {
       <div className="flex h-14 items-center justify-between gap-3 border-b border-white/20 px-5">
         <span className="flex items-center gap-2 text-[13px] font-bold tracking-[0.15em] text-white/60">
           <span className={`inline-block size-2.5 rounded-full ${online ? 'bg-[#4ade80]' : 'bg-[#f87171]'}`} title={online ? 'Conectado' : 'Sin conexión'} />
-          {sessionName ? <span className="max-w-[180px] truncate normal-case tracking-normal text-white/80">{sessionName}</span> : 'MODO MANGA'}
+          {sessionName ? <span className="max-w-[140px] truncate normal-case tracking-normal text-white/80">{sessionName}</span> : 'MANGA'}
+          <span className="rounded bg-[#4ade80]/20 px-2 py-0.5 text-[12px] tracking-normal text-[#4ade80]">{mode}</span>
         </span>
         <span className="flex items-center gap-4 font-mono text-[18px] font-bold">
           <span className="text-[#4ade80]">{saved} <span className="text-[12px] font-normal text-white/40">reg</span></span>
@@ -326,6 +351,17 @@ export default function MangaPage() {
         {!animal ? (
           /* Paso 1: identificar el animal */
           <>
+            <div className="flex max-w-full flex-wrap justify-center gap-1.5">
+              {MODES.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`h-8 rounded-full px-3 text-[14px] font-bold ${mode === m ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/60'}`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
             <div className="text-[15px] font-bold tracking-[0.15em] text-white/50 uppercase">Caravana</div>
             <input
               ref={tagRef}
@@ -377,49 +413,70 @@ export default function MangaPage() {
               ) : null;
             })()}
 
-            <div className="flex items-end gap-3">
-              <input
-                ref={kgRef}
-                value={kg}
-                onChange={(e) => { setKg(e.target.value); setConfirmMsg(null); setWarn(null); }}
-                onKeyDown={(e) => e.key === 'Enter' && save()}
-                inputMode="decimal"
-                placeholder="0"
-                className="w-56 border-b-4 border-white/40 bg-transparent text-center font-mono text-[56px] leading-none font-bold text-white outline-none placeholder:text-white/20 focus:border-[#4ade80]"
-                aria-label="Peso en kilogramos"
-              />
-              <span className="pb-2 text-[24px] font-bold text-white/50">kg</span>
-            </div>
+            {mode === 'Pesaje' ? (
+              <>
+                <div className="flex items-end gap-3">
+                  <input
+                    ref={kgRef}
+                    value={kg}
+                    onChange={(e) => { setKg(e.target.value); setConfirmMsg(null); setWarn(null); }}
+                    onKeyDown={(e) => e.key === 'Enter' && save()}
+                    inputMode="decimal"
+                    placeholder="0"
+                    className="w-56 border-b-4 border-white/40 bg-transparent text-center font-mono text-[56px] leading-none font-bold text-white outline-none placeholder:text-white/20 focus:border-[#4ade80]"
+                    aria-label="Peso en kilogramos"
+                  />
+                  <span className="pb-2 text-[24px] font-bold text-white/50">kg</span>
+                </div>
 
-            <div className="w-full max-w-md">
-              <div className="mb-2 text-center text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Condición corporal</div>
-              <div className="grid grid-cols-6 gap-2">
-                {CC_OPTIONS.map((v) => (
-                  <button key={v} onClick={() => setCc(cc === v ? null : v)} className={`h-14 rounded-lg text-[20px] font-bold ${cc === v ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/80'}`}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
+                <div className="w-full max-w-md">
+                  <div className="mb-2 text-center text-[13px] font-bold tracking-[0.15em] text-white/50 uppercase">Condición corporal</div>
+                  <div className="grid grid-cols-6 gap-2">
+                    {CC_OPTIONS.map((v) => (
+                      <button key={v} onClick={() => setCc(cc === v ? null : v)} className={`h-14 rounded-lg text-[20px] font-bold ${cc === v ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/80'}`}>
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {error && <div className="text-[20px] font-bold text-[#f87171]">{error}</div>}
-            {!error && warn && !confirmMsg && (
-              <div className="w-full max-w-md rounded-lg bg-[#facc15]/15 px-4 py-2 text-center text-[16px] font-bold text-[#facc15]">⚠ {warn}</div>
+                {error && <div className="text-[20px] font-bold text-[#f87171]">{error}</div>}
+                {!error && warn && !confirmMsg && (
+                  <div className="w-full max-w-md rounded-lg bg-[#facc15]/15 px-4 py-2 text-center text-[16px] font-bold text-[#facc15]">⚠ {warn}</div>
+                )}
+                {confirmMsg && (
+                  <div className="w-full max-w-md rounded-lg bg-[#facc15] px-4 py-3 text-center text-[17px] font-bold text-black">⚠ {confirmMsg}</div>
+                )}
+
+                <button
+                  onClick={save}
+                  disabled={!kg}
+                  className={`h-[72px] w-full max-w-md rounded-xl text-[24px] font-extrabold text-black disabled:opacity-30 ${confirmMsg ? 'bg-[#facc15]' : 'bg-[#4ade80]'}`}
+                >
+                  {confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}
+                </button>
+                <button onClick={() => (setAnimal(null), setKg(''), setCc(null), setError(''), setWarn(null), setConfirmMsg(null))} className="text-[15px] text-white/50 underline">
+                  Cambiar animal
+                </button>
+              </>
+            ) : (
+              <>
+                {error && <div className="text-[20px] font-bold text-[#f87171]">{error}</div>}
+                <MangaCapture
+                  animal={animal}
+                  mode={mode}
+                  catalogs={{ products, lots, bulls }}
+                  onSaved={(rec) => {
+                    soundSaved();
+                    setRecords((r) => [{ key: crypto.randomUUID(), tag: animal.tag, action: rec.action, detail: rec.detail, at: Date.now(), status: 'saved' }, ...r]);
+                    setAnimal(null);
+                    setError('');
+                  }}
+                  onError={(msg) => fail(msg)}
+                  onCancel={() => (setAnimal(null), setError(''))}
+                />
+              </>
             )}
-            {confirmMsg && (
-              <div className="w-full max-w-md rounded-lg bg-[#facc15] px-4 py-3 text-center text-[17px] font-bold text-black">⚠ {confirmMsg}</div>
-            )}
-
-            <button
-              onClick={save}
-              disabled={!kg}
-              className={`h-[72px] w-full max-w-md rounded-xl text-[24px] font-extrabold text-black disabled:opacity-30 ${confirmMsg ? 'bg-[#facc15]' : 'bg-[#4ade80]'}`}
-            >
-              {confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}
-            </button>
-            <button onClick={() => (setAnimal(null), setKg(''), setCc(null), setError(''), setWarn(null), setConfirmMsg(null))} className="text-[15px] text-white/50 underline">
-              Cambiar animal
-            </button>
           </>
         )}
       </div>
