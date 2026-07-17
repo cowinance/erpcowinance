@@ -10,7 +10,7 @@ import { ControlPanel } from './ControlPanel';
 import { MassHealthPanel } from './MassHealthPanel';
 import { HealthCostsPanel } from './HealthCostsPanel';
 import { HospitalPanel } from './HospitalPanel';
-import { Clock, Syringe } from 'lucide-react';
+import { Clock, FileBarChart, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
   const [kpis, withdrawals, upcoming, products, lots, categories, catalogs, items] = await Promise.all([
@@ -28,8 +28,15 @@ export default async function SanidadPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">Sanidad</h1>
-      <p className="mt-0.5 mb-5 text-body text-ink-3">Vacunaciones, tratamientos, retiros y mortalidad</p>
+      <div className="mb-5 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Sanidad</h1>
+          <p className="mt-0.5 text-body text-ink-3">Vacunaciones, tratamientos, retiros y mortalidad</p>
+        </div>
+        <Link href="/sanidad/reportes" className="inline-flex items-center gap-1.5 rounded-md border border-subtle bg-surface px-3 py-1.5 text-label font-medium text-ink-2 shadow-[var(--shadow-1)] hover:border-strong hover:text-ink">
+          <FileBarChart size={14} className="text-brand" /> Reportes sanitarios
+        </Link>
+      </div>
 
       <div className="grid grid-cols-6 gap-4 max-lg:grid-cols-3 max-md:grid-cols-2">
         <KpiCard

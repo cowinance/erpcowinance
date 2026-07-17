@@ -39,17 +39,20 @@ const SEV_ES: Record<string, string> = { mild: 'Leve', moderate: 'Moderada', sev
 export function ControlPanel() {
   const [critical, setCritical] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
+  const [anomalies, setAnomalies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, l] = await Promise.all([
+    const [c, l, an] = await Promise.all([
       fetch(`${API_URL}/health/critical-animals`, { headers: authHeaders() }).then((r) => r.json()).catch(() => []),
       fetch(`${API_URL}/health/by-lot`, { headers: authHeaders() }).then((r) => r.json()).catch(() => []),
+      fetch(`${API_URL}/health/reports/mortality-anomaly`, { headers: authHeaders() }).then((r) => r.json()).catch(() => []),
     ]);
     setCritical(Array.isArray(c) ? c : []);
     setLots(Array.isArray(l) ? l : []);
+    setAnomalies(Array.isArray(an) ? an : []);
     setLoading(false);
   }, []);
 
@@ -69,6 +72,20 @@ export function ControlPanel() {
 
   return (
     <div className="mt-4 space-y-4">
+      {/* Alerta de mortalidad anormal por lote */}
+      {anomalies.length > 0 && (
+        <div className="rounded-[10px] border border-danger/40 bg-danger/5 p-3">
+          <div className="flex items-center gap-2 text-label font-medium text-danger">
+            <AlertTriangle size={15} /> Mortalidad anormal (últimos 90 días)
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-label text-ink-2">
+            {anomalies.map((a) => (
+              <span key={a.lot_id}>{a.lot_name}: <span className="font-medium text-danger">{a.mortality_pct}%</span> ({a.deaths}/{a.head})</span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Accesos rápidos */}
       <div className="flex flex-wrap gap-2">
         {QUICK.map((a) => (

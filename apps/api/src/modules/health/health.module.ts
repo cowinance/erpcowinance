@@ -11,6 +11,8 @@ import { ClinicalCaseController } from './clinical-case.controller';
 import { ClinicalCaseService } from './clinical-case.service';
 import { HospitalizationController } from './hospitalization.controller';
 import { HospitalizationService } from './hospitalization.service';
+import { HealthReportsController } from './health-reports.controller';
+import { HealthReportsService } from './health-reports.service';
 import { PlansController } from './plans.controller';
 import { PlansService } from './plans.service';
 import { MortalitySyncHandler } from './sync/mortality-sync.handler';
@@ -19,9 +21,9 @@ import { VaccinationSyncHandler } from './sync/vaccination-sync.handler';
 
 @Module({
   imports: [TasksModule, InventoryModule, LandModule],
-  controllers: [HealthController, PlansController, ClinicalCaseController, HospitalizationController],
+  controllers: [HealthController, PlansController, ClinicalCaseController, HospitalizationController, HealthReportsController],
   providers: [
-    HealthService, MortalityService, TreatmentService, VaccinationService, ClinicalCaseService, HospitalizationService, PlansService,
+    HealthService, MortalityService, TreatmentService, VaccinationService, ClinicalCaseService, HospitalizationService, HealthReportsService, PlansService,
     MortalitySyncHandler, TreatmentSyncHandler, VaccinationSyncHandler,
   ],
 })

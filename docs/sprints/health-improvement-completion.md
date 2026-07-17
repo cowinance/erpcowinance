@@ -228,7 +228,40 @@ que no coincide, alta devuelve al origen, alta a lote destino, idempotencia, ing
 **724 tests** (712 → +12), 0 ciclos. Verificado en web: ingreso movió el animal al Hospital y el alta lo
 devolvió a su lote de origen.
 
-### Siguiente
-**Etapa 7 — Reportes + alertas sanitarias**: incidencia por diagnóstico, mortalidad por causa/lote/
-período, animales reincidentes, productos más usados, efectividad (recuperados vs abiertos/muertos),
-export CSV, y alerta de mortalidad anormal por lote/período.
+---
+
+## Etapa 7 — Reportes + alertas sanitarias ✅ (cierre del módulo)
+
+Aprovecha los datos estructurados de E2–E6 para reportes clínicos, sin duplicar el reporte de período
+de P9 (`reports.service.health`): lo complementa.
+
+**Backend (`HealthReportsService`, `/health/reports/*`):**
+- `incidence`: incidencia por diagnóstico (casos + eventos clínicos + tratamientos + muertes), con
+  categoría, notificable, eventos y animales afectados.
+- `mortality` (by `cause`/`lot`/`period`): muertes y pérdida estimada agrupadas.
+- `recurrent` (≥ `min` casos): animales reincidentes con conteo de casos y abiertos.
+- `products`: productos más usados (tratamientos + vacunaciones) por aplicaciones/animales/costo.
+- `effectiveness`: desenlace de los casos (recuperados/muertos/derivados/abiertos) + **tasa de
+  recuperación** (recuperados sobre resueltos).
+- `mortalityAnomaly` (ventana + umbral): lotes con mortalidad anormal — **alerta operativa**.
+
+**Web:** sub-página `/sanidad/reportes` (`HealthReportsView`) con tabs (Incidencia / Mortalidad /
+Reincidentes / Productos / Efectividad), filtro de período y **export CSV** (helper único
+anti-inyección `downloadCsv`); enlace «Reportes sanitarios» en el header de `/sanidad`; y **banner de
+mortalidad anormal** por lote en el `ControlPanel`.
+
+**Tests (7 nuevos):** `health-reports.integration` — incidencia, mortalidad por causa/lote,
+reincidentes, productos, efectividad y mortalidad anormal. **731 tests** (724 → +7), 0 ciclos.
+Verificado en web: productos más usados con datos reales; banner «Recría 2026: 5,56 % (1/18)»; página
+de reportes con tabs + CSV.
+
+---
+
+## Estado final del módulo Sanidad
+
+**COMPLETO (7/7 etapas).** De captura rápida a centro operativo: núcleos neutrales de tratamientos y
+vacunaciones (E1), casos clínicos + diagnósticos estructurados (E2), panel de control (E3), aplicación
+masiva + cobertura (E4), inventario de medicamentos + costos (E5), hospital/cuarentena (E6), y reportes
++ alertas (E7). **731 tests**, 0 ciclos de dependencia, verificado end-to-end en cada etapa. Tablas
+nuevas: `clinical_cases`, `clinical_case_events`, `health_admissions`. Reutiliza y respeta las reglas
+únicas del sistema (movimientos, inventario, mortalidad) sin duplicar lógica.
