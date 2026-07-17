@@ -18,13 +18,14 @@ const REPRO_LABELS: Record<string, string> = {
 
 export default async function AnimalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [animal, timeline, lots, categories, overview, reproStatus] = await Promise.all([
+  const [animal, timeline, lots, categories, overview, reproStatus, catalogs] = await Promise.all([
     apiSafe<any>(`/animals/${id}`),
     apiSafe<any[]>(`/animals/${id}/timeline`),
     apiSafe<any[]>('/lots'),
     apiSafe<any[]>('/catalogs/categories'),
     apiSafe<any>(`/animals/${id}/overview`),
     apiSafe<any>(`/reproduction/animals/${id}/status`),
+    apiSafe<any>('/config/catalogs'),
   ]);
   if (!animal) notFound();
 
@@ -107,7 +108,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <EditAnimalButton animal={animal} categories={categories ?? []} />
+          <EditAnimalButton animal={animal} categories={categories ?? []} breeds={catalogs?.breeds ?? []} />
           <MoveAction animalId={id} lots={lots ?? []} />
         </div>
       </div>

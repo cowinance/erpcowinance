@@ -4,7 +4,11 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
 export default async function NewAnimalPage() {
-  const [categories, lots] = await Promise.all([apiSafe<any[]>('/catalogs/categories'), apiSafe<any[]>('/lots')]);
+  const [categories, lots, catalogs] = await Promise.all([
+    apiSafe<any[]>('/catalogs/categories'),
+    apiSafe<any[]>('/lots'),
+    apiSafe<any>('/config/catalogs'),
+  ]);
 
   return (
     <div className="mx-auto max-w-lg">
@@ -13,9 +17,10 @@ export default async function NewAnimalPage() {
       </Link>
       <h1 className="text-xl font-semibold">Nuevo animal</h1>
       <p className="mt-0.5 mb-6 text-body text-ink-3">
-        Alta manual — el alta por nacimiento, compra o importación masiva llega con el resto del módulo Hato.
+        Alta manual — según el origen se registra el evento (nacimiento, compra o transferencia). Para altas
+        masivas usá Importar.
       </p>
-      <NewAnimalForm categories={categories ?? []} lots={lots ?? []} />
+      <NewAnimalForm categories={categories ?? []} lots={lots ?? []} breeds={catalogs?.breeds ?? []} />
     </div>
   );
 }

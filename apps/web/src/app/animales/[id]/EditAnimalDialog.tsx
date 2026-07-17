@@ -16,19 +16,19 @@ import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
-export function EditAnimalButton({ animal, categories }: { animal: any; categories: any[] }) {
+export function EditAnimalButton({ animal, categories, breeds }: { animal: any; categories: any[]; breeds: any[] }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
         <Pencil size={14} className="mr-1.5" /> Editar
       </Button>
-      {open && <EditAnimalDialog animal={animal} categories={categories} onClose={() => setOpen(false)} />}
+      {open && <EditAnimalDialog animal={animal} categories={categories} breeds={breeds} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function EditAnimalDialog({ animal, categories, onClose }: { animal: any; categories: any[]; onClose: () => void }) {
+function EditAnimalDialog({ animal, categories, breeds, onClose }: { animal: any; categories: any[]; breeds: any[]; onClose: () => void }) {
   const router = useRouter();
   const visual = animal.identifiers?.find((i: any) => i.type === 'visual');
   const [saving, setSaving] = useState(false);
@@ -50,6 +50,11 @@ function EditAnimalDialog({ animal, categories, onClose }: { animal: any; catego
   const [sire, setSire] = useState<PickedAnimal | null>(
     animal.genealogy?.sire_id ? { id: animal.genealogy.sire_id, tag: animal.genealogy.sire_tag ?? '—' } : null,
   );
+  const initialBreeds: string[] = (animal.breeds ?? []).map((b: any) => b.breed_id).filter(Boolean);
+  const [selectedBreeds, setSelectedBreeds] = useState<string[]>(initialBreeds);
+  const toggleBreed = (id: string) => setSelectedBreeds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const breedsChanged = () =>
+    selectedBreeds.length !== initialBreeds.length || selectedBreeds.some((id) => !initialBreeds.includes(id));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !saving && onClose();
@@ -82,6 +87,16 @@ function EditAnimalDialog({ animal, categories, onClose }: { animal: any; catego
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      // La raza tiene su propia regla (PUT /animals/:id/breeds) — solo si cambió.
+      if (breedsChanged()) {
+        const br = await fetch(`${API_URL}/animals/${animal.id}/breeds`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ breeds: selectedBreeds.map((id) => ({ breed_id: id })) }),
+        });
+        const bj = await br.json().catch(() => ({}));
+        if (!br.ok) throw new Error(bj?.message?.title ?? bj?.title ?? `Error ${br.status}`);
+      }
       router.refresh();
       onClose();
     } catch (e: any) {
@@ -154,6 +169,26 @@ function EditAnimalDialog({ animal, categories, onClose }: { animal: any; catego
             <AnimalPicker animal={sire} onSelect={setSire} />
           </div>
         </div>
+
+        {breeds.length > 0 && (
+          <div className="mt-4">
+            <span className="mb-1.5 block text-label font-medium text-ink-2">Raza / composición</span>
+            <div className="flex flex-wrap gap-1.5">
+              {breeds.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => toggleBreed(b.id)}
+                  className={`inline-flex h-7 items-center rounded-full border px-3 text-label font-medium ${
+                    selectedBreeds.includes(b.id) ? 'border-brand bg-brand-soft text-brand' : 'border-subtle bg-surface text-ink-2 hover:bg-sunken'
+                  }`}
+                >
+                  {b.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && <p role="alert" className="mt-4 text-label text-danger">{error}</p>}
 

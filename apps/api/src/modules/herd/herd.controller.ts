@@ -79,6 +79,26 @@ export class HerdController {
     return this.herd.registerEvent(id, body);
   }
 
+  @Post('animals/:id/identifiers')
+  addIdentifier(@Param('id') id: string, @Body() body: any) {
+    return this.herd.addIdentifier(id, body);
+  }
+
+  @Post('animals/:id/identifiers/:idfId/retire')
+  retireIdentifier(@Param('id') id: string, @Param('idfId') idfId: string) {
+    return this.herd.retireIdentifier(id, idfId);
+  }
+
+  @Post('animals/:id/identifiers/:idfId/make-official')
+  makeOfficial(@Param('id') id: string, @Param('idfId') idfId: string) {
+    return this.herd.makeOfficialIdentifier(id, idfId);
+  }
+
+  @Put('animals/:id/breeds')
+  setBreeds(@Param('id') id: string, @Body() body: any) {
+    return this.herd.setBreeds(id, body?.breeds ?? []);
+  }
+
   @Post('lots')
   createLot(@Body() body: any) {
     return this.herd.createLot(body);

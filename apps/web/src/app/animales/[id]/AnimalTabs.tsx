@@ -10,17 +10,20 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  Baby, Clock, Heart, MapPin, Pencil, Scale, Stethoscope, Syringe, StickyNote, Milk, Filter,
+  Baby, Clock, Heart, MapPin, Pencil, Scale, Stethoscope, Syringe, StickyNote, Milk, Filter, Tag, ShoppingCart,
 } from 'lucide-react';
 import { Card, CardTitle } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
 import { EVENT_LABELS, ageFrom, formatDate, formatKg, relativeTime } from '@/lib/format';
 import { WeighingForm } from './WeighingForm';
 import { PhotoGallery } from './PhotoGallery';
+import { IdentifiersManager } from './IdentifiersManager';
 
 const EVENT_ICON: Record<string, any> = {
   birth: Baby, weighing: Scale, treatment: Stethoscope, vaccination: Syringe,
   pregnancy_diagnosed: Heart, note: StickyNote, edit: Pencil, movement: MapPin,
+  purchase: ShoppingCart, transfer: MapPin,
+  identifier_added: Tag, identifier_retired: Tag, identifier_official: Tag,
 };
 
 const REPRO_LABELS: Record<string, string> = {
@@ -125,8 +128,12 @@ function ResumenTab({ animal, timeline }: { animal: any; timeline: any[] }) {
                   {(e.event_type === 'treatment' || e.event_type === 'vaccination') && e.payload?.product}
                   {e.event_type === 'pregnancy_diagnosed' && `Ecografía · parto probable ${formatDate(e.payload?.expected_due_date)}`}
                   {e.event_type === 'birth' && 'Alta en el sistema'}
+                  {e.event_type === 'purchase' && 'Alta por compra'}
+                  {e.event_type === 'transfer' && 'Alta por transferencia'}
                   {e.event_type === 'note' && e.payload?.text}
                   {e.event_type === 'edit' && `Se actualizó: ${(e.payload?.changes ?? []).join(', ')}`}
+                  {(e.event_type === 'identifier_added' || e.event_type === 'identifier_retired') && `${e.payload?.type ?? ''} ${e.payload?.value ?? ''}`}
+                  {e.event_type === 'identifier_official' && `${e.payload?.value ?? ''} → oficial`}
                 </div>
               </div>
             );
@@ -145,6 +152,10 @@ function ResumenTab({ animal, timeline }: { animal: any; timeline: any[] }) {
               value: w.weight_kg,
             }))}
           />
+        </Card>
+        <Card>
+          <CardTitle>Identificadores</CardTitle>
+          <IdentifiersManager animalId={animal.id} identifiers={animal.identifiers ?? []} />
         </Card>
         <Card>
           <CardTitle>Registrar pesaje</CardTitle>

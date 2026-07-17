@@ -44,6 +44,11 @@ export const EVENT_LABELS: Record<string, string> = {
   movement: 'Movimiento',
   note: 'Nota',
   edit: 'Edición de ficha',
+  purchase: 'Compra',
+  transfer: 'Transferencia',
+  identifier_added: 'Identificador agregado',
+  identifier_retired: 'Identificador retirado',
+  identifier_official: 'Identificador oficial',
 };
 
 export const STATUS_LABELS: Record<string, string> = {
