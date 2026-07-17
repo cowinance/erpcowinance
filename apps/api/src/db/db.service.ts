@@ -400,6 +400,13 @@ export class DbService implements OnModuleInit {
     // TB-2: entregas de leche + tests de calidad.
     'milk_deliveries',
     'milk_quality_tests',
+    // WL-1: partes de trabajo (horas de empleado). El esquema traía su policy
+    // dispersa sobre app.current_tenant; acá recibe la estándar sobre app.tenant_id.
+    'work_logs',
+    // LAB-1: laboratorio — maestro + muestras + resultados (tablas dormidas activadas).
+    'labs',
+    'lab_samples',
+    'lab_results',
     'lots',
     'paddocks',
     'products_veterinary',
@@ -542,6 +549,10 @@ export class DbService implements OnModuleInit {
     }
     // TB-2: mismas policies dispersas en entregas y tests de calidad.
     for (const t of ['milk_deliveries', 'milk_quality_tests']) {
+      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
+    }
+    // WL-1 + LAB-1: mismas policies dispersas en partes de trabajo y laboratorio.
+    for (const t of ['work_logs', 'labs', 'lab_samples', 'lab_results']) {
       await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
     }
     await this.db.exec(DbService.rlsMigration());
