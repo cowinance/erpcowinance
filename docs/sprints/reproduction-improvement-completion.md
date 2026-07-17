@@ -139,6 +139,31 @@ asignar por selección. Test de asignaciones ajustado (objetivo vacío → 400).
 ciclos. Verificado en web: asignación por categoría (8 vaquillonas), completar paso hormonal → 8 eventos
 de sincronización; página con objetivo/tipo-de-paso/progreso.
 
+---
+
+## Etapa 5 — KPIs + reportes ampliados ✅
+
+Sin esquema nuevo. Espejo del patrón de reportes de Sanidad (servicio + sub-página con tabs + CSV).
+
+**Backend (`ReproReportsService`, `/reproduction/reports/*`):**
+- `summary(from,to)`: KPIs de período — servicios (IA/monta/TE), **tasa de concepción**, **servicios por
+  concepción**, partos (vivos/muertos), abortos, destetes + tasa, **intervalo entre partos** y **días
+  abiertos promedio** (snapshot).
+- `byBull(from,to)`: **desempeño por toro/semen** — servicios, concepciones (preñeces del servicio) y
+  tasa de concepción.
+- `abortions(from,to)`: abortos y pérdidas con causa + edad gestacional.
+- `openCows` / `repeatBreeders` / `diagnosisPending`: listas DERIVADAS del estado (reusan
+  `ReproService.herdStatus` → regla única, sin re-implementar el estado en SQL).
+
+**Web:** sub-página `/reproduccion/reportes` (`ReproReportsView`) con tabs (Resumen / Por toro / Abiertas /
+Repetidoras / Diag. pendiente / Abortos), filtro de período y **export CSV** (helper único
+anti-inyección); enlace «Reportes →» en el header de Reproducción.
+
+**Tests (4 nuevos):** `repro-reports.integration` — summary (concepción, vivos/muertos, abortos, días
+abiertos), por toro (servicios/concepciones/tasa), abortos con causa, abiertas derivadas del estado.
+**758 tests** (754 → +4), 0 ciclos. Verificado en web: Resumen con KPIs reales (17 servicios, concepción
+100 %, 11 partos, 1 aborto, 68 d intervalo, 120 d abiertos); «Por toro» (226: 5/5/100 %, 231: 4/4/100 %) + CSV.
+
 ### Siguiente
-**Etapa 5 — KPIs + reportes ampliados:** tasa de concepción, servicios por concepción, días abiertos,
-intervalo parto-concepción, por toro/semen, abiertas/repetidoras/diagnósticos-pendientes/abortos, CSV.
+**Etapa 6 — Integración Lotes / Sanidad / Genética:** estado repro agregado por lote, bloquear/advertir
+servicio si hay retiro activo o caso sanitario grave, y desempeño por toro/semen (ya iniciado en E5).

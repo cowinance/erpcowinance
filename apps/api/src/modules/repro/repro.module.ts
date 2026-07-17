@@ -3,6 +3,8 @@ import { TasksModule } from '../tasks/tasks.module';
 import { GeneticsModule } from '../genetics/genetics.module';
 import { ReproController } from './repro.controller';
 import { ReproService } from './repro.service';
+import { ReproReportsController } from './repro-reports.controller';
+import { ReproReportsService } from './repro-reports.service';
 import { WeaningService } from './weaning.service';
 import { BreedingEventSyncHandler } from './sync/breeding-event-sync.handler';
 import { CalvingSyncHandler } from './sync/calving-sync.handler';
@@ -12,8 +14,8 @@ import { WeaningSyncHandler } from './sync/weaning-sync.handler';
 
 @Module({
   imports: [TasksModule, GeneticsModule],
-  controllers: [ReproController],
-  providers: [ReproService, WeaningService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler, PregnancySyncHandler, WeaningSyncHandler],
+  controllers: [ReproController, ReproReportsController],
+  providers: [ReproService, ReproReportsService, WeaningService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler, PregnancySyncHandler, WeaningSyncHandler],
   exports: [ReproService], // AlertsModule reusa `statusAlerts` (mismas reglas de estado, sin duplicar SQL).
 })
 export class ReproModule {}
