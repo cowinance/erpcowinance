@@ -9,7 +9,8 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
-interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number }
+interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number; status?: string; alert_count?: number }
+interface LotAlert { code: string; label: string; severity: 'info' | 'warning' }
 interface Paddock { id: string; name: string }
 interface Category { code: string; name: string }
 interface AnimalFilters { q: string; category: string; sex: string; minWeight: string; maxWeight: string; minAge: string; maxAge: string }
@@ -23,6 +24,8 @@ interface Detail extends Lot {
   avg_gdp: number | null;
   by_category: { category: string; n: number }[];
   by_sex: { sex: string; n: number }[];
+  status: string;
+  alerts: LotAlert[];
 }
 
 const PURPOSES: [string, string][] = [
@@ -241,9 +244,15 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
           <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
             {lots.map((l) => (
               <button key={l.id} onClick={() => open(l.id)} className={`rounded-[10px] border bg-surface p-4 text-left shadow-[var(--shadow-1)] transition-colors ${selectedId === l.id ? 'border-brand' : 'border-subtle hover:border-strong'} ${l.is_active ? '' : 'opacity-60'}`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-body font-semibold">{l.name}</span>
-                  {!l.is_active && <span className="rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Archivado</span>}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-body font-semibold">{l.name}</span>
+                  {!l.is_active ? (
+                    <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Archivado</span>
+                  ) : (l.alert_count ?? 0) > 0 ? (
+                    <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-caption text-warning">⚠ {l.alert_count}</span>
+                  ) : l.status === 'empty' ? (
+                    <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Vacío</span>
+                  ) : null}
                 </div>
                 <div className="mt-0.5 text-label text-ink-3">{PURPOSE_ES[l.purpose ?? ''] ?? l.purpose ?? 'sin propósito'} · {l.paddock_name ?? 'sin potrero'}</div>
                 <div className="tnum mt-2 text-compat-22 font-semibold">{l.animal_count}<span className="ml-1 text-body font-normal text-ink-2">animales</span></div>
@@ -355,6 +364,17 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
                   </div>
                   {confirmMerge && <p className="mt-1 text-caption text-warning">Se moverán todos los animales al lote elegido y este lote se archivará.</p>}
                 </div>
+              </div>
+            )}
+
+            {detail.alerts && detail.alerts.length > 0 && (
+              <div className="mt-3 space-y-1">
+                {detail.alerts.map((al) => (
+                  <div key={al.code} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-label ${al.severity === 'warning' ? 'bg-warning/10 text-warning' : 'bg-sunken text-ink-2'}`}>
+                    <span aria-hidden>{al.severity === 'warning' ? '⚠' : 'ℹ'}</span>
+                    <span className="font-medium">{al.label}</span>
+                  </div>
+                ))}
               </div>
             )}
 

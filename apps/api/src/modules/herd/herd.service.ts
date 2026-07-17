@@ -344,6 +344,25 @@ export class HerdService {
   }
 
   /** Crea un lote (rodeo/grupo de manejo) del tenant. `purpose` opcional (validado). */
+  /**
+   * Reglas de alertas operativas + estado del lote (Etapa 5), fuente única para el detalle y la lista.
+   * `alerts`: sin potrero, sin pesaje reciente (>90 días), sin identificación, mezcla inusual de
+   * categorías (>2), lote vacío. `status`: archived | empty | alert | active.
+   */
+  private computeLotAlerts(a: { isActive: boolean; head: number; paddockId: string | null; sinId: number; sinPesaje: number; categorias: number }) {
+    const alerts: { code: string; label: string; severity: 'info' | 'warning' }[] = [];
+    if (a.head === 0) {
+      if (a.isActive) alerts.push({ code: 'empty', label: 'Lote vacío', severity: 'info' });
+    } else {
+      if (!a.paddockId) alerts.push({ code: 'no_paddock', label: 'Sin potrero asignado', severity: 'warning' });
+      if (a.sinId > 0) alerts.push({ code: 'no_id', label: `${a.sinId} sin identificación`, severity: 'warning' });
+      if (a.sinPesaje > 0) alerts.push({ code: 'no_weight', label: `${a.sinPesaje} sin pesaje reciente`, severity: 'info' });
+      if (a.categorias > 2) alerts.push({ code: 'mixed', label: 'Mezcla inusual de categorías', severity: 'info' });
+    }
+    const status = !a.isActive ? 'archived' : a.head === 0 ? 'empty' : alerts.length ? 'alert' : 'active';
+    return { status, alerts };
+  }
+
   private validateLot<T>(fn: () => T): T {
     try {
       return fn();
@@ -365,13 +384,22 @@ export class HerdService {
   }
 
   async lots() {
-    return this.db.query(
-      `SELECT l.id, l.name, l.purpose, l.is_active, p.name AS paddock_name,
-              (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS animal_count
+    const rows = await this.db.query<any>(
+      `SELECT l.id, l.name, l.purpose, l.is_active, l.current_paddock_id, p.name AS paddock_name,
+              (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS animal_count,
+              (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL
+                 AND NOT EXISTS(SELECT 1 FROM animal_identifiers ai WHERE ai.animal_id=a.id AND ai.type='visual' AND ai.deleted_at IS NULL)) AS sin_id,
+              (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL
+                 AND NOT EXISTS(SELECT 1 FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90)) AS sin_pesaje,
+              (SELECT count(DISTINCT a.category_id)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS categorias
        FROM lots l LEFT JOIN paddocks p ON p.id = l.current_paddock_id
        WHERE l.tenant_id = $1 AND l.deleted_at IS NULL ORDER BY l.is_active DESC, l.name`,
       [this.db.tenant],
     );
+    return rows.map((l) => {
+      const { status, alerts } = this.computeLotAlerts({ isActive: l.is_active, head: l.animal_count, paddockId: l.current_paddock_id, sinId: l.sin_id, sinPesaje: l.sin_pesaje, categorias: l.categorias });
+      return { id: l.id, name: l.name, purpose: l.purpose, is_active: l.is_active, paddock_name: l.paddock_name, animal_count: l.animal_count, status, alert_count: alerts.length };
+    });
   }
 
   /**
@@ -482,7 +510,7 @@ export class HerdService {
       [id, t],
     );
     if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
-    const [agg, byCategory, bySex] = await Promise.all([
+    const [agg, byCategory, bySex, checks] = await Promise.all([
       this.db.one<any>(
         `SELECT count(*)::int AS head,
                 round(avg(lw.weight_kg))::int AS avg_weight_kg,
@@ -504,8 +532,20 @@ export class HerdService {
          WHERE a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL GROUP BY a.sex`,
         [id, t],
       ),
+      this.db.one<any>(
+        `SELECT count(*) FILTER (WHERE NOT EXISTS(SELECT 1 FROM animal_identifiers ai WHERE ai.animal_id=a.id AND ai.type='visual' AND ai.deleted_at IS NULL))::int AS sin_id,
+                count(*) FILTER (WHERE NOT EXISTS(SELECT 1 FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90))::int AS sin_pesaje,
+                count(DISTINCT a.category_id)::int AS categorias
+         FROM animals a WHERE a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL`,
+        [id, t],
+      ),
     ]);
-    return { ...lot, head: agg?.head ?? 0, avg_weight_kg: agg?.avg_weight_kg ?? null, avg_gdp: agg?.avg_gdp ?? null, by_category: byCategory, by_sex: bySex };
+    const head = agg?.head ?? 0;
+    const { status, alerts } = this.computeLotAlerts({
+      isActive: lot.is_active, head, paddockId: lot.current_paddock_id,
+      sinId: checks?.sin_id ?? 0, sinPesaje: checks?.sin_pesaje ?? 0, categorias: checks?.categorias ?? 0,
+    });
+    return { ...lot, head, avg_weight_kg: agg?.avg_weight_kg ?? null, avg_gdp: agg?.avg_gdp ?? null, by_category: byCategory, by_sex: bySex, status, alerts };
   }
 
   /** Edita nombre, propósito, potrero asignado y/o estado. El potrero debe pertenecer al tenant. */

@@ -132,9 +132,24 @@ crías al pie; **Recría** peso inicial/actual/GDP/edad prom; **Hospital** días
 «Métricas de <propósito>». Test `lot-metrics`. Verificado en web: Rodeo Cría 1 → Vientres 18/Toros 2/
 Preñadas 11/Vacías 7; Engorde Otoño → Kg ganados 1.664/GDP 1,27.
 
+## 5-septies. Alertas operativas + estado del lote (7ª entrega — Etapa 5)
+
+Regla única `computeLotAlerts` (helper puro en herd.service), usada por el detalle y la lista:
+
+- **Alertas:** sin potrero asignado (con animales), sin identificación (N sin caravana visual), sin
+  pesaje reciente (N sin pesada en 90 días), mezcla inusual de categorías (>2 categorías distintas),
+  lote vacío. Severidad info/warning.
+- **Estado:** `archived` | `empty` | `alert` | `active`.
+- **API:** `getLot` devuelve `{status, alerts:[{code,label,severity}]}`; `lots()` devuelve `status` y
+  `alert_count` por lote (con subconsultas de conteo).
+- **Web:** badge en la card (Archivado / ⚠ N / Vacío) y sección de alertas en el detalle.
+- **Test** (`lot-alerts`): lote problemático (sin potrero/id/pesaje + mezcla → 4 alertas, estado alert),
+  vacío (empty), sano (active sin alertas), y la lista con status/alert_count.
+
+Verificado en web: Recría 2026 con badge «⚠ 1» y alerta «Mezcla inusual de categorías» (Vaquillona 8 /
+Ternero 5 / Ternera 4 = 3 categorías).
+
 ## 6. Trabajo diferido (etapas siguientes del rediseño)
-- **Etapa 5:** **alertas operativas** (sin potrero, sin pesaje reciente, sin identificación, mezcla
-  inusual de categorías, vacío) y estado del lote (activo/vacío/archivado/con alertas).
 - **Etapa 6:** UX — tabla compacta, orden por cabezas/propósito/potrero/peso/estado, export/print.
 
 ## 7. Estado del roadmap
