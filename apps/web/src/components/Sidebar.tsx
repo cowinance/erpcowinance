@@ -89,7 +89,7 @@ const FOOTER_ITEMS = [
   { href: '/alertas', label: 'Alertas', icon: Bell },
   { href: '/modulo/academia', label: 'Academia', icon: GraduationCap },
   { href: '/suscripcion', label: 'Plan y suscripción', icon: CreditCard },
-  { href: '/modulo/configuracion', label: 'Configuración', icon: Settings },
+  { href: '/configuracion', label: 'Configuración', icon: Settings },
 ];
 
 function NavItem({

@@ -22,3 +22,5 @@ export * from './hr';
 export * from './production';
 // Servicios de dominio — tierra: métricas de pastoreo (PG-1).
 export * from './land';
+// Configuración — validación de catálogos maestros (A3).
+export * from './config';

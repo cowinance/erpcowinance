@@ -1,0 +1,230 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { API_URL, authHeaders } from '@/lib/api';
+import { Card, CardTitle } from '@/components/ui';
+import { Button } from '@/components/Button';
+import { Input } from '@/components/Input';
+import { Select } from '@/components/Select';
+
+interface Species { id: string; code: string; name: string; gestation_days: number | null }
+interface Breed { id: string; code: string; name: string; purpose: string | null; species_id: string; species_name?: string; editable: boolean }
+interface Category { id: string; code: string; name: string; sex: string | null; min_age_months: number | null; max_age_months: number | null }
+interface Unit { code: string; name: string; dimension: string; si_factor: number }
+interface Diagnosis { id: string; code: string; name: string; category: string | null; is_notifiable: boolean; editable: boolean }
+interface Catalogs { species: Species[]; breeds: Breed[]; categories: Category[]; units: Unit[]; diagnoses: Diagnosis[] }
+
+const PURPOSES: [string, string][] = [['beef', 'Carne'], ['dairy', 'Leche'], ['dual', 'Doble'], ['wool', 'Lana'], ['work', 'Trabajo']];
+const PURPOSE_ES = Object.fromEntries(PURPOSES) as Record<string, string>;
+const TABS = ['Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
+
+export function ConfigView({ catalogs }: { catalogs: Catalogs }) {
+  const router = useRouter();
+  const [tab, setTab] = useState<(typeof TABS)[number]>('Razas');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function call(method: string, path: string, data?: any): Promise<boolean> {
+    if (busy) return false;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}${path}`, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: data ? JSON.stringify(data) : undefined });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.title ?? `Error ${res.status}`);
+      }
+      router.refresh();
+      return true;
+    } catch (e: any) {
+      setError(e.message ?? 'No se pudo guardar.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <nav className="flex gap-1 border-b border-subtle">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => { setTab(t); setError(''); }}
+            className={`-mb-px border-b-2 px-3 py-2 text-body font-medium ${tab === t ? 'border-brand text-brand' : 'border-transparent text-ink-3 hover:text-ink-1'}`}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      {error && <p role="alert" className="text-label text-danger">{error}</p>}
+
+      {tab === 'Razas' && <BreedsTab catalogs={catalogs} busy={busy} call={call} />}
+      {tab === 'Diagnósticos' && <DiagnosesTab diagnoses={catalogs.diagnoses} busy={busy} call={call} />}
+      {tab === 'Categorías' && <CategoriesTab categories={catalogs.categories} />}
+      {tab === 'Unidades' && <UnitsTab units={catalogs.units} />}
+      {tab === 'Especies' && <SpeciesTab species={catalogs.species} />}
+    </div>
+  );
+}
+
+type Call = (method: string, path: string, data?: any) => Promise<boolean>;
+
+function BaseBadge({ editable }: { editable: boolean }) {
+  return editable ? <span className="rounded bg-brand-soft px-1.5 py-0.5 text-caption text-brand">Propia</span> : <span className="rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Base</span>;
+}
+
+function BreedsTab({ catalogs, busy, call }: { catalogs: Catalogs; busy: boolean; call: Call }) {
+  const [speciesId, setSpeciesId] = useState(catalogs.species[0]?.id ?? '');
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [purpose, setPurpose] = useState('');
+
+  return (
+    <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
+      <Card className="self-start">
+        <CardTitle>Nueva raza</CardTitle>
+        <div className="space-y-2">
+          <Select value={speciesId} onChange={(e) => setSpeciesId(e.target.value)} aria-label="Especie">
+            {catalogs.species.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </Select>
+          <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código" aria-label="Código" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" aria-label="Nombre" />
+          <Select value={purpose} onChange={(e) => setPurpose(e.target.value)} aria-label="Aptitud">
+            <option value="">Aptitud (opcional)</option>
+            {PURPOSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </Select>
+          <Button size="sm" fullWidth loading={busy} disabled={busy || !code.trim() || !name.trim() || !speciesId}
+            onClick={() => call('POST', '/config/breeds', { species_id: speciesId, code, name, purpose: purpose || undefined }).then((ok) => { if (ok) { setCode(''); setName(''); setPurpose(''); } })}>
+            Agregar raza
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="col-span-2 self-start max-lg:col-span-3">
+        <CardTitle action={<span className="text-label text-ink-3">{catalogs.breeds.length}</span>}>Razas</CardTitle>
+        <ul className="divide-y divide-subtle">
+          {catalogs.breeds.map((b) => (
+            <li key={b.id} className="flex items-center justify-between py-2">
+              <div className="flex items-center gap-2">
+                <span className="text-body font-medium">{b.name}</span>
+                <span className="text-label text-ink-3">{b.species_name} · {b.code}{b.purpose ? ` · ${PURPOSE_ES[b.purpose] ?? b.purpose}` : ''}</span>
+                <BaseBadge editable={b.editable} />
+              </div>
+              {b.editable && (
+                <Button variant="secondary" size="sm" disabled={busy} onClick={() => call('DELETE', `/config/breeds/${b.id}`)} aria-label={`Borrar ${b.name}`}>✕</Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+function DiagnosesTab({ diagnoses, busy, call }: { diagnoses: Diagnosis[]; busy: boolean; call: Call }) {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [notifiable, setNotifiable] = useState(false);
+
+  return (
+    <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
+      <Card className="self-start">
+        <CardTitle>Nuevo diagnóstico</CardTitle>
+        <div className="space-y-2">
+          <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código" aria-label="Código" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" aria-label="Nombre" />
+          <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Categoría (opcional)" aria-label="Categoría" />
+          <label className="flex items-center gap-2 text-body text-ink-2">
+            <input type="checkbox" checked={notifiable} onChange={(e) => setNotifiable(e.target.checked)} /> De notificación obligatoria
+          </label>
+          <Button size="sm" fullWidth loading={busy} disabled={busy || !code.trim() || !name.trim()}
+            onClick={() => call('POST', '/config/diagnoses', { code, name, category: category || undefined, is_notifiable: notifiable }).then((ok) => { if (ok) { setCode(''); setName(''); setCategory(''); setNotifiable(false); } })}>
+            Agregar diagnóstico
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="col-span-2 self-start max-lg:col-span-3">
+        <CardTitle action={<span className="text-label text-ink-3">{diagnoses.length}</span>}>Diagnósticos</CardTitle>
+        {diagnoses.length === 0 ? (
+          <p className="py-3 text-center text-label text-ink-3">Sin diagnósticos. Agregá los propios de tu finca.</p>
+        ) : (
+          <ul className="divide-y divide-subtle">
+            {diagnoses.map((d) => (
+              <li key={d.id} className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-body font-medium">{d.name}</span>
+                  <span className="text-label text-ink-3">{d.code}{d.category ? ` · ${d.category}` : ''}</span>
+                  {d.is_notifiable && <span className="rounded bg-warning/10 px-1.5 py-0.5 text-caption text-warning">Notificable</span>}
+                  <BaseBadge editable={d.editable} />
+                </div>
+                {d.editable && (
+                  <Button variant="secondary" size="sm" disabled={busy} onClick={() => call('DELETE', `/config/diagnoses/${d.id}`)} aria-label={`Borrar ${d.name}`}>✕</Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function ReadOnlyNote() {
+  return <p className="mb-3 text-label text-ink-3">Catálogo global de solo lectura.</p>;
+}
+
+function CategoriesTab({ categories }: { categories: Category[] }) {
+  return (
+    <Card>
+      <CardTitle action={<span className="text-label text-ink-3">{categories.length}</span>}>Categorías zootécnicas</CardTitle>
+      <ReadOnlyNote />
+      <ul className="divide-y divide-subtle">
+        {categories.map((c) => (
+          <li key={c.id} className="flex items-center justify-between py-1.5 text-body">
+            <span className="font-medium">{c.name}</span>
+            <span className="text-label text-ink-3">{c.code}{c.sex ? ` · ${c.sex}` : ''}{c.min_age_months != null ? ` · ${c.min_age_months}+ m` : ''}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function UnitsTab({ units }: { units: Unit[] }) {
+  return (
+    <Card>
+      <CardTitle action={<span className="text-label text-ink-3">{units.length}</span>}>Unidades de medida</CardTitle>
+      <ReadOnlyNote />
+      <ul className="divide-y divide-subtle">
+        {units.map((u) => (
+          <li key={u.code} className="flex items-center justify-between py-1.5 text-body">
+            <span className="font-medium">{u.name} <span className="text-label text-ink-3">({u.code})</span></span>
+            <span className="text-label text-ink-3">{u.dimension} · SI ×{u.si_factor}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function SpeciesTab({ species }: { species: Species[] }) {
+  return (
+    <Card>
+      <CardTitle action={<span className="text-label text-ink-3">{species.length}</span>}>Especies</CardTitle>
+      <ReadOnlyNote />
+      <ul className="divide-y divide-subtle">
+        {species.map((s) => (
+          <li key={s.id} className="flex items-center justify-between py-1.5 text-body">
+            <span className="font-medium">{s.name} <span className="text-label text-ink-3">({s.code})</span></span>
+            {s.gestation_days != null && <span className="text-label text-ink-3">gestación {s.gestation_days} d</span>}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
