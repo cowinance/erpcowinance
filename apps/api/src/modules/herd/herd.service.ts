@@ -399,15 +399,8 @@ export class HerdService {
       args.push(input.purpose);
       sets.push(`purpose=$${args.length}`);
     }
-    if (body?.current_paddock_id !== undefined) {
-      const pid = body.current_paddock_id || null;
-      if (pid) {
-        const paddock = await this.db.one(`SELECT id FROM paddocks WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [pid, t]);
-        if (!paddock) throw new BadRequestException({ code: 'lot.paddock_not_found', title: 'El potrero no existe' });
-      }
-      args.push(pid);
-      sets.push(`current_paddock_id=$${args.length}`);
-    }
+    // El potrero NO se edita como campo: cambiarlo es una rotación del lote completo (los animales lo
+    // siguen y queda historial). Ese cambio pasa por POST /lots/:id/rotate (reusa land.moveLot).
     if (body?.is_active !== undefined) {
       args.push(Boolean(body.is_active));
       sets.push(`is_active=$${args.length}`);
@@ -429,6 +422,51 @@ export class HerdService {
     if ((occ?.n ?? 0) > 0) throw new ConflictException({ code: 'lot.occupied', title: `El lote tiene ${occ!.n} animales; reasignalos antes de archivarlo` });
     await this.db.query(`UPDATE lots SET is_active=false, deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2`, [id, t]);
     return { id, deleted: true };
+  }
+
+  /**
+   * Historial del lote basado en movimientos REALES (`animal_movements`), agrupado por movimiento
+   * (`movement_id`): ingresos, salidas y rotaciones de potrero, con fecha efectiva, origen, destino,
+   * motivo, cantidad y usuario. Fuente única de trazabilidad — no se derivan campos manuales.
+   */
+  async lotHistory(id: string) {
+    const t = this.db.tenant;
+    const lot = await this.db.one<any>(`SELECT id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
+    if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+    const rows = await this.db.query<any>(
+      `SELECT m.movement_id, max(m.moved_at) AS moved_at, m.from_lot_id, m.to_lot_id, m.from_paddock_id, m.to_paddock_id, m.reason,
+              count(*)::int AS animals,
+              fl.name AS from_lot, tl.name AS to_lot, fp.name AS from_paddock, tp.name AS to_paddock, COALESCE(u.full_name, u.email) AS actor
+       FROM animal_movements m
+       LEFT JOIN lots fl ON fl.id=m.from_lot_id
+       LEFT JOIN lots tl ON tl.id=m.to_lot_id
+       LEFT JOIN paddocks fp ON fp.id=m.from_paddock_id
+       LEFT JOIN paddocks tp ON tp.id=m.to_paddock_id
+       LEFT JOIN users u ON u.id=m.created_by
+       WHERE m.tenant_id=$1 AND m.deleted_at IS NULL AND (m.from_lot_id=$2 OR m.to_lot_id=$2)
+       GROUP BY m.movement_id, m.from_lot_id, m.to_lot_id, m.from_paddock_id, m.to_paddock_id, m.reason, fl.name, tl.name, fp.name, tp.name, u.full_name, u.email
+       ORDER BY moved_at DESC LIMIT 100`,
+      [t, id],
+    );
+    return rows.map((r) => {
+      let kind: 'ingreso' | 'salida' | 'rotacion' | 'movimiento';
+      if (r.to_lot_id === id && r.from_lot_id !== id) kind = 'ingreso';
+      else if (r.from_lot_id === id && r.to_lot_id !== id) kind = 'salida';
+      else if (r.from_paddock_id !== r.to_paddock_id) kind = 'rotacion';
+      else kind = 'movimiento';
+      return {
+        movement_id: r.movement_id,
+        moved_at: r.moved_at,
+        kind,
+        animals: r.animals,
+        reason: r.reason,
+        actor: r.actor ?? null,
+        from_lot: r.from_lot ?? null,
+        to_lot: r.to_lot ?? null,
+        from_paddock: r.from_paddock ?? null,
+        to_paddock: r.to_paddock ?? null,
+      };
+    });
   }
 
   async categories() {

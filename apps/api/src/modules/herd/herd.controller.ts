@@ -57,6 +57,11 @@ export class HerdController {
     return this.herd.getLot(id);
   }
 
+  @Get('lots/:id/history')
+  lotHistory(@Param('id') id: string) {
+    return this.herd.lotHistory(id);
+  }
+
   @Put('lots/:id')
   updateLot(@Param('id') id: string, @Body() body: any) {
     return this.herd.updateLot(id, body);

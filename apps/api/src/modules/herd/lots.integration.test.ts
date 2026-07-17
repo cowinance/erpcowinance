@@ -73,14 +73,15 @@ describe('HerdService — lotes (CRUD + composición)', () => {
     expect(detail.by_category.find((c: any) => c.category === 'Vaca').n).toBe(2);
   });
 
-  it('edita nombre, propósito, potrero y estado', async () => {
+  it('edita nombre, propósito y estado (el potrero NO se edita como campo: es rotación)', async () => {
     const lot: any = await herd.createLot({ name: 'Rodeo Editar' });
-    const upd: any = await herd.updateLot(lot.id, { name: 'Rodeo Editado', purpose: 'fattening', current_paddock_id: paddockId, is_active: false });
+    const upd: any = await herd.updateLot(lot.id, { name: 'Rodeo Editado', purpose: 'fattening', is_active: false });
     expect(upd.name).toBe('Rodeo Editado');
     expect(upd.purpose).toBe('fattening');
-    expect(upd.current_paddock_id).toBe(paddockId);
     expect(upd.is_active).toBe(false);
-    await expect(herd.updateLot(lot.id, { current_paddock_id: '00000000-0000-0000-0000-000000000000' })).rejects.toMatchObject({ status: 400 });
+    // Regla #4: cambiar el potrero es una rotación (land.moveLot), no una edición de campo.
+    // updateLot ignora current_paddock_id; sin otros cambios queda sin nada para actualizar → 400.
+    await expect(herd.updateLot(lot.id, { current_paddock_id: paddockId })).rejects.toMatchObject({ status: 400 });
   });
 
   it('archiva un lote vacío pero bloquea uno con animales', async () => {

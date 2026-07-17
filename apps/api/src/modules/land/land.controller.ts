@@ -33,6 +33,12 @@ export class LandController {
     return this.land.moveLot(id, body);
   }
 
+  /** Rotación de lote: cambiar el potrero de un lote (los animales lo siguen vía recordMovement). */
+  @Post('lots/:id/rotate')
+  rotateLot(@Param('id') id: string, @Body() body: { paddock_id?: string }) {
+    return this.land.moveLot(body?.paddock_id ?? '', { lot_id: id });
+  }
+
   /**
    * Movimiento individual/grupal (P3 M-1.d). El `Idempotency-Key` (uuid) del cliente,
    * si viene y es válido, se usa como `movementId` (deduplica un doble-submit

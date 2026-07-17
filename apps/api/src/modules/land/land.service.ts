@@ -189,6 +189,12 @@ export class LandService {
     const animalIds = Array.isArray(body?.animal_ids) ? (body.animal_ids as string[]) : [];
     if (!animalIds.length) throw new BadRequestException({ code: 'movement.no_animals', title: 'animal_ids es obligatorio (1..N)' });
 
+    // Regla de negocio: no se mueven animales a un lote archivado.
+    if (body?.lot_id) {
+      const lot = await this.db.one<{ id: string }>(`SELECT id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL AND is_active`, [body.lot_id, this.db.tenant]);
+      if (!lot) throw new ConflictException({ code: 'movement.lot_archived', title: 'El lote de destino está archivado o no existe' });
+    }
+
     const to: MovementIntent = {};
     if ('lot_id' in body) to.lot = body.lot_id ?? null;
     if ('paddock_id' in body) to.paddock = body.paddock_id ?? null;

@@ -12,6 +12,7 @@ import { Select } from '@/components/Select';
 interface Lot { id: string; name: string; purpose: string | null; is_active: boolean; paddock_name: string | null; animal_count: number }
 interface Paddock { id: string; name: string }
 interface AnimalRow { id: string; tag: string | null; name: string | null; category: string | null; sex: string; lot_id: string | null; lot_name: string | null }
+interface HistoryEvent { movement_id: string; moved_at: string; kind: 'ingreso' | 'salida' | 'rotacion' | 'movimiento'; animals: number; reason: string | null; actor: string | null; from_lot: string | null; to_lot: string | null; from_paddock: string | null; to_paddock: string | null }
 interface Detail extends Lot {
   current_paddock_id: string | null;
   head: number;
@@ -27,6 +28,8 @@ const PURPOSES: [string, string][] = [
 ];
 const PURPOSE_ES = Object.fromEntries(PURPOSES) as Record<string, string>;
 const SEX_ES: Record<string, string> = { F: 'Hembras', M: 'Machos' };
+const HIST_LABEL: Record<string, string> = { ingreso: 'Ingreso', salida: 'Salida', rotacion: 'Rotación de potrero', movimiento: 'Movimiento' };
+const HIST_TONE: Record<string, string> = { ingreso: 'bg-success', salida: 'bg-warning', rotacion: 'bg-info', movimiento: 'bg-ink-3' };
 
 export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock[] }) {
   const router = useRouter();
@@ -48,11 +51,17 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<AnimalRow[]>([]);
   const [addSel, setAddSel] = useState<Set<string>>(new Set());
+  // historial del lote
+  const [history, setHistory] = useState<HistoryEvent[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   async function call(method: string, path: string, body?: any): Promise<any | null> {
     setBusy(true); setError('');
     try {
-      const res = await fetch(`${API_URL}${path}`, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: body ? JSON.stringify(body) : undefined });
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() };
+      // Idempotencia: los movimientos llevan una clave por acción para no duplicar por doble clic/reintento.
+      if (method === 'POST' && (path.startsWith('/movements') || path.includes('/rotate'))) headers['Idempotency-Key'] = crypto.randomUUID();
+      const res = await fetch(`${API_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.title ?? json?.message?.title ?? `Error ${res.status}`);
       return json;
@@ -66,9 +75,9 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
     setSel(new Set());
   }
   async function open(id: string) {
-    setSelectedId(id); setMode('none'); setError(''); setAdding(false); setResults([]); setSearch('');
+    setSelectedId(id); setMode('none'); setError(''); setAdding(false); setResults([]); setSearch(''); setShowHistory(false);
     const d = await call('GET', `/lots/${id}`);
-    if (d) { setDetail(d); loadAnimals(id); }
+    if (d) { setDetail(d); loadAnimals(id); call('GET', `/lots/${id}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[])); }
   }
   function toggle(set: Set<string>, id: string): Set<string> {
     const next = new Set(set);
@@ -102,9 +111,15 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
     if (r) { setMode('none'); router.refresh(); open(r.id); }
   }
   async function saveEdit() {
-    if (!selectedId) return;
-    const r = await call('PUT', `/lots/${selectedId}`, { name, purpose: purpose || null, current_paddock_id: paddockId || null, is_active: active });
-    if (r) { setDetail(r); setMode('none'); router.refresh(); }
+    if (!selectedId || !detail) return;
+    const r = await call('PUT', `/lots/${selectedId}`, { name, purpose: purpose || null, is_active: active });
+    if (!r) return;
+    // Cambiar el potrero NO es editar un campo: es una ROTACIÓN del lote (los animales lo siguen).
+    if (paddockId && paddockId !== detail.current_paddock_id) {
+      const rot = await call('POST', `/lots/${selectedId}/rotate`, { paddock_id: paddockId });
+      if (!rot) return;
+    }
+    setMode('none'); router.refresh(); open(selectedId);
   }
   async function archive() {
     if (!selectedId) return;
@@ -165,10 +180,13 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
                 <option value="">Sin propósito</option>
                 {PURPOSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </Select>
-              <Select value={paddockId} onChange={(e) => setPaddockId(e.target.value)} aria-label="Potrero">
-                <option value="">Sin potrero</option>
-                {paddocks.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </Select>
+              <div>
+                <Select value={paddockId} onChange={(e) => setPaddockId(e.target.value)} aria-label="Potrero">
+                  <option value="">Sin potrero</option>
+                  {paddocks.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+                <p className="mt-1 text-caption text-ink-3">Cambiar el potrero rota el lote completo: los animales lo siguen y queda registrado.</p>
+              </div>
               <label className="flex items-center gap-2 text-body text-ink-2">
                 <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Activo
               </label>
@@ -271,6 +289,39 @@ export function LotsManager({ lots, paddocks }: { lots: Lot[]; paddocks: Paddock
                     </div>
                   )}
                 </>
+              )}
+            </div>
+
+            {/* Historial / timeline del lote (movimientos reales) */}
+            <div className="mt-5 border-t border-subtle pt-4">
+              <button onClick={() => setShowHistory((v) => !v)} className="mb-1.5 flex w-full items-center justify-between text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
+                <span>Historial ({history.length})</span>
+                <span className="text-brand">{showHistory ? 'Ocultar' : 'Ver'}</span>
+              </button>
+              {showHistory && (
+                history.length === 0 ? (
+                  <p className="text-body text-ink-3">Sin movimientos registrados.</p>
+                ) : (
+                  <ul className="max-h-64 space-y-2 overflow-y-auto">
+                    {history.map((h) => (
+                      <li key={h.movement_id} className="flex gap-2 text-label">
+                        <span className={`mt-1 size-2 shrink-0 rounded-full ${HIST_TONE[h.kind]}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-ink-1">
+                            {HIST_LABEL[h.kind]} · {h.animals} {h.animals === 1 ? 'animal' : 'animales'}
+                          </div>
+                          <div className="text-ink-3">
+                            {h.kind === 'rotacion' ? `${h.from_paddock ?? '—'} → ${h.to_paddock ?? '—'}`
+                              : h.kind === 'ingreso' ? `desde ${h.from_lot ?? h.from_paddock ?? 'sin lote'}`
+                              : h.kind === 'salida' ? `hacia ${h.to_lot ?? h.to_paddock ?? 'sin lote'}` : ''}
+                            {h.reason ? ` · ${h.reason}` : ''}
+                          </div>
+                          <div className="text-caption text-ink-3">{String(h.moved_at).slice(0, 10)}{h.actor ? ` · ${h.actor}` : ''}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )
               )}
             </div>
 

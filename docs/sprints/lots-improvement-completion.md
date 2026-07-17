@@ -58,11 +58,43 @@ CRUD parcial (solo listar + crear, web de solo lectura) a un gestor completo con
   en `animal_movements`** (prueba que reusa la regla única, no un UPDATE directo de `current_lot_id`).
 - Verificado en web: moví 2 animales (Rodeo Cría 2 10→8, Rodeo Cría 1 20→22) y agregué 1 de vuelta (8→9).
 
-## 6. Trabajo diferido
+## 5-ter. Consistencia de movimientos + trazabilidad (3ª entrega — rediseño a fondo, Etapa 1)
 
-- **Historial del lote** (movimientos, cambios de composición en el tiempo).
-- **Filtros** en la grilla (por propósito, por potrero, activos/todos).
-- **Mover TODO el lote** de un tiro (merge) como acción rápida.
+Sobre el pedido de convertir Lotes en una herramienta de gestión diaria. Etapa 1 = prioridad del
+usuario (consistencia de movimientos + trazabilidad):
+
+- **Rotación de potrero (regla #4):** `updateLot` **dejó de tocar `current_paddock_id`**. Cambiar el
+  potrero de un lote es una ROTACIÓN del lote completo: `POST /lots/:id/rotate` **reusa `land.moveLot`**
+  (el lote cambia de potrero y sus animales lo siguen vía `recordMovement`, con lock e historial). En la
+  web, el select de potrero del form de edición dispara la rotación, no una edición de campo.
+- **Guarda de negocio (regla #6):** no se mueven animales a un **lote archivado** (409 en `moveAnimals`).
+  Los animales muertos/vendidos/inactivos ya los filtra `recordMovement` (`status='active'`).
+- **Historial / timeline (prioridad #2):** `GET /lots/:id/history` arma el historial desde
+  `animal_movements` REALES, agrupado por `movement_id`: ingresos, salidas y rotaciones con fecha,
+  origen, destino, motivo, cantidad y **usuario**. UI: sección «Historial» plegable con timeline por tipo.
+- **Idempotencia (prioridad #4):** la UI manda `Idempotency-Key` en todo movimiento/rotación (el
+  endpoint la usa como `movement_id`; el índice único deduplica doble-clic/reintentos).
+- **Tests** (`lots-rotation-history`): rotación (lote y animales cambian de potrero + fila en
+  `animal_movements`), mover-a-archivado bloqueado (409), historial refleja la rotación (from/to, cantidad).
+
+Verificado en web: cambié Rodeo Cría 1 de Potrero Norte → Potrero Este (rotación, 20 animales lo
+siguieron) y el historial mostró «Rotación de potrero · 20 animales · Potrero Norte → Potrero Este ·
+Jose Montilla», además de ingresos/salidas previos.
+
+**Criterio clave respetado:** nunca se actualiza `current_lot_id`/`current_paddock_id` desde la UI ni
+por edición de campo; todo pasa por `recordMovement` (regla única, con transacción y trazabilidad).
+
+## 6. Trabajo diferido (etapas siguientes del rediseño)
+
+- **Etapa 2:** filtros (caravana/nombre/categoría/sexo/peso/edad/estado) + paginación de la lista de
+  animales del lote.
+- **Etapa 3:** acciones **dividir** lote, **fusionar** lotes y **mover TODO** el lote.
+- **Etapa 4:** **métricas por propósito** (engorde: conversión/costo/kg/terminación; cría: vientres/toros/
+  preñadas/vacías/crías; recría: peso inicial/actual/GDP/edad; hospital: motivo/días/tratamientos;
+  cuarentena: ingreso/liberación; tambo: producción/estado reproductivo).
+- **Etapa 5:** **alertas operativas** (sin potrero, sin pesaje reciente, sin identificación, mezcla
+  inusual de categorías, vacío) y estado del lote (activo/vacío/archivado/con alertas).
+- **Etapa 6:** UX — tabla compacta, orden por cabezas/propósito/potrero/peso/estado, export/print.
 
 ## 7. Estado del roadmap
 
