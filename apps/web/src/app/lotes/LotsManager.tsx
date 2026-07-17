@@ -60,6 +60,12 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
   // historial del lote
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  // acciones del lote: dividir / mover todo / fusionar
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [splitName, setSplitName] = useState('');
+  const [moveAllTarget, setMoveAllTarget] = useState('');
+  const [mergeTarget, setMergeTarget] = useState('');
+  const [confirmMerge, setConfirmMerge] = useState(false);
 
   async function call(method: string, path: string, body?: any): Promise<any | null> {
     setBusy(true); setError('');
@@ -102,6 +108,7 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
   async function open(id: string) {
     setSelectedId(id); setMode('none'); setError(''); setAdding(false); setResults([]); setSearch(''); setShowHistory(false);
     setFilters(EMPTY_FILTERS); setFiltersOpen(false);
+    setActionsOpen(false); setSplitName(''); setMoveAllTarget(''); setMergeTarget(''); setConfirmMerge(false);
     const d = await call('GET', `/lots/${id}`);
     if (d) { setDetail(d); loadAnimals(id, EMPTY_FILTERS, null); call('GET', `/lots/${id}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[])); }
   }
@@ -125,6 +132,31 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
     if (!selectedId || addSel.size === 0) return;
     const r = await call('POST', '/movements', { animal_ids: [...addSel], lot_id: selectedId, reason: 'ingreso al lote' });
     if (r) { setAdding(false); setAddSel(new Set()); setResults([]); setSearch(''); router.refresh(); const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d); loadAnimals(selectedId, filters, null); }
+  }
+  async function refreshDetail() {
+    if (!selectedId) return;
+    router.refresh();
+    const d = await call('GET', `/lots/${selectedId}`); if (d) setDetail(d);
+    loadAnimals(selectedId, filters, null);
+    call('GET', `/lots/${selectedId}/history`).then((h) => setHistory((h ?? []) as HistoryEvent[]));
+  }
+  /** Dividir: crea un lote nuevo con los animales seleccionados. */
+  async function doSplit() {
+    if (!selectedId || sel.size === 0 || !splitName.trim()) return;
+    const r = await call('POST', `/lots/${selectedId}/split`, { name: splitName, animal_ids: [...sel] });
+    if (r) { setSplitName(''); setActionsOpen(false); refreshDetail(); }
+  }
+  /** Mover todo el rodeo a otro lote. */
+  async function doMoveAll() {
+    if (!selectedId || !moveAllTarget) return;
+    const r = await call('POST', `/lots/${selectedId}/move-all`, { target_lot_id: moveAllTarget });
+    if (r) { setMoveAllTarget(''); setActionsOpen(false); refreshDetail(); }
+  }
+  /** Fusionar este lote en otro (mueve todo + archiva este). Requiere confirmación (acción destructiva). */
+  async function doMerge() {
+    if (!selectedId || !mergeTarget) return;
+    const r = await call('POST', `/lots/${selectedId}/merge`, { target_lot_id: mergeTarget });
+    if (r) { setSelectedId(null); setDetail(null); setConfirmMerge(false); setActionsOpen(false); router.refresh(); }
   }
   function startNew() { setMode('new'); setSelectedId(null); setDetail(null); setName(''); setPurpose(''); setError(''); }
   function startEdit() {
@@ -232,6 +264,7 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
                 <p className="mt-0.5 text-label text-ink-3">{PURPOSE_ES[detail.purpose ?? ''] ?? detail.purpose ?? 'sin propósito'} · {detail.paddock_name ?? 'sin potrero'}{detail.is_active ? '' : ' · archivado'}</p>
               </div>
               <div className="flex gap-1">
+                <Button size="sm" variant={actionsOpen ? 'primary' : 'secondary'} onClick={() => setActionsOpen((v) => !v)}>Acciones</Button>
                 <Button size="sm" variant="secondary" onClick={startEdit}>Editar</Button>
                 <Button size="sm" variant="secondary" onClick={archive} disabled={busy} aria-label="Archivar lote">✕</Button>
               </div>
@@ -242,6 +275,47 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
               <div className="rounded-md bg-sunken p-3"><div className="text-caption text-ink-3">Peso prom.</div><div className="tnum text-compat-22 font-semibold">{detail.avg_weight_kg ?? '—'}<span className="ml-0.5 text-caption font-normal text-ink-3">kg</span></div></div>
               <div className="rounded-md bg-sunken p-3"><div className="text-caption text-ink-3">GDP</div><div className="tnum text-compat-22 font-semibold">{detail.avg_gdp ?? '—'}</div></div>
             </div>
+
+            {/* Acciones del lote: dividir, mover todo, fusionar */}
+            {actionsOpen && (
+              <div className="mt-3 space-y-3 rounded-md border border-subtle bg-sunken p-3">
+                <div>
+                  <div className="mb-1 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Dividir en un lote nuevo</div>
+                  <div className="flex gap-1.5">
+                    <Input value={splitName} onChange={(e) => setSplitName(e.target.value)} placeholder="Nombre del lote nuevo" aria-label="Nombre del lote nuevo" />
+                    <Button size="sm" disabled={busy || sel.size === 0 || !splitName.trim()} onClick={doSplit} className="shrink-0">Dividir ({sel.size})</Button>
+                  </div>
+                  <p className="mt-1 text-caption text-ink-3">Marcá animales en la lista de abajo y creá un lote nuevo con ellos.</p>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Mover todo el rodeo</div>
+                  <div className="flex gap-1.5">
+                    <Select value={moveAllTarget} onChange={(e) => setMoveAllTarget(e.target.value)} aria-label="Mover todo a" controlSize="sm" fullWidth={false} className="min-w-0 flex-1">
+                      <option value="">Mover todo a…</option>
+                      {lots.filter((l) => l.id !== detail.id && l.is_active).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </Select>
+                    <Button size="sm" disabled={busy || !moveAllTarget} onClick={doMoveAll} className="shrink-0">Mover todo</Button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">Fusionar (archiva este lote)</div>
+                  <div className="flex gap-1.5">
+                    <Select value={mergeTarget} onChange={(e) => { setMergeTarget(e.target.value); setConfirmMerge(false); }} aria-label="Fusionar en" controlSize="sm" fullWidth={false} className="min-w-0 flex-1">
+                      <option value="">Fusionar en…</option>
+                      {lots.filter((l) => l.id !== detail.id && l.is_active).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </Select>
+                    {confirmMerge ? (
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={doMerge} className="shrink-0 border-danger text-danger">Confirmar</Button>
+                    ) : (
+                      <Button size="sm" variant="secondary" disabled={busy || !mergeTarget} onClick={() => setConfirmMerge(true)} className="shrink-0">Fusionar</Button>
+                    )}
+                  </div>
+                  {confirmMerge && <p className="mt-1 text-caption text-warning">Se moverán todos los animales al lote elegido y este lote se archivará.</p>}
+                </div>
+              </div>
+            )}
 
             {detail.head > 0 && (
               <>

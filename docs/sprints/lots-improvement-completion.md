@@ -98,9 +98,30 @@ por edición de campo; todo pasa por `recordMovement` (regla única, con transac
 - Verificado en web: en Rodeo Cría 1 (20), filtrar Sexo = Machos dejó 2 (los toros, con su peso), con el
   badge «Filtros (1)».
 
-## 6. Trabajo diferido (etapas siguientes del rediseño)
+## 5-quinquies. Dividir / fusionar / mover todo (5ª entrega — Etapa 3)
 
-- **Etapa 3:** acciones **dividir** lote, **fusionar** lotes y **mover TODO** el lote.
+Tres acciones de lote, todas **reusan `recordMovement`** (regla única, `animal_movements` + historial) en
+UNA transacción — sin update directo de `current_lot_id`. Idempotentes por `Idempotency-Key`. Viven en
+`LandService` (que ya orquesta movimientos y toca lotes en `moveLot`):
+
+- **`POST /lots/:id/move-all`** `{target_lot_id, reason}` — mueve TODOS los animales activos del lote a
+  otro (rodeo completo).
+- **`POST /lots/:id/merge`** `{target_lot_id, reason}` — mueve todos al destino y **archiva** el lote
+  origen (queda vacío) en la misma tx.
+- **`POST /lots/:id/split`** `{name, purpose, animal_ids, reason}` — **crea un lote nuevo** (valida con
+  `validateLotInput`) y mueve el subconjunto elegido; si el movimiento falla, el lote nuevo no queda
+  huérfano.
+- **Reglas de negocio:** no a lote archivado (409), no al mismo lote (400), split sin animales/ sin
+  nombre (400). Muertos/vendidos ya los filtra `recordMovement`. Fusión con **confirmación** en la UI.
+- **Web:** panel **«Acciones»** en el detalle: Dividir (usa la selección de la lista), Mover todo y
+  Fusionar (con confirmación inline y aviso de archivado).
+- **Test** (`lots-split-merge`): move-all (todos + historial), split (crea lote + mueve subconjunto),
+  merge (mueve + archiva origen), y las reglas (archivado/mismo/vacío).
+
+Verificado en web: dividí Rodeo Cría 2 (9 → 6) en un lote nuevo «Vaquillonas 2026» (3); luego lo fusioné
+de vuelta (Rodeo Cría 2 → 9) y «Vaquillonas 2026» quedó archivado (fuera de la grilla).
+
+## 6. Trabajo diferido (etapas siguientes del rediseño)
 - **Etapa 4:** **métricas por propósito** (engorde: conversión/costo/kg/terminación; cría: vientres/toros/
   preñadas/vacías/crías; recría: peso inicial/actual/GDP/edad; hospital: motivo/días/tratamientos;
   cuarentena: ingreso/liberación; tambo: producción/estado reproductivo).

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { InvalidPolygonError, polygonAreaHa, toPolygonGeoJSON } from '@cowinance/domain';
-import { DbService } from '../../db/db.service';
+import { InvalidLotError, InvalidPolygonError, polygonAreaHa, toPolygonGeoJSON, validateLotInput } from '@cowinance/domain';
+import { DbService, type Q } from '../../db/db.service';
 import { MovementService, type MovementIntent } from './movement.service';
 
 @Injectable()
@@ -211,5 +211,85 @@ export class LandService {
       }),
     );
     return { moved: res.moved, skipped: res.skipped, movement_id: movementId };
+  }
+
+  /** Verifica que el lote destino exista y esté activo (no archivado). Devuelve su nombre. */
+  private async assertActiveLot(q: Q, lotId: string): Promise<string> {
+    const l = await q.one<{ name: string }>(`SELECT name FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL AND is_active`, [lotId, this.db.tenant]);
+    if (!l) throw new ConflictException({ code: 'lot.archived_or_missing', title: 'El lote de destino está archivado o no existe' });
+    return l.name;
+  }
+
+  /**
+   * Mueve TODOS los animales activos de un lote a otro (rodeo completo). Reusa la regla única
+   * `recordMovement` en UNA tx — sin update directo de current_lot_id. `movementId` idempotente.
+   */
+  async moveAllAnimals(fromLotId: string, body: { target_lot_id?: string; reason?: string }, movementId: string) {
+    const target = body?.target_lot_id;
+    if (!target) throw new BadRequestException({ code: 'lot.no_target', title: 'target_lot_id es obligatorio' });
+    if (target === fromLotId) throw new BadRequestException({ code: 'lot.same', title: 'El lote de destino no puede ser el mismo' });
+    return this.db.tx(async (q) => {
+      const src = await q.one<{ id: string }>(`SELECT id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL FOR UPDATE`, [fromLotId, this.db.tenant]);
+      if (!src) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+      const to = await this.assertActiveLot(q, target);
+      const animals = await q.query<{ id: string }>(`SELECT id FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`, [fromLotId, this.db.tenant]);
+      if (!animals.length) throw new ConflictException({ code: 'lot.empty', title: 'El lote no tiene animales para mover' });
+      const res = await this.movement.recordMovement(q, {
+        animalIds: animals.map((a) => a.id), to: { lot: target }, reason: body.reason ?? 'mover lote completo',
+        actorUserId: this.db.user, origin: 'web', movementId, emitServerOrigin: true,
+      });
+      return { moved: res.moved, to };
+    });
+  }
+
+  /** Fusiona un lote en otro: mueve todos sus animales al destino y ARCHIVA el lote origen (queda vacío). */
+  async mergeLots(fromLotId: string, body: { target_lot_id?: string; reason?: string }, movementId: string) {
+    const target = body?.target_lot_id;
+    if (!target) throw new BadRequestException({ code: 'lot.no_target', title: 'target_lot_id es obligatorio' });
+    if (target === fromLotId) throw new BadRequestException({ code: 'lot.same', title: 'No se puede fusionar un lote consigo mismo' });
+    return this.db.tx(async (q) => {
+      const src = await q.one<{ id: string; name: string }>(`SELECT id, name FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL FOR UPDATE`, [fromLotId, this.db.tenant]);
+      if (!src) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+      const to = await this.assertActiveLot(q, target);
+      const animals = await q.query<{ id: string }>(`SELECT id FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`, [fromLotId, this.db.tenant]);
+      if (animals.length) {
+        await this.movement.recordMovement(q, {
+          animalIds: animals.map((a) => a.id), to: { lot: target }, reason: body.reason ?? `fusión con ${to}`,
+          actorUserId: this.db.user, origin: 'web', movementId, emitServerOrigin: true,
+        });
+      }
+      // El origen queda vacío → se archiva en la misma tx (consistente).
+      await q.query(`UPDATE lots SET is_active=false, deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2`, [fromLotId, this.db.tenant]);
+      return { merged: animals.length, from: src.name, into: to };
+    });
+  }
+
+  /**
+   * Divide un lote en dos: crea un lote nuevo y mueve los animales indicados (subconjunto del origen).
+   * Todo en UNA tx: si el movimiento falla, el lote nuevo no queda huérfano. Reusa recordMovement.
+   */
+  async splitLot(fromLotId: string, body: { name?: unknown; purpose?: unknown; animal_ids?: unknown; reason?: string }, movementId: string) {
+    let input;
+    try {
+      input = validateLotInput(body);
+    } catch (e) {
+      if (e instanceof InvalidLotError) throw new BadRequestException({ code: 'lot.invalid', title: e.reason });
+      throw e;
+    }
+    const animalIds = Array.isArray(body?.animal_ids) ? (body.animal_ids as string[]) : [];
+    if (!animalIds.length) throw new BadRequestException({ code: 'lot.no_animals', title: 'Elegí al menos un animal para el nuevo lote' });
+    return this.db.tx(async (q) => {
+      const src = await q.one<{ farm_id: string }>(`SELECT farm_id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [fromLotId, this.db.tenant]);
+      if (!src) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+      const newLot = await q.one<{ id: string; name: string }>(
+        `INSERT INTO lots (tenant_id, farm_id, name, purpose, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id, name`,
+        [this.db.tenant, src.farm_id, input.name, input.purpose, this.db.user],
+      );
+      const res = await this.movement.recordMovement(q, {
+        animalIds, to: { lot: newLot!.id }, reason: body.reason ?? 'división de lote',
+        actorUserId: this.db.user, origin: 'web', movementId, emitServerOrigin: true,
+      });
+      return { new_lot_id: newLot!.id, name: newLot!.name, moved: res.moved };
+    });
   }
 }

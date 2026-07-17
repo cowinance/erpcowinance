@@ -39,6 +39,24 @@ export class LandController {
     return this.land.moveLot(body?.paddock_id ?? '', { lot_id: id });
   }
 
+  /** Mover TODO el lote a otro lote. Idempotente por Idempotency-Key. */
+  @Post('lots/:id/move-all')
+  moveAll(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.land.moveAllAnimals(id, body, key && UUID_RE.test(key) ? key : randomUUID());
+  }
+
+  /** Fusionar este lote en otro (mueve todo + archiva este). */
+  @Post('lots/:id/merge')
+  merge(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.land.mergeLots(id, body, key && UUID_RE.test(key) ? key : randomUUID());
+  }
+
+  /** Dividir el lote: crea un lote nuevo con los animales indicados. */
+  @Post('lots/:id/split')
+  split(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.land.splitLot(id, body, key && UUID_RE.test(key) ? key : randomUUID());
+  }
+
   /**
    * Movimiento individual/grupal (P3 M-1.d). El `Idempotency-Key` (uuid) del cliente,
    * si viene y es válido, se usa como `movementId` (deduplica un doble-submit
