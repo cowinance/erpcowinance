@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { CatalogsService } from './catalogs.service';
 
 /** Configuración (A3): catálogos maestros. Lectura global + extensión por tenant de razas y diagnósticos. */
@@ -9,6 +9,15 @@ export class ConfigController {
   @Get('catalogs')
   all() {
     return this.catalogs.catalogs();
+  }
+
+  @Get('currency')
+  currency() {
+    return this.catalogs.currencySettings();
+  }
+  @Put('currency')
+  setCurrency(@Body() body: any) {
+    return this.catalogs.setCurrency(body);
   }
 
   @Post('breeds')

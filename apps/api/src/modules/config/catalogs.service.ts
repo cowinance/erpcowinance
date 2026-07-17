@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvalidCatalogEntryError, validateBreedInput, validateDiagnosisInput } from '@cowinance/domain';
+import { InvalidCatalogEntryError, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -83,6 +83,32 @@ export class CatalogsService {
     );
     if (res.length === 0) throw new NotFoundException({ code: 'config.diagnosis_not_deletable', title: 'El diagnóstico no existe o es del catálogo base (no editable)' });
     return { id, deleted: true };
+  }
+
+  /**
+   * Moneda operativa de la finca: la de la organización (default_currency) + la funcional de cada
+   * empresa (functional_currency), más el catálogo de monedas disponible. Los documentos ya emitidos
+   * conservan la moneda con la que se registraron; este ajuste es hacia adelante.
+   */
+  async currencySettings() {
+    const t = this.db.tenant;
+    const [org, companies, currencies] = await Promise.all([
+      this.db.one<{ default_currency: string }>(`SELECT default_currency FROM organizations WHERE id=$1`, [t]),
+      this.db.query(`SELECT id, name, functional_currency FROM companies WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_at`, [t]),
+      this.db.query(`SELECT code, name, symbol FROM currencies ORDER BY code`),
+    ]);
+    return { default_currency: org?.default_currency ?? null, companies, currencies };
+  }
+
+  /** Cambia la moneda operativa (organización + todas sus empresas) a un código del catálogo. */
+  async setCurrency(body: { code?: unknown }) {
+    const code = this.validate(() => normalizeCurrencyCode(body?.code));
+    const exists = await this.db.one<{ code: string }>(`SELECT code FROM currencies WHERE code=$1`, [code]);
+    if (!exists) throw new BadRequestException({ code: 'config.currency_unknown', title: `La moneda ${code} no está en el catálogo` });
+    const t = this.db.tenant;
+    await this.db.query(`UPDATE organizations SET default_currency=$1, updated_at=now() WHERE id=$2`, [code, t]);
+    await this.db.query(`UPDATE companies SET functional_currency=$1, updated_at=now() WHERE tenant_id=$2 AND deleted_at IS NULL`, [code, t]);
+    return this.currencySettings();
   }
 
   /** Ejecuta una validación de dominio y traduce su error a 400. */

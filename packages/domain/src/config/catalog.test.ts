@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidCatalogEntryError, assertBreedPurpose, normalizeCatalogCode, validateBreedInput, validateDiagnosisInput } from './catalog';
+import { InvalidCatalogEntryError, assertBreedPurpose, normalizeCatalogCode, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from './catalog';
+
+describe('normalizeCurrencyCode', () => {
+  it('normaliza a mayúsculas y exige 3 letras ISO 4217', () => {
+    expect(normalizeCurrencyCode('usd')).toBe('USD');
+    expect(normalizeCurrencyCode(' ars ')).toBe('ARS');
+    expect(() => normalizeCurrencyCode('US')).toThrow(InvalidCatalogEntryError);
+    expect(() => normalizeCurrencyCode('US1')).toThrow(InvalidCatalogEntryError);
+    expect(() => normalizeCurrencyCode('')).toThrow(InvalidCatalogEntryError);
+  });
+});
 
 describe('normalizeCatalogCode', () => {
   it('recorta y exige no vacío', () => {

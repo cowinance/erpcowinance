@@ -14,14 +14,16 @@ interface Category { id: string; code: string; name: string; sex: string | null;
 interface Unit { code: string; name: string; dimension: string; si_factor: number }
 interface Diagnosis { id: string; code: string; name: string; category: string | null; is_notifiable: boolean; editable: boolean }
 interface Catalogs { species: Species[]; breeds: Breed[]; categories: Category[]; units: Unit[]; diagnoses: Diagnosis[] }
+interface Currency { code: string; name: string; symbol: string }
+interface CurrencySettings { default_currency: string | null; companies: { id: string; name: string; functional_currency: string }[]; currencies: Currency[] }
 
 const PURPOSES: [string, string][] = [['beef', 'Carne'], ['dairy', 'Leche'], ['dual', 'Doble'], ['wool', 'Lana'], ['work', 'Trabajo']];
 const PURPOSE_ES = Object.fromEntries(PURPOSES) as Record<string, string>;
-const TABS = ['Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
+const TABS = ['Moneda', 'Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
 
-export function ConfigView({ catalogs }: { catalogs: Catalogs }) {
+export function ConfigView({ catalogs, currency }: { catalogs: Catalogs; currency: CurrencySettings | null }) {
   const router = useRouter();
-  const [tab, setTab] = useState<(typeof TABS)[number]>('Razas');
+  const [tab, setTab] = useState<(typeof TABS)[number]>('Moneda');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -61,6 +63,7 @@ export function ConfigView({ catalogs }: { catalogs: Catalogs }) {
 
       {error && <p role="alert" className="text-label text-danger">{error}</p>}
 
+      {tab === 'Moneda' && <CurrencyTab currency={currency} busy={busy} call={call} />}
       {tab === 'Razas' && <BreedsTab catalogs={catalogs} busy={busy} call={call} />}
       {tab === 'Diagnósticos' && <DiagnosesTab diagnoses={catalogs.diagnoses} busy={busy} call={call} />}
       {tab === 'Categorías' && <CategoriesTab categories={catalogs.categories} />}
@@ -71,6 +74,45 @@ export function ConfigView({ catalogs }: { catalogs: Catalogs }) {
 }
 
 type Call = (method: string, path: string, data?: any) => Promise<boolean>;
+
+function CurrencyTab({ currency, busy, call }: { currency: CurrencySettings | null; busy: boolean; call: Call }) {
+  const [code, setCode] = useState(currency?.default_currency ?? '');
+  if (!currency) return <Card><p className="py-3 text-center text-label text-ink-3">No se pudo cargar la configuración de moneda.</p></Card>;
+  const current = currency.currencies.find((c) => c.code === currency.default_currency);
+  const changed = code !== currency.default_currency;
+
+  return (
+    <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
+      <Card className="self-start">
+        <CardTitle>Moneda de la finca</CardTitle>
+        <p className="mb-3 text-label text-ink-3">
+          Moneda operativa actual: <span className="font-medium text-ink-1">{current ? `${current.name} (${current.code})` : currency.default_currency ?? '—'}</span>
+        </p>
+        <div className="space-y-2">
+          <Select value={code} onChange={(e) => setCode(e.target.value)} aria-label="Moneda">
+            {currency.currencies.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
+          </Select>
+          <Button size="sm" fullWidth loading={busy} disabled={busy || !changed} onClick={() => call('PUT', '/config/currency', { code })}>
+            Guardar moneda
+          </Button>
+          <p className="text-caption text-ink-3">Aplica a la organización y a sus empresas. Los documentos ya emitidos conservan su moneda original.</p>
+        </div>
+      </Card>
+
+      <Card className="col-span-2 self-start max-lg:col-span-3">
+        <CardTitle>Empresas</CardTitle>
+        <ul className="divide-y divide-subtle">
+          {currency.companies.map((c) => (
+            <li key={c.id} className="flex items-center justify-between py-2 text-body">
+              <span className="font-medium">{c.name}</span>
+              <span className="tnum text-label text-ink-3">{c.functional_currency}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
 
 function BaseBadge({ editable }: { editable: boolean }) {
   return editable ? <span className="rounded bg-brand-soft px-1.5 py-0.5 text-caption text-brand">Propia</span> : <span className="rounded bg-sunken px-1.5 py-0.5 text-caption text-ink-3">Base</span>;

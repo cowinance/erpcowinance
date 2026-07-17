@@ -4,7 +4,7 @@ import { ConfigView } from './ConfigView';
 
 /** Configuración (A3): catálogos maestros. Lectura de globales + extensión por tenant de razas y diagnósticos. */
 export default async function ConfiguracionPage() {
-  const catalogs = await apiSafe<any>('/config/catalogs');
+  const [catalogs, currency] = await Promise.all([apiSafe<any>('/config/catalogs'), apiSafe<any>('/config/currency')]);
   if (catalogs === null) {
     return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
   }
@@ -12,9 +12,9 @@ export default async function ConfiguracionPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Configuración</h1>
-        <p className="mt-0.5 text-body text-ink-3">Catálogos maestros. Podés extender razas y diagnósticos con entradas propias de tu finca.</p>
+        <p className="mt-0.5 text-body text-ink-3">Moneda de la finca y catálogos maestros. Podés extender razas y diagnósticos con entradas propias.</p>
       </div>
-      <ConfigView catalogs={catalogs} />
+      <ConfigView catalogs={catalogs} currency={currency} />
     </div>
   );
 }

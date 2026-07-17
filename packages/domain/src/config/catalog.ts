@@ -21,6 +21,13 @@ export function normalizeCatalogCode(code: unknown): string {
   return c;
 }
 
+/** Código de moneda ISO 4217: 3 letras. Normaliza a mayúsculas; la existencia en el catálogo la valida el servicio. */
+export function normalizeCurrencyCode(code: unknown): string {
+  const c = String(code ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(c)) throw new InvalidCatalogEntryError('Código de moneda inválido (ISO 4217, 3 letras)');
+  return c;
+}
+
 export function normalizeCatalogName(name: unknown): string {
   const n = String(name ?? '').trim();
   if (!n) throw new InvalidCatalogEntryError('El nombre es obligatorio');

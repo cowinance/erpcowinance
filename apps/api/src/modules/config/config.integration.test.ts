@@ -77,4 +77,23 @@ describe('config — catálogos maestros', () => {
     const cat: any = await svc.catalogs();
     expect(cat.diagnoses.some((x: any) => x.id === d.id)).toBe(false);
   });
+
+  it('cambia la moneda operativa (organización + empresas) a un código del catálogo', async () => {
+    const before: any = await svc.currencySettings();
+    expect(before.default_currency).toBe('ARS'); // demo argentino
+    expect(before.currencies.some((c: any) => c.code === 'USD')).toBe(true);
+
+    const after: any = await svc.setCurrency({ code: 'usd' }); // normaliza a mayúsculas
+    expect(after.default_currency).toBe('USD');
+    expect(after.companies.every((c: any) => c.functional_currency === 'USD')).toBe(true);
+
+    // Persistió en la organización.
+    const [org] = await db.query<{ default_currency: string }>(`SELECT default_currency FROM organizations WHERE id=$1`, [db.tenant]);
+    expect(org.default_currency).toBe('USD');
+  });
+
+  it('rechaza moneda con formato inválido (400) y código desconocido (400)', async () => {
+    await expect(svc.setCurrency({ code: 'US' })).rejects.toMatchObject({ status: 400 }); // formato
+    await expect(svc.setCurrency({ code: 'XYZ' })).rejects.toMatchObject({ status: 400 }); // no está en el catálogo
+  });
 });

@@ -61,9 +61,23 @@ Los catálogos tienen dos modelos distintos en el esquema:
 - **Categorías zootécnicas por tenant:** requeriría agregar `tenant_id` a `animal_categories`.
 - **Feature flags, parámetros de negocio (system_settings), motor de reglas** — otras partes de A3.
 
+## 6-bis. Moneda de la finca (2ª entrega)
+
+- **Pestaña «Moneda»** en `/configuracion`: muestra la moneda operativa actual y permite cambiarla a
+  cualquier código del catálogo `currencies` (ARS, USD, UYU, MXN, COP, BRL — ya sembrados).
+- **API** `GET /config/currency` (org + empresas + catálogo) y `PUT /config/currency` (cambia
+  `organizations.default_currency` y `companies.functional_currency` del tenant).
+- **Regla única (dominio):** `normalizeCurrencyCode` (ISO 4217, 3 letras, mayúsculas). Código fuera del
+  catálogo → 400.
+- **Decisión:** la moneda es hacia adelante — los documentos ya emitidos (payments/invoices) conservan
+  su `currency` registrada; solo cambian los defaults para lo nuevo.
+- **Aplicado:** el tenant demo se pasó de **ARS → USD** (verificado en la web: organización y empresa
+  «La Esperanza S.A.» muestran USD). El seed de fábrica sigue naciendo en ARS/AR; esta pantalla es la
+  vía para operar en USD.
+
 ## 7. Estado del roadmap
 
-**Configuración · Catálogos maestros → 1ª entrega COMPLETA.** El módulo dejó de ser placeholder.
+**Configuración · Catálogos maestros + Moneda → COMPLETAS.** El módulo dejó de ser placeholder.
 
 **Siguiente en A3 (a elección):** monedas y tipos de cambio (desbloquea multi-moneda de Tesorería),
 feature flags por tenant, o parámetros de negocio. También pendiente el hardening de RLS de los
