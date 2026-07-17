@@ -36,6 +36,7 @@ export interface RecordMortalityInput {
   diedAt?: string;
   necropsy?: boolean;
   estimatedLoss?: number | null;
+  causeDiagnosisId?: string | null;
   notes?: string | null;
   actorUserId: string;
   origin: MortalityOrigin;
@@ -102,10 +103,10 @@ export class MortalityService {
 
     // (1) hecho: fila mortalities con id determinista = mortalityId. animal_id UNIQUE.
     await q.query(
-      `INSERT INTO mortalities (id, tenant_id, animal_id, died_at, necropsy, estimated_loss, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO mortalities (id, tenant_id, animal_id, died_at, cause_diagnosis_id, necropsy, estimated_loss, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (animal_id) DO NOTHING`,
-      [input.mortalityId, t, input.animalId, diedAt, input.necropsy ?? false, input.estimatedLoss ?? null, input.notes ?? null, input.actorUserId],
+      [input.mortalityId, t, input.animalId, diedAt, input.causeDiagnosisId ?? null, input.necropsy ?? false, input.estimatedLoss ?? null, input.notes ?? null, input.actorUserId],
     );
 
     // (2) estado: status='dead' + status_changed_at.

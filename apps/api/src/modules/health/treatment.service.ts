@@ -102,13 +102,13 @@ export class TreatmentService {
     );
     const withdrawalMismatch = this.detectMismatch(input, meatWithdrawalUntil, milkWithdrawalUntil);
 
-    // (1) hecho: fila treatments con id determinista = treatmentId.
+    // (1) hecho: fila treatments con id determinista = treatmentId. Puede vincularse a un caso clínico.
     await q.query(
-      `INSERT INTO treatments (id, tenant_id, animal_id, diagnosis_id, product_id, applied_at, dose, dose_unit, route,
+      `INSERT INTO treatments (id, tenant_id, animal_id, diagnosis_id, clinical_case_id, product_id, applied_at, dose, dose_unit, route,
                                meat_withdrawal_until, milk_withdrawal_until, applied_by, cost, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (id) DO NOTHING`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (id) DO NOTHING`,
       [
-        input.treatmentId, t, input.animalId, input.diagnosisId ?? null, input.productId, appliedAt.toISOString(),
+        input.treatmentId, t, input.animalId, input.diagnosisId ?? null, input.clinicalCaseId ?? null, input.productId, appliedAt.toISOString(),
         input.dose ?? null, input.doseUnit ?? null, input.route ?? null, meatWithdrawalUntil, milkWithdrawalUntil,
         input.actorUserId, input.cost ?? null, input.notes ?? null, input.actorUserId,
       ],

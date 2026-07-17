@@ -91,8 +91,8 @@ export class HealthService {
         this.treatments.recordTreatment(q, {
           animalId: body.animal_id, productId: body.product_id, appliedAt: body.applied_at, dose: body.dose ?? null,
           doseUnit: body.dose_unit ?? null, route: body.route ?? null, diagnosisId: body.diagnosis_id ?? null,
-          cost: body.cost ?? null, notes: body.notes ?? null, actorUserId: this.db.user, origin: 'rest',
-          treatmentId: idempotencyKey ?? randomUUID(),
+          clinicalCaseId: body.clinical_case_id ?? null, cost: body.cost ?? null, notes: body.notes ?? null,
+          actorUserId: this.db.user, origin: 'rest', treatmentId: idempotencyKey ?? randomUUID(),
         }),
       );
     } catch (e) {
@@ -106,19 +106,20 @@ export class HealthService {
     return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
   }
 
-  /** Diagnóstico / evento clínico. */
+  /** Diagnóstico / evento clínico — con diagnóstico estructurado del catálogo y caso opcional. */
   async healthEvent(body: any) {
     if (!body?.animal_id)
       throw new BadRequestException({ code: 'health_event.missing_fields', title: 'animal_id es obligatorio' });
     const animal = await requireAnimal(this.db, body.animal_id);
     if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
+    if (body.diagnosis_id) await this.requireDiagnosis(body.diagnosis_id);
     const occurredAt = body.occurred_at ?? new Date().toISOString();
     const row = await this.db.one<any>(
-      `INSERT INTO health_events (tenant_id, animal_id, occurred_at, severity, outcome, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, occurred_at, severity, outcome`,
-      [this.db.tenant, body.animal_id, occurredAt, body.severity ?? null, body.outcome ?? 'ongoing', body.notes ?? null, this.db.user],
+      `INSERT INTO health_events (tenant_id, animal_id, diagnosis_id, clinical_case_id, occurred_at, severity, outcome, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, occurred_at, severity, outcome, diagnosis_id`,
+      [this.db.tenant, body.animal_id, body.diagnosis_id ?? null, body.clinical_case_id ?? null, occurredAt, body.severity ?? null, body.outcome ?? 'ongoing', body.notes ?? null, this.db.user],
     );
-    await insertAnimalEvent(this.db, body.animal_id, 'diagnosis', { severity: body.severity, outcome: body.outcome, notes: body.notes }, occurredAt);
+    await insertAnimalEvent(this.db, body.animal_id, 'diagnosis', { diagnosis_id: body.diagnosis_id ?? null, severity: body.severity, outcome: body.outcome, notes: body.notes }, occurredAt);
     return { ...row, tag: animal.tag };
   }
 
@@ -131,12 +132,14 @@ export class HealthService {
   async mortality(body: any) {
     if (!body?.animal_id)
       throw new BadRequestException({ code: 'mortality.missing_fields', title: 'animal_id es obligatorio' });
+    if (body.cause_diagnosis_id) await this.requireDiagnosis(body.cause_diagnosis_id);
     const res = await this.db.tx((q) =>
       this.mortalities.recordMortality(q, {
         animalId: body.animal_id,
         diedAt: body.died_at,
         necropsy: body.necropsy ?? false,
         estimatedLoss: body.estimated_loss ?? null,
+        causeDiagnosisId: body.cause_diagnosis_id ?? null,
         notes: body.notes ?? null,
         actorUserId: this.db.user,
         origin: 'rest',
@@ -145,6 +148,16 @@ export class HealthService {
       }),
     );
     return { id: res.mortalityId, died_at: res.diedAt, tag: res.tag };
+  }
+
+  /** Valida que el diagnóstico pertenezca al catálogo (global o del tenant). */
+  private async requireDiagnosis(id: string) {
+    const d = await this.db.one<{ id: string }>(
+      `SELECT id FROM diagnoses WHERE id = $1 AND (tenant_id IS NULL OR tenant_id = $2) AND deleted_at IS NULL`,
+      [id, this.db.tenant],
+    );
+    if (!d) throw new BadRequestException({ code: 'diagnosis.invalid', title: 'Diagnóstico inválido' });
+    return d;
   }
 
   async withdrawals() {

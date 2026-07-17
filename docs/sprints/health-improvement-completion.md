@@ -60,6 +60,49 @@ Idempotency-Key**). Los tests de mortalidad siguen verdes (no se tocó su regla)
 **Métricas:** **686 tests** (676 → +10), 0 ciclos de dependencia (madge). Verificado en web: POST
 `/vaccinations` y POST `/treatments` → 201; la página de Sanidad (KPIs, retiros) sigue operativa.
 
+---
+
+## Etapa 2 — Casos clínicos + diagnósticos estructurados ✅
+
+**Esquema (tablas/columnas nuevas + RLS):**
+- `clinical_cases` (animal, diagnóstico, estado, severidad, inicio, cierre, resultado, notas) y
+  `clinical_case_events` (timeline del caso: apertura, notas, cambios de estado, cierre). Ambas en
+  `RLS_TABLES`.
+- `clinical_case_id` agregado a `treatments` y `health_events` (vinculan al caso sin duplicar el caso
+  en cada fila).
+
+**Máquina de estados (regla pura, `packages/domain/src/health/clinical-case.ts`):** estados
+`open / in_treatment / observation / recovered / referred / died / closed`; `closed` terminal,
+`died` sólo cierra; `assertCaseTransition` valida las transiciones; `assertCaseStatus/Severity/Outcome`
+validan contra el catálogo. `OPEN_CASE_STATUSES` define «caso abierto» para KPIs.
+
+**`ClinicalCaseService`:**
+- `create` (idempotente por `Idempotency-Key`) → fila + evento `opened` + timeline del animal.
+- `list` con filtros (estado open/all/específico, animal, lote, diagnóstico); expone diagnóstico +
+  categoría + `is_notifiable` + lote + conteo de tratamientos.
+- `get` → cabecera + **timeline COMPUESTO** (eventos del caso + `treatments` y `health_events` que
+  apuntan al caso, sin duplicar).
+- `addFollowUp` (nota y/o cambio de estado, valida la transición → 409 si es inválida).
+- `close` (transición a `closed` + `outcome` + `closed_at`).
+
+**Diagnósticos estructurados en los flujos existentes:**
+- `treat()` vincula `clinical_case_id`; `TreatmentService` persiste la FK.
+- `healthEvent()` ahora setea `diagnosis_id` (antes lo ignoraba) y `clinical_case_id`.
+- `mortality()` + `MortalityService` setean `cause_diagnosis_id` (antes lo ignoraban).
+- Todos validan que el diagnóstico pertenezca al catálogo (global o del tenant).
+- **Seed de catálogo base** (`bootstrapCatalogs`): 12 diagnósticos globales (`tenant_id NULL`), 4
+  marcados notificables (Brucelosis, Carbunclo, Tuberculosis, Fiebre aftosa — denuncia SENASA).
+
+**Web:** selector de diagnóstico (con categoría + «⚠ notificable») en las capturas de Tratamiento /
+Diagnóstico / Mortalidad; panel **Casos clínicos** (`ClinicalCasesPanel`) con filtro (abiertos/todos/
+cerrados), alta de caso, lista con badge de estado, y detalle con timeline compuesto + seguimientos +
+cambio de estado + cierre. (La UI de control completa es la Etapa 3.)
+
+**Tests (9 nuevos):** dominio de la máquina de estados (4) + `ClinicalCaseService.integration` (ciclo
+de vida, transición inválida → 409, idempotencia, diagnóstico en mortalidad). **695 tests** (686 → +9),
+0 ciclos. Verificado en web: catálogo de 12 diagnósticos en el selector; caso creado → seguimiento →
+transición `in_treatment` → timeline `[opened, status_change]` end-to-end.
+
 ### Siguiente
-**Etapa 2 — Casos clínicos + diagnósticos estructurados** (tabla `clinical_cases` + RLS,
-`treatments/health_events.clinical_case_id`, catálogo de diagnósticos en los flujos, timeline del caso).
+**Etapa 3 — UI de control**: panel sanitario con KPIs ampliados, animales críticos, vista por lote,
+accesos rápidos, y vistas con búsqueda/filtros (no solo captura).

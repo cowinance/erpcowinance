@@ -106,6 +106,25 @@ export async function bootstrapCatalogs(db: PGlite) {
     [bovine],
   );
 
+  // ── Diagnósticos base (tenant_id NULL: catálogo global; cada finca puede extenderlo) ──
+  // Se marcan como notificables las de denuncia obligatoria en Argentina (SENASA).
+  await q(
+    `INSERT INTO diagnoses (tenant_id, code, name, category, is_notifiable) VALUES
+     (NULL,'neumonia','Neumonía','respiratoria',false),
+     (NULL,'diarrea_neonatal','Diarrea neonatal','digestiva',false),
+     (NULL,'timpanismo','Timpanismo','digestiva',false),
+     (NULL,'mastitis','Mastitis','mamaria',false),
+     (NULL,'queratoconjuntivitis','Queratoconjuntivitis','ocular',false),
+     (NULL,'pietin','Pietín','podal',false),
+     (NULL,'carbunclo','Carbunclo bacteridiano','infecciosa',true),
+     (NULL,'brucelosis','Brucelosis','reproductiva',true),
+     (NULL,'tuberculosis','Tuberculosis bovina','infecciosa',true),
+     (NULL,'fiebre_aftosa','Fiebre aftosa','viral',true),
+     (NULL,'parasitosis','Parasitosis gastrointestinal','parasitaria',false),
+     (NULL,'intoxicacion','Intoxicación','toxica',false)
+     ON CONFLICT (tenant_id, code) DO NOTHING`,
+  );
+
   // ── Roles de sistema (tenant_id NULL): base de RBAC para toda finca ────
   await q(
     `INSERT INTO roles (tenant_id, code, name, is_system) VALUES

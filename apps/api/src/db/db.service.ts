@@ -412,6 +412,9 @@ export class DbService implements OnModuleInit {
     'lots',
     'paddocks',
     'products_veterinary',
+    // Sanidad E2: casos clínicos + su timeline.
+    'clinical_cases',
+    'clinical_case_events',
     'alerts',
     'alert_rules',
     'notifications',

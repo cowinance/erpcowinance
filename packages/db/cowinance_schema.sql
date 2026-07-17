@@ -716,6 +716,7 @@ CREATE TABLE "treatments" (
   "tenant_id" uuid NOT NULL,
   "animal_id" uuid NOT NULL,
   "diagnosis_id" uuid,
+  "clinical_case_id" uuid,
   "product_id" uuid,
   "applied_at" timestamptz NOT NULL,
   "dose" numeric(14,3),
@@ -740,6 +741,7 @@ CREATE TABLE "health_events" (
   "tenant_id" uuid NOT NULL,
   "animal_id" uuid NOT NULL,
   "diagnosis_id" uuid,
+  "clinical_case_id" uuid,
   "occurred_at" timestamptz NOT NULL,
   "severity" varchar(255) CHECK ("severity" IN ('mild','moderate','severe')),
   "outcome" varchar(255) CHECK ("outcome" IN ('recovered','ongoing','referred','died')),
@@ -786,6 +788,45 @@ CREATE TABLE "mortalities" (
   PRIMARY KEY ("id")
 );
 CREATE INDEX "ix_mortalities_tenant_id" ON "mortalities" ("tenant_id");
+
+-- Casos clínicos (Sanidad E2): agrupan diagnóstico + severidad + tratamientos + seguimientos
+-- de un episodio sanitario de UN animal, con una máquina de estados y un timeline propio.
+CREATE TABLE "clinical_cases" (
+  "id" uuid DEFAULT gen_random_uuid(),
+  "tenant_id" uuid NOT NULL,
+  "animal_id" uuid NOT NULL,
+  "diagnosis_id" uuid,
+  "status" varchar(255) DEFAULT 'open' NOT NULL CHECK ("status" IN ('open','in_treatment','observation','recovered','referred','died','closed')),
+  "severity" varchar(255) CHECK ("severity" IN ('mild','moderate','severe')),
+  "started_at" timestamptz NOT NULL,
+  "closed_at" timestamptz,
+  "outcome" varchar(255) CHECK ("outcome" IN ('recovered','referred','died','culled','other')),
+  "notes" text,
+  "created_at" timestamptz DEFAULT now() NOT NULL,
+  "updated_at" timestamptz DEFAULT now() NOT NULL,
+  "created_by" uuid,
+  "deleted_at" timestamptz,
+  PRIMARY KEY ("id")
+);
+CREATE INDEX "ix_clinical_cases_tenant_id" ON "clinical_cases" ("tenant_id");
+CREATE INDEX "ix_clinical_cases_animal_id" ON "clinical_cases" ("animal_id");
+
+-- Eventos del caso clínico: seguimientos, cambios de estado y enlaces (timeline del caso).
+CREATE TABLE "clinical_case_events" (
+  "id" uuid DEFAULT gen_random_uuid(),
+  "tenant_id" uuid NOT NULL,
+  "case_id" uuid NOT NULL,
+  "kind" varchar(255) NOT NULL CHECK ("kind" IN ('opened','note','status_change','treatment','closed')),
+  "status" varchar(255),
+  "note" text,
+  "ref_id" uuid,
+  "occurred_at" timestamptz NOT NULL,
+  "created_at" timestamptz DEFAULT now() NOT NULL,
+  "created_by" uuid,
+  PRIMARY KEY ("id")
+);
+CREATE INDEX "ix_clinical_case_events_tenant_id" ON "clinical_case_events" ("tenant_id");
+CREATE INDEX "ix_clinical_case_events_case_id" ON "clinical_case_events" ("case_id");
 
 -- ============================================================================
 -- MÓDULO: Producción

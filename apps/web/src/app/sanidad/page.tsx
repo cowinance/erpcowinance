@@ -5,17 +5,20 @@ import { formatDate } from '@/lib/format';
 import { SanidadCapture } from './SanidadCapture';
 import { HealthPlansPanel } from './HealthPlansPanel';
 import { MedicationsPanel } from './MedicationsPanel';
+import { ClinicalCasesPanel } from './ClinicalCasesPanel';
 import { Clock, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
-  const [kpis, withdrawals, upcoming, products, lots, categories] = await Promise.all([
+  const [kpis, withdrawals, upcoming, products, lots, categories, catalogs] = await Promise.all([
     apiSafe<any>('/health/kpis'),
     apiSafe<any[]>('/health/withdrawals'),
     apiSafe<any[]>('/health/upcoming-vaccinations?days=60'),
     apiSafe<any[]>('/products-veterinary'),
     apiSafe<any[]>('/lots'),
     apiSafe<any[]>('/catalogs/categories'),
+    apiSafe<any>('/config/catalogs'),
   ]);
+  const diagnoses = catalogs?.diagnoses ?? [];
   if (!kpis) return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
 
   return (
@@ -116,9 +119,11 @@ export default async function SanidadPage() {
 
         <Card className="col-span-2 self-start max-lg:col-span-3">
           <CardTitle>Captura rápida</CardTitle>
-          <SanidadCapture products={products ?? []} />
+          <SanidadCapture products={products ?? []} diagnoses={diagnoses} />
         </Card>
       </div>
+
+      <ClinicalCasesPanel diagnoses={diagnoses} />
 
       <MedicationsPanel products={products ?? []} />
 

@@ -10,7 +10,7 @@ import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
-export function SanidadCapture({ products }: { products: any[] }) {
+export function SanidadCapture({ products, diagnoses = [] }: { products: any[]; diagnoses?: any[] }) {
   const router = useRouter();
   const [tab, setTab] = useState('Vacunación');
   const [animal, setAnimal] = useState<PickedAnimal | null>(null);
@@ -20,6 +20,21 @@ export function SanidadCapture({ products }: { products: any[] }) {
 
   const vaccines = products.filter((p) => p.type === 'vaccine');
   const drugs = products.filter((p) => p.type !== 'vaccine');
+
+  const DiagnosisPicker = ({ label }: { label: string }) => (
+    <Field label={label} htmlFor="diagnosis_id">
+      <Select id="diagnosis_id" name="diagnosis_id" controlSize="md" defaultValue="">
+        <option value="">Sin diagnóstico</option>
+        {diagnoses.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+            {d.category ? ` · ${d.category}` : ''}
+            {d.is_notifiable ? ' · ⚠ notificable' : ''}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
 
   function changeTab(t: string) {
     setTab(t);
@@ -92,6 +107,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
           dose: fd.get('dose') ? Number(fd.get('dose')) : undefined,
           dose_unit: 'ml',
           route: fd.get('route') || undefined,
+          diagnosis_id: fd.get('diagnosis_id') || undefined,
           notes: fd.get('notes') || undefined,
         },
         (r) =>
@@ -102,6 +118,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
         '/health-events',
         {
           animal_id: animal.id,
+          diagnosis_id: fd.get('diagnosis_id') || undefined,
           severity: fd.get('severity') || undefined,
           outcome: fd.get('outcome') || 'ongoing',
           notes: fd.get('notes') || undefined,
@@ -111,7 +128,13 @@ export function SanidadCapture({ products }: { products: any[] }) {
     } else {
       res = await submit(
         '/mortalities',
-        { animal_id: animal.id, notes: fd.get('notes') || undefined, estimated_loss: fd.get('estimated_loss') ? Number(fd.get('estimated_loss')) : undefined },
+        {
+          animal_id: animal.id,
+          cause_diagnosis_id: fd.get('diagnosis_id') || undefined,
+          necropsy: fd.get('necropsy') === 'on',
+          notes: fd.get('notes') || undefined,
+          estimated_loss: fd.get('estimated_loss') ? Number(fd.get('estimated_loss')) : undefined,
+        },
         () => `Baja por muerte registrada para ${animal.tag}`,
       );
     }
@@ -166,6 +189,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
                 </Select>
               </Field>
             </div>
+            <DiagnosisPicker label="Diagnóstico" />
             <Field label="Notas" htmlFor="notes">
               <Input id="notes" name="notes" controlSize="md" placeholder="Motivo, observaciones…" />
             </Field>
@@ -174,6 +198,7 @@ export function SanidadCapture({ products }: { products: any[] }) {
 
         {tab === 'Diagnóstico' && (
           <>
+            <DiagnosisPicker label="Diagnóstico" />
             <div className="grid grid-cols-2 gap-3">
               <Field label="Severidad" htmlFor="severity">
                 <Select id="severity" name="severity" controlSize="md" defaultValue="mild">
@@ -198,12 +223,18 @@ export function SanidadCapture({ products }: { products: any[] }) {
 
         {tab === 'Mortalidad' && (
           <>
-            <Field label="Causa" htmlFor="notes">
+            <DiagnosisPicker label="Causa (diagnóstico)" />
+            <Field label="Causa / notas" htmlFor="notes">
               <Input id="notes" name="notes" controlSize="md" placeholder="Causa probable de muerte…" />
             </Field>
-            <Field label="Pérdida estimada ($)" htmlFor="estimated_loss">
-              <Input id="estimated_loss" name="estimated_loss" type="number" controlSize="md" placeholder="45000" />
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Pérdida estimada ($)" htmlFor="estimated_loss">
+                <Input id="estimated_loss" name="estimated_loss" type="number" controlSize="md" placeholder="45000" />
+              </Field>
+              <label className="flex items-center gap-2 self-end pb-2 text-body text-ink-2">
+                <input type="checkbox" name="necropsy" className="size-4 accent-brand" /> Necropsia
+              </label>
+            </div>
             <p className="text-label text-warning">El animal quedará dado de baja (estado: muerto). El historial se conserva.</p>
           </>
         )}
