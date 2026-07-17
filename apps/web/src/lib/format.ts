@@ -49,6 +49,11 @@ export const EVENT_LABELS: Record<string, string> = {
   identifier_added: 'Identificador agregado',
   identifier_retired: 'Identificador retirado',
   identifier_official: 'Identificador oficial',
+  cull: 'Descarte',
+  loss: 'Pérdida',
+  transfer_out: 'Transferencia',
+  sale: 'Venta',
+  mortality: 'Muerte',
 };
 
 export const STATUS_LABELS: Record<string, string> = {

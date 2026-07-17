@@ -346,7 +346,7 @@ export function AnimalsBrowser({
 
       {/* Resultados */}
       {view === 'table' ? (
-        <AnimalsTable animals={rows} lots={lots} />
+        <AnimalsTable animals={rows} lots={lots} categories={categories} />
       ) : (
         <CardsView rows={rows} />
       )}

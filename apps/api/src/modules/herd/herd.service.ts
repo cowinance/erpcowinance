@@ -666,6 +666,44 @@ export class HerdService {
     return this.getAnimal(animalId);
   }
 
+  /**
+   * Cambio de categoría MASIVO (A360 E5): valida species + sexo↔categoría por animal; los que no
+   * encajan (o no están activos) se omiten. Versiona category_code y propaga por sync. Idempotente.
+   */
+  async bulkChangeCategory(animalIds: string[], categoryCode: string): Promise<{ changed: number; skipped: number }> {
+    const t = this.db.tenant;
+    const ids = [...new Set((animalIds ?? []).filter((x) => typeof x === 'string'))];
+    if (!ids.length) throw new BadRequestException({ code: 'category.empty', title: 'Sin animales seleccionados' });
+    const cat = await this.db.one<{ id: string; species_id: string; sex: string | null }>(
+      `SELECT id, species_id, sex FROM animal_categories WHERE code = $1`,
+      [categoryCode],
+    );
+    if (!cat) throw new BadRequestException({ code: 'animal.invalid_category', title: 'Categoría inexistente' });
+
+    let changed = 0;
+    await this.db.tx(async (q) => {
+      const animals = await q.query<{ id: string; sex: string; species_id: string; category_id: string | null }>(
+        `SELECT id, sex, species_id, category_id FROM animals WHERE id = ANY($1) AND tenant_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+        [ids, t],
+      );
+      for (const a of animals) {
+        if (a.species_id !== cat.species_id) continue; // otra especie → omitir
+        if (cat.sex && cat.sex !== 'any' && cat.sex !== a.sex) continue; // sexo incompatible → omitir
+        if (a.category_id === cat.id) { changed++; continue; } // ya en esa categoría (idempotente)
+        await q.query(`UPDATE animals SET category_id = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3`, [cat.id, a.id, t]);
+        const op = await this.writer.projectAnimalUpdate(q, a.id, { category_code: categoryCode });
+        if (op) await this.writer.emitServerOrigin(q, [op], `rest:animal:category:${a.id}:${op.hlc}`);
+        await q.query(
+          `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
+           VALUES ($1,$2,'edit',$3,now(),now(),'manual')`,
+          [t, a.id, JSON.stringify({ changes: ['categoría'] })],
+        );
+        changed++;
+      }
+    });
+    return { changed, skipped: ids.length - changed };
+  }
+
   /** Reemplaza la composición racial (A360 E4). Fracciones normalizadas si no vienen. */
   async setBreeds(animalId: string, breeds: { breed_id: string; fraction?: number }[]) {
     await this.assertAnimal(animalId);

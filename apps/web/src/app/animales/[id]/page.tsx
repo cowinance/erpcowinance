@@ -5,6 +5,7 @@ import { Card, StatusBadge, TagMono } from '@/components/ui';
 import { ageFrom, formatDate, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { MoveAction } from './MoveAction';
 import { EditAnimalButton } from './EditAnimalDialog';
+import { LifecycleAction } from './LifecycleAction';
 import { AnimalTabs } from './AnimalTabs';
 import { fileUrl } from '@/lib/api';
 import { ArrowLeft, Clock } from 'lucide-react';
@@ -110,6 +111,7 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
         <div className="flex shrink-0 items-center gap-2">
           <EditAnimalButton animal={animal} categories={categories ?? []} breeds={catalogs?.breeds ?? []} />
           <MoveAction animalId={id} lots={lots ?? []} />
+          <LifecycleAction animalId={id} active={animal.status === 'active'} />
         </div>
       </div>
 

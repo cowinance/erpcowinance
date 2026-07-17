@@ -1,9 +1,13 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { HerdService } from './herd.service';
+import { AnimalStatusService } from './animal-status.service';
 
 @Controller()
 export class HerdController {
-  constructor(private readonly herd: HerdService) {}
+  constructor(
+    private readonly herd: HerdService,
+    private readonly status: AnimalStatusService,
+  ) {}
 
   @Get('animals')
   list(
@@ -97,6 +101,21 @@ export class HerdController {
   @Put('animals/:id/breeds')
   setBreeds(@Param('id') id: string, @Body() body: any) {
     return this.herd.setBreeds(id, body?.breeds ?? []);
+  }
+
+  @Post('animals/:id/status')
+  changeStatus(@Param('id') id: string, @Body() body: any) {
+    return this.status.changeStatus(id, { toStatus: body?.status, reason: body?.reason, occurredAt: body?.occurred_at });
+  }
+
+  @Post('animals/status/bulk')
+  bulkStatus(@Body() body: any) {
+    return this.status.bulkChangeStatus(body?.animal_ids ?? [], { toStatus: body?.status, reason: body?.reason });
+  }
+
+  @Post('animals/category/bulk')
+  bulkCategory(@Body() body: any) {
+    return this.herd.bulkChangeCategory(body?.animal_ids ?? [], body?.category_code);
   }
 
   @Post('lots')
