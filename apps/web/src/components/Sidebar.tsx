@@ -33,6 +33,7 @@ import {
   CreditCard,
   GraduationCap,
   Settings,
+  FileText,
   ChevronsUpDown,
   Search,
   Zap,
@@ -87,6 +88,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
 const FOOTER_ITEMS = [
   { href: '/notificaciones', label: 'Notificaciones', icon: Inbox },
   { href: '/alertas', label: 'Alertas', icon: Bell },
+  { href: '/documentos', label: 'Documentos', icon: FileText },
   { href: '/modulo/academia', label: 'Academia', icon: GraduationCap },
   { href: '/suscripcion', label: 'Plan y suscripción', icon: CreditCard },
   { href: '/configuracion', label: 'Configuración', icon: Settings },

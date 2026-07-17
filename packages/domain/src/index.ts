@@ -24,3 +24,5 @@ export * from './production';
 export * from './land';
 // Configuración — validación de catálogos maestros (A3).
 export * from './config';
+// Documentos — validación del DMS formal (A6).
+export * from './documents';
