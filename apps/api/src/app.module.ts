@@ -32,6 +32,7 @@ import { GrazingModule } from './modules/grazing/grazing.module';
 import { DairyModule } from './modules/dairy/dairy.module';
 import { LabModule } from './modules/lab/lab.module';
 import { FeedlotModule } from './modules/feedlot/feedlot.module';
+import { BreedingModule } from './modules/breeding/breeding.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 
 /**
@@ -40,6 +41,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule],
+  imports: [DbModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule],
 })
 export class AppModule {}
