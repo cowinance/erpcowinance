@@ -7,6 +7,7 @@ import { HealthService } from './health.service';
 import type { MortalityService } from './mortality.service';
 import type { TreatmentService } from './treatment.service';
 import type { VaccinationService } from './vaccination.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 /**
  * Sanidad E3 — vistas de control. KPIs ampliados (casos abiertos, vacunas vencidas), lista de
@@ -36,7 +37,7 @@ describe('HealthService — vistas de control (E3)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    health = new HealthService(db, {} as MortalityService, {} as TreatmentService, {} as VaccinationService);
+    health = new HealthService(db, {} as MortalityService, {} as TreatmentService, {} as VaccinationService, new InventoryService(db));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;

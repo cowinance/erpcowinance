@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Put, Query } from '@nestjs/common';
 import { HealthService } from './health.service';
 
 @Controller()
@@ -13,6 +13,11 @@ export class HealthController {
   @Post('products-veterinary')
   createProduct(@Body() body: any) {
     return this.health.createProduct(body);
+  }
+
+  @Put('products-veterinary/:id')
+  updateProduct(@Param('id') id: string, @Body() body: any) {
+    return this.health.updateProduct(id, body);
   }
 
   @Post('vaccinations')
@@ -73,5 +78,20 @@ export class HealthController {
   @Get('health/by-lot')
   byLot() {
     return this.health.lotHealth();
+  }
+
+  @Get('health/costs')
+  costs(@Query('from') from?: string, @Query('to') to?: string, @Query('by') by?: string) {
+    return this.health.costs({ from, to, by: by === 'animal' ? 'animal' : by === 'lot' ? 'lot' : 'period' });
+  }
+
+  @Get('health/consumption')
+  consumption(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.health.consumption({ from, to });
+  }
+
+  @Get('health/stock-alerts')
+  stockAlerts(@Query('expiry_days') expiryDays?: string) {
+    return this.health.stockAlerts(expiryDays ? Number(expiryDays) : undefined);
   }
 }

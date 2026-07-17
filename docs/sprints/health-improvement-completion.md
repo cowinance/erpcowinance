@@ -161,7 +161,39 @@ un muerto → salteado con motivo, resto aplicado; objetivo categoría; producto
 400 fail-fast; selección vacía → 400; cobertura por lote. **705 tests** (699 → +6), 0 ciclos. Verificado
 en web: masiva a «Engorde Otoño» 9/9 aplicadas, replay idempotente (0 nuevas / 9 ya), cobertura 100 %.
 
+---
+
+## Etapa 5 — Inventario de medicamentos + costos ✅
+
+Conecta el vademécum con el inventario y calcula el costo real de cada aplicación.
+
+**Esquema:** `cost numeric(16,2)` agregado a `vaccinations` (treatments ya lo tenía). Sin tablas nuevas.
+
+**Backend (`health.service`, inyecta `InventoryService`):**
+- Producto ↔ inventario: `createProduct`/`updateProduct` aceptan `inventory_item_id`; `products()`
+  (vademécum) devuelve stock total, avg_cost, punto de reorden, vencimiento más próximo y banderas
+  `is_low`/`is_expired`.
+- **Descuento de stock al aplicar** (helper `chargeAndSetCost`): si el producto está enlazado, consume
+  del ítem vía la regla única `InventoryService.recordMovementInTx` (`consumption`) en la MISMA tx, y
+  fija el **costo real** = dosis × avg_cost del stock consumido, sobre la fila (salvo costo manual).
+  Cableado en `treat`, `vaccinate`, `vaccinateMass`, `treatMass`. Solo por aplicación NUEVA (idempotente:
+  la reaplicación no vuelve a consumir). **Stock insuficiente aborta la aplicación entera** (atómico,
+  409 `inventory.insufficient_stock`). Depósito: el indicado, o el de más stock, o el primero.
+- Reportes: `GET /health/costs?by=period|animal|lot` (tratamientos + vacunaciones), `GET
+  /health/consumption` (consumo por producto desde los movimientos de sanidad), `GET
+  /health/stock-alerts` (stock ≤ reorden o lote vencido/por vencer). `PUT /products-veterinary/:id`.
+
+**Web:** vademécum con columna **Stock** + badges (bajo/vencido) y enlace a ítem en el alta;
+`HealthCostsPanel` (costo sanitario por mes/lote/animal, consumo por producto, alertas de stock).
+GOTCHA: los ítems de inventario se sirven en `/inventory/items` (controller `@Controller('inventory')`),
+no en `/items`.
+
+**Tests (7 nuevos):** `health-inventory.integration` — descuento + costo real, masiva descuenta por
+aplicación, stock insuficiente aborta (atómico), consumo, costo por lote, alertas de reorden, vademécum
+con stock. **712 tests** (705 → +7), 0 ciclos. Verificado en web: tratamiento dosis 4 → costo US$ 32
+(4 × $8), stock 50 → 46, consumo «Oxitetra E5 4 un · US$ 32», costo por mes formateado.
+
 ### Siguiente
-**Etapa 5 — Inventario de medicamentos + costos**: conectar `products_veterinary.inventory_item_id`
-para descontar stock al aplicar (reusa `InventoryService.recordMovementInTx`), lote/vencimiento del
-frasco, alertas de stock bajo/vencido, y costo sanitario por aplicación/animal/lote.
+**Etapa 6 — Hospital / cuarentena**: enviar un animal a un lote hospital/cuarentena desde un caso
+clínico (reusa `recordMovement`), con motivo de ingreso, fecha estimada de alta y alta sanitaria que
+devuelve el animal a su lote anterior o a uno destino.

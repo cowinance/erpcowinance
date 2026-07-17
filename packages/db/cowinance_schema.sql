@@ -702,6 +702,7 @@ CREATE TABLE "vaccinations" (
   "applied_by" uuid,
   "next_due_date" date,
   "plan_id" uuid,
+  "cost" numeric(16,2),
   "created_at" timestamptz DEFAULT now() NOT NULL,
   "updated_at" timestamptz DEFAULT now() NOT NULL,
   "created_by" uuid,

@@ -9,6 +9,7 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
 import { MortalityService } from './mortality.service';
 import { TreatmentService } from './treatment.service';
 import { VaccinationService } from './vaccination.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { HealthService } from './health.service';
 
 /**
@@ -41,7 +42,7 @@ describe('VaccinationService · integración', () => {
     await db.onModuleInit();
     svc = new VaccinationService(db);
     const mortality = new MortalityService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
-    health = new HealthService(db, mortality, new TreatmentService(db), svc);
+    health = new HealthService(db, mortality, new TreatmentService(db), svc, new InventoryService(db));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;

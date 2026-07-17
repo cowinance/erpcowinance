@@ -7,6 +7,7 @@ import { DbService } from '../../db/db.service';
 import { HealthService } from './health.service';
 import { TreatmentService } from './treatment.service';
 import { VaccinationService } from './vaccination.service';
+import { InventoryService } from '../inventory/inventory.service';
 import type { MortalityService } from './mortality.service';
 
 /**
@@ -37,7 +38,7 @@ describe('HealthService — aplicación masiva + cobertura (E4)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    health = new HealthService(db, {} as MortalityService, new TreatmentService(db), new VaccinationService(db));
+    health = new HealthService(db, {} as MortalityService, new TreatmentService(db), new VaccinationService(db), new InventoryService(db));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;

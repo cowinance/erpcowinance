@@ -21,10 +21,12 @@ export function AddProductForm({
   defaultType,
   onCreated,
   onCancel,
+  items = [],
 }: {
   defaultType?: string;
   onCreated: (product: any) => void;
   onCancel?: () => void;
+  items?: any[];
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -48,6 +50,7 @@ export function AddProductForm({
           withdrawal_meat_days: fd.get('withdrawal_meat_days') ? Number(fd.get('withdrawal_meat_days')) : undefined,
           withdrawal_milk_hours: fd.get('withdrawal_milk_hours') ? Number(fd.get('withdrawal_milk_hours')) : undefined,
           default_dose: fd.get('default_dose') || undefined,
+          inventory_item_id: fd.get('inventory_item_id') || undefined,
         }),
       });
       const body = await res.json();
@@ -86,6 +89,16 @@ export function AddProductForm({
         <Field label="Retiro leche (horas)" htmlFor={`${fid}-withdrawal_milk_hours`}>
           <Input id={`${fid}-withdrawal_milk_hours`} name="withdrawal_milk_hours" type="number" min="0" placeholder="0" controlSize="md" />
         </Field>
+        {items.length > 0 && (
+          <Field label="Ítem de inventario (descuenta stock)" htmlFor={`${fid}-inventory_item_id`}>
+            <Select id={`${fid}-inventory_item_id`} name="inventory_item_id" defaultValue="" controlSize="md">
+              <option value="">Sin enlazar</option>
+              {items.map((it) => (
+                <option key={it.id} value={it.id}>{it.name} ({it.unit})</option>
+              ))}
+            </Select>
+          </Field>
+        )}
       </div>
       {error && <p className="text-label text-danger">{error}</p>}
       <div className="flex gap-2">

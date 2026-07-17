@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { HealthApplicationError } from '@cowinance/domain';
-import { DbService } from '../../db/db.service';
+import { DbService, Q } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
+import { InventoryService } from '../inventory/inventory.service';
 import { MortalityService } from './mortality.service';
 import { TreatmentService, HealthApplicationLookupError } from './treatment.service';
 import { VaccinationService } from './vaccination.service';
@@ -15,6 +16,7 @@ export class HealthService {
     private readonly mortalities: MortalityService,
     private readonly treatments: TreatmentService,
     private readonly vaccinations: VaccinationService,
+    private readonly inventory: InventoryService,
   ) {}
 
   /** Traduce los errores de dominio/lookup de los núcleos neutrales a HTTP. */
@@ -27,10 +29,32 @@ export class HealthService {
     throw e;
   }
 
+  /**
+   * Vademécum con enlace a inventario: stock total (suma de saldos), costo promedio, punto de
+   * reorden y vencimiento más próximo del ítem enlazado. `is_low` (stock ≤ reorden) e `is_expired`
+   * (algún lote vencido) alimentan las alertas de stock/vencimiento.
+   */
   async products() {
     return this.db.query(
-      `SELECT id, name, type, active_ingredient, withdrawal_meat_days, withdrawal_milk_hours, default_dose
-       FROM products_veterinary WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY name`,
+      `SELECT pv.id, pv.name, pv.type, pv.active_ingredient, pv.withdrawal_meat_days, pv.withdrawal_milk_hours,
+              pv.default_dose, pv.inventory_item_id, i.name AS item_name, i.unit,
+              i.reorder_point::float AS reorder_point,
+              st.stock::float AS stock, st.avg_cost::float AS avg_cost,
+              ex.nearest_expiry,
+              (st.stock IS NOT NULL AND i.reorder_point IS NOT NULL AND st.stock <= i.reorder_point) AS is_low,
+              (ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry < CURRENT_DATE) AS is_expired
+       FROM products_veterinary pv
+       LEFT JOIN inventory_items i ON i.id = pv.inventory_item_id AND i.deleted_at IS NULL
+       LEFT JOIN LATERAL (
+         SELECT sum(sl.quantity) AS stock,
+                CASE WHEN sum(sl.quantity) > 0 THEN sum(sl.quantity * COALESCE(sl.avg_cost,0)) / sum(sl.quantity) ELSE NULL END AS avg_cost
+         FROM stock_levels sl WHERE sl.item_id = pv.inventory_item_id AND sl.deleted_at IS NULL
+       ) st ON pv.inventory_item_id IS NOT NULL
+       LEFT JOIN LATERAL (
+         SELECT min(b.expiry_date) AS nearest_expiry FROM inventory_batches b
+         WHERE b.item_id = pv.inventory_item_id AND b.deleted_at IS NULL AND b.expiry_date IS NOT NULL
+       ) ex ON pv.inventory_item_id IS NOT NULL
+       WHERE pv.tenant_id = $1 AND pv.deleted_at IS NULL ORDER BY pv.name`,
       [this.db.tenant],
     );
   }
@@ -38,11 +62,41 @@ export class HealthService {
   async createProduct(body: any) {
     if (!body?.name || !body?.type)
       throw new BadRequestException({ code: 'product.missing_fields', title: 'name y type son obligatorios' });
+    if (body.inventory_item_id) await this.requireInventoryItem(body.inventory_item_id);
     return this.db.one(
-      `INSERT INTO products_veterinary (tenant_id, name, type, active_ingredient, withdrawal_meat_days, withdrawal_milk_hours, default_dose, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [this.db.tenant, body.name, body.type, body.active_ingredient ?? null, body.withdrawal_meat_days ?? null, body.withdrawal_milk_hours ?? null, body.default_dose ?? null, this.db.user],
+      `INSERT INTO products_veterinary (tenant_id, name, type, active_ingredient, withdrawal_meat_days, withdrawal_milk_hours, default_dose, inventory_item_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [this.db.tenant, body.name, body.type, body.active_ingredient ?? null, body.withdrawal_meat_days ?? null, body.withdrawal_milk_hours ?? null, body.default_dose ?? null, body.inventory_item_id ?? null, this.db.user],
     );
+  }
+
+  /** Edita un producto veterinario (incluye enlazar/desenlazar el ítem de inventario). */
+  async updateProduct(id: string, body: any) {
+    const sets: string[] = [];
+    const args: unknown[] = [id, this.db.tenant];
+    const set = (col: string, val: unknown) => { args.push(val); sets.push(`${col} = $${args.length}`); };
+    if (body.name != null) set('name', String(body.name).trim());
+    if ('active_ingredient' in body) set('active_ingredient', body.active_ingredient ?? null);
+    if ('withdrawal_meat_days' in body) set('withdrawal_meat_days', body.withdrawal_meat_days ?? null);
+    if ('withdrawal_milk_hours' in body) set('withdrawal_milk_hours', body.withdrawal_milk_hours ?? null);
+    if ('default_dose' in body) set('default_dose', body.default_dose ?? null);
+    if ('inventory_item_id' in body) {
+      if (body.inventory_item_id) await this.requireInventoryItem(body.inventory_item_id);
+      set('inventory_item_id', body.inventory_item_id ?? null);
+    }
+    if (!sets.length) throw new BadRequestException({ code: 'product.no_changes', title: 'Sin cambios' });
+    const row = await this.db.one(
+      `UPDATE products_veterinary SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL RETURNING *`,
+      args,
+    );
+    if (!row) throw new NotFoundException({ code: 'product.not_found', title: 'Producto no encontrado' });
+    return row;
+  }
+
+  private async requireInventoryItem(id: string) {
+    const it = await this.db.one<{ id: string }>(`SELECT id FROM inventory_items WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [id, this.db.tenant]);
+    if (!it) throw new BadRequestException({ code: 'product.invalid_item', title: 'Ítem de inventario inválido' });
+    return it;
   }
 
   /**
@@ -62,15 +116,19 @@ export class HealthService {
 
     try {
       return await this.db.tx(async (q) => {
+        const link = await this.productLink(q, body.product_id);
+        const qty = Number(body.dose) || 1;
         const results: RecordVaccinationResult[] = [];
         for (const animalId of animalIds) {
           // id determinista por (key, animal): la misma request reaplicada no duplica ninguna fila.
           const vaccinationId = this.deriveId(baseKey, animalId);
-          results.push(await this.vaccinations.recordVaccination(q, {
+          const r = await this.vaccinations.recordVaccination(q, {
             animalId, productId: body.product_id, appliedAt, dose: body.dose ?? null, doseUnit: body.dose_unit ?? null,
             batchNumber: body.batch_number ?? null, nextDueDate: nextDue, planId: body.plan_id ?? null,
             actorUserId: this.db.user, origin: 'rest', vaccinationId,
-          }));
+          });
+          if (r.recorded) await this.chargeAndSetCost(q, { inventoryItemId: link?.inventory_item_id ?? null, table: 'vaccinations', rowId: vaccinationId, quantity: qty, warehouseId: body.warehouse_id, refType: 'vaccination', occurredAt: appliedAt });
+          results.push(r);
         }
         return { applied: results.length, results };
       });
@@ -87,14 +145,23 @@ export class HealthService {
     if (!body?.animal_id || !body?.product_id)
       throw new BadRequestException({ code: 'treatment.missing_fields', title: 'animal_id y product_id son obligatorios' });
     try {
-      return await this.db.tx((q) =>
-        this.treatments.recordTreatment(q, {
+      return await this.db.tx(async (q) => {
+        const link = await this.productLink(q, body.product_id);
+        const res = await this.treatments.recordTreatment(q, {
           animalId: body.animal_id, productId: body.product_id, appliedAt: body.applied_at, dose: body.dose ?? null,
           doseUnit: body.dose_unit ?? null, route: body.route ?? null, diagnosisId: body.diagnosis_id ?? null,
           clinicalCaseId: body.clinical_case_id ?? null, cost: body.cost ?? null, notes: body.notes ?? null,
           actorUserId: this.db.user, origin: 'rest', treatmentId: idempotencyKey ?? randomUUID(),
-        }),
-      );
+        });
+        if (res.recorded) {
+          const cost = await this.chargeAndSetCost(q, {
+            inventoryItemId: link?.inventory_item_id ?? null, table: 'treatments', rowId: res.treatmentId,
+            quantity: Number(body.dose) || 1, warehouseId: body.warehouse_id, refType: 'treatment', occurredAt: res.appliedAt, manualCost: body.cost ?? null,
+          });
+          if (cost != null && body.cost == null) (res as any).cost = cost;
+        }
+        return res;
+      });
     } catch (e) {
       this.mapHealthError(e);
     }
@@ -117,19 +184,27 @@ export class HealthService {
     const baseKey = idempotencyKey ?? randomUUID();
 
     return this.db.tx(async (q) => {
+      const link = await this.productLink(q, body.product_id);
+      const qty = Number(body.dose) || 1;
       const applied: any[] = [];
       const skipped: { animal_id: string; reason: string }[] = [];
       for (const animalId of animals) {
+        const vaccinationId = this.deriveId(baseKey, animalId);
+        let r: RecordVaccinationResult;
         try {
-          const r = await this.vaccinations.recordVaccination(q, {
+          r = await this.vaccinations.recordVaccination(q, {
             animalId, productId: body.product_id, appliedAt, dose: body.dose ?? null, doseUnit: body.dose_unit ?? null,
             batchNumber: body.batch_number ?? null, nextDueDate: nextDue, planId: body.plan_id ?? null,
-            actorUserId: this.db.user, origin: 'rest', vaccinationId: this.deriveId(baseKey, animalId),
+            actorUserId: this.db.user, origin: 'rest', vaccinationId,
           });
           applied.push(r);
         } catch (e) {
           skipped.push({ animal_id: animalId, reason: this.skipReason(e) });
+          continue;
         }
+        // Descuento de stock solo por aplicación NUEVA (idempotente: la reaplicación no vuelve a
+        // consumir). Stock insuficiente aborta TODA la masiva → atómico.
+        if (r.recorded) await this.chargeAndSetCost(q, { inventoryItemId: link?.inventory_item_id ?? null, table: 'vaccinations', rowId: vaccinationId, quantity: qty, warehouseId: body.warehouse_id, refType: 'vaccination', occurredAt: appliedAt });
       }
       return this.massResult(animals.length, applied, skipped);
     });
@@ -144,20 +219,26 @@ export class HealthService {
     const baseKey = idempotencyKey ?? randomUUID();
 
     return this.db.tx(async (q) => {
+      const link = await this.productLink(q, body.product_id);
+      const qty = Number(body.dose) || 1;
       const applied: any[] = [];
       const skipped: { animal_id: string; reason: string }[] = [];
       for (const animalId of animals) {
+        const treatmentId = this.deriveId(baseKey, animalId);
+        let r: Awaited<ReturnType<TreatmentService['recordTreatment']>>;
         try {
-          const r = await this.treatments.recordTreatment(q, {
+          r = await this.treatments.recordTreatment(q, {
             animalId, productId: body.product_id, appliedAt: body.applied_at, dose: body.dose ?? null,
             doseUnit: body.dose_unit ?? null, route: body.route ?? null, diagnosisId: body.diagnosis_id ?? null,
             cost: body.cost ?? null, notes: body.notes ?? null, actorUserId: this.db.user, origin: 'rest',
-            treatmentId: this.deriveId(baseKey, animalId),
+            treatmentId,
           });
           applied.push(r);
         } catch (e) {
           skipped.push({ animal_id: animalId, reason: this.skipReason(e) });
+          continue;
         }
+        if (r.recorded) await this.chargeAndSetCost(q, { inventoryItemId: link?.inventory_item_id ?? null, table: 'treatments', rowId: treatmentId, quantity: qty, warehouseId: body.warehouse_id, refType: 'treatment', occurredAt: r.appliedAt, manualCost: body.cost ?? null });
       }
       return this.massResult(animals.length, applied, skipped);
     });
@@ -248,6 +329,139 @@ export class HealthService {
     if (expectedType && p.type !== expectedType)
       throw new BadRequestException({ code: 'product.wrong_type', title: `El producto '${p.name}' no es del tipo requerido (${expectedType})` });
     return p;
+  }
+
+  // ── Inventario de medicamentos + costo (E5) ────────────────────────────────
+
+  /**
+   * Enlace del producto a inventario (item + dosis por defecto), para descontar stock al aplicar.
+   * Recibe `q` EXPLÍCITO: se llama dentro de `db.tx`, y usar `this.db` ahí colgaría la conexión única.
+   */
+  private async productLink(q: Q, productId: string) {
+    return q.one<{ inventory_item_id: string | null; default_dose: string | null }>(
+      `SELECT inventory_item_id, default_dose FROM products_veterinary WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [productId, this.db.tenant],
+    );
+  }
+
+  /**
+   * Descuenta stock del ítem enlazado (regla única `InventoryService.recordMovementInTx`, consumo) y
+   * setea el costo REAL (cantidad × avg_cost del stock consumido) sobre la fila de aplicación, salvo
+   * que venga un costo manual. Si el ítem no tiene depósito resoluble, no consume (devuelve null).
+   * Si el stock es insuficiente, `recordMovementInTx` lanza y la tx entera se revierte (atómico).
+   */
+  private async chargeAndSetCost(
+    q: Q,
+    opts: { inventoryItemId: string | null; table: 'treatments' | 'vaccinations'; rowId: string; quantity: number; warehouseId?: string; refType: string; occurredAt?: string; manualCost?: number | null },
+  ): Promise<number | null> {
+    if (!opts.inventoryItemId) return null;
+    const whId = await this.resolveWarehouse(q, opts.inventoryItemId, opts.warehouseId);
+    if (!whId) return null;
+    const res: any = await this.inventory.recordMovementInTx(q, {
+      item_id: opts.inventoryItemId, warehouse_id: whId, movement_type: 'consumption',
+      quantity: -Math.abs(opts.quantity), occurred_at: opts.occurredAt,
+      reference_type: opts.refType, reference_id: opts.rowId,
+    });
+    const cost = +(Math.abs(opts.quantity) * (res?.level?.avg_cost ?? 0)).toFixed(2);
+    if (opts.manualCost == null) {
+      await q.query(`UPDATE ${opts.table} SET cost = $3 WHERE id = $1 AND tenant_id = $2`, [opts.rowId, this.db.tenant, cost]);
+    }
+    return cost;
+  }
+
+  /** Depósito para consumir: el indicado, si no el de mayor stock del ítem, si no el primero del tenant. */
+  private async resolveWarehouse(q: Q, itemId: string, given?: string): Promise<string | null> {
+    if (given) return given;
+    const wh = await q.one<{ warehouse_id: string }>(
+      `SELECT warehouse_id FROM stock_levels WHERE tenant_id = $1 AND item_id = $2 AND quantity > 0 ORDER BY quantity DESC LIMIT 1`,
+      [this.db.tenant, itemId],
+    );
+    if (wh) return wh.warehouse_id;
+    const any = await q.one<{ id: string }>(`SELECT id FROM warehouses WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`, [this.db.tenant]);
+    return any?.id ?? null;
+  }
+
+  /**
+   * Costo sanitario agrupado (tratamientos + vacunaciones) por período (mes), animal o lote.
+   * Reusa el `cost` real ya persistido en cada aplicación (derivado del stock o manual).
+   */
+  async costs(params: { from?: string; to?: string; by?: 'period' | 'animal' | 'lot' } = {}) {
+    const t = this.db.tenant;
+    const args: unknown[] = [t];
+    const range: string[] = [];
+    if (params.from) { args.push(params.from); range.push(`applied_at >= $${args.length}`); }
+    if (params.to) { args.push(params.to); range.push(`applied_at <= $${args.length}`); }
+    const rangeSql = range.length ? `AND ${range.join(' AND ')}` : '';
+    const apps = `
+      SELECT animal_id, applied_at, COALESCE(cost,0)::float AS cost, 'treatment' AS kind FROM treatments
+        WHERE tenant_id = $1 AND deleted_at IS NULL ${rangeSql}
+      UNION ALL
+      SELECT animal_id, applied_at, COALESCE(cost,0)::float AS cost, 'vaccination' AS kind FROM vaccinations
+        WHERE tenant_id = $1 AND deleted_at IS NULL ${rangeSql}`;
+    const by = params.by ?? 'period';
+    if (by === 'animal') {
+      return this.db.query(
+        `SELECT a.id AS animal_id, ai.value AS tag, count(*)::int AS applications, round(sum(x.cost)::numeric,2)::float AS cost
+         FROM (${apps}) x JOIN animals a ON a.id = x.animal_id
+         LEFT JOIN LATERAL (SELECT value FROM animal_identifiers z WHERE z.animal_id=a.id AND z.type='visual' AND z.deleted_at IS NULL ORDER BY z.created_at DESC LIMIT 1) ai ON true
+         GROUP BY a.id, ai.value ORDER BY cost DESC LIMIT 100`, args);
+    }
+    if (by === 'lot') {
+      return this.db.query(
+        `SELECT l.id AS lot_id, l.name AS lot_name, count(*)::int AS applications, round(sum(x.cost)::numeric,2)::float AS cost
+         FROM (${apps}) x JOIN animals a ON a.id = x.animal_id LEFT JOIN lots l ON l.id = a.current_lot_id
+         GROUP BY l.id, l.name ORDER BY cost DESC`, args);
+    }
+    return this.db.query(
+      `SELECT to_char(date_trunc('month', x.applied_at), 'YYYY-MM') AS period,
+              count(*) FILTER (WHERE kind='treatment')::int AS treatments,
+              count(*) FILTER (WHERE kind='vaccination')::int AS vaccinations,
+              round(sum(x.cost)::numeric,2)::float AS cost
+       FROM (${apps}) x GROUP BY 1 ORDER BY 1 DESC LIMIT 24`, args);
+  }
+
+  /** Consumo de medicamentos por producto en el período (desde los movimientos de stock de sanidad). */
+  async consumption(params: { from?: string; to?: string } = {}) {
+    const t = this.db.tenant;
+    const args: unknown[] = [t];
+    const range: string[] = [];
+    if (params.from) { args.push(params.from); range.push(`sm.occurred_at >= $${args.length}`); }
+    if (params.to) { args.push(params.to); range.push(`sm.occurred_at <= $${args.length}`); }
+    const rangeSql = range.length ? `AND ${range.join(' AND ')}` : '';
+    return this.db.query(
+      `SELECT pv.id AS product_id, pv.name AS product, i.unit,
+              round(sum(-sm.quantity)::numeric,3)::float AS quantity,
+              round(sum(-sm.quantity * COALESCE(sm.unit_cost, sl.avg_cost, 0))::numeric,2)::float AS cost
+       FROM stock_movements sm
+       JOIN products_veterinary pv ON pv.inventory_item_id = sm.item_id AND pv.tenant_id = $1 AND pv.deleted_at IS NULL
+       JOIN inventory_items i ON i.id = sm.item_id
+       LEFT JOIN stock_levels sl ON sl.item_id = sm.item_id AND sl.warehouse_id = sm.warehouse_id
+       WHERE sm.tenant_id = $1 AND sm.movement_type = 'consumption'
+         AND sm.reference_type IN ('treatment','vaccination') ${rangeSql}
+       GROUP BY pv.id, pv.name, i.unit ORDER BY cost DESC`, args);
+  }
+
+  /** Alertas de inventario de medicamentos: stock bajo (≤ reorden) o con lote vencido/por vencer. */
+  async stockAlerts(expiryDays = 30) {
+    const t = this.db.tenant;
+    return this.db.query(
+      `SELECT pv.id AS product_id, pv.name AS product, i.unit,
+              i.reorder_point::float AS reorder_point,
+              COALESCE(st.stock,0)::float AS stock,
+              ex.nearest_expiry,
+              (i.reorder_point IS NOT NULL AND COALESCE(st.stock,0) <= i.reorder_point) AS is_low,
+              (ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry < CURRENT_DATE) AS is_expired,
+              (ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry BETWEEN CURRENT_DATE AND CURRENT_DATE + $2::int) AS expiring_soon
+       FROM products_veterinary pv
+       JOIN inventory_items i ON i.id = pv.inventory_item_id AND i.deleted_at IS NULL
+       LEFT JOIN LATERAL (SELECT sum(quantity) AS stock FROM stock_levels sl WHERE sl.item_id = pv.inventory_item_id AND sl.deleted_at IS NULL) st ON true
+       LEFT JOIN LATERAL (SELECT min(expiry_date) AS nearest_expiry FROM inventory_batches b WHERE b.item_id = pv.inventory_item_id AND b.deleted_at IS NULL AND b.expiry_date IS NOT NULL) ex ON true
+       WHERE pv.tenant_id = $1 AND pv.deleted_at IS NULL
+         AND ((i.reorder_point IS NOT NULL AND COALESCE(st.stock,0) <= i.reorder_point)
+              OR (ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE + $2::int))
+       ORDER BY is_expired DESC, is_low DESC, ex.nearest_expiry NULLS LAST`,
+      [t, expiryDays],
+    );
   }
 
   /** id determinista uuid v5-like a partir de (key, animal), sin dependencias externas. */

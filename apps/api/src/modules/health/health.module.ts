@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TasksModule } from '../tasks/tasks.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { MortalityService } from './mortality.service';
@@ -14,7 +15,7 @@ import { TreatmentSyncHandler } from './sync/treatment-sync.handler';
 import { VaccinationSyncHandler } from './sync/vaccination-sync.handler';
 
 @Module({
-  imports: [TasksModule],
+  imports: [TasksModule, InventoryModule],
   controllers: [HealthController, PlansController, ClinicalCaseController],
   providers: [
     HealthService, MortalityService, TreatmentService, VaccinationService, ClinicalCaseService, PlansService,

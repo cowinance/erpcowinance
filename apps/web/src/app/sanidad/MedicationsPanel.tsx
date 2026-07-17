@@ -14,7 +14,7 @@ import { Plus, Pill } from 'lucide-react';
 
 const TYPE_LABEL = Object.fromEntries(PRODUCT_TYPES);
 
-export function MedicationsPanel({ products }: { products: any[] }) {
+export function MedicationsPanel({ products, items = [] }: { products: any[]; items?: any[] }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
 
@@ -35,6 +35,7 @@ export function MedicationsPanel({ products }: { products: any[] }) {
       {adding && (
         <div className="mb-4">
           <AddProductForm
+            items={items}
             onCreated={() => {
               setAdding(false);
               router.refresh();
@@ -56,6 +57,7 @@ export function MedicationsPanel({ products }: { products: any[] }) {
               <th>Tipo</th>
               <th>Principio activo</th>
               <th>Dosis por defecto</th>
+              <th className="text-right">Stock</th>
               <th className="text-right">Retiro carne</th>
               <th className="pr-1 text-right">Retiro leche</th>
             </tr>
@@ -71,6 +73,17 @@ export function MedicationsPanel({ products }: { products: any[] }) {
                 <td className="text-ink-2">{TYPE_LABEL[p.type] ?? p.type}</td>
                 <td className="text-ink-2">{p.active_ingredient ?? '—'}</td>
                 <td className="text-ink-2">{p.default_dose ?? '—'}</td>
+                <td className="tnum text-right">
+                  {p.inventory_item_id == null ? (
+                    <span className="text-ink-3">—</span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className={p.is_low ? 'text-danger' : 'text-ink-2'}>{p.stock ?? 0} {p.unit ?? ''}</span>
+                      {p.is_low && <span className="rounded bg-danger/10 px-1 py-0.5 text-caption text-danger">bajo</span>}
+                      {p.is_expired && <span className="rounded bg-danger/10 px-1 py-0.5 text-caption text-danger">vencido</span>}
+                    </span>
+                  )}
+                </td>
                 <td className="tnum text-right text-ink-2">{p.withdrawal_meat_days != null ? `${p.withdrawal_meat_days} d` : '—'}</td>
                 <td className="tnum pr-1 text-right text-ink-2">{p.withdrawal_milk_hours != null ? `${p.withdrawal_milk_hours} h` : '—'}</td>
               </tr>

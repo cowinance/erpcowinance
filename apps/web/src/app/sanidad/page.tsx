@@ -8,10 +8,11 @@ import { MedicationsPanel } from './MedicationsPanel';
 import { ClinicalCasesPanel } from './ClinicalCasesPanel';
 import { ControlPanel } from './ControlPanel';
 import { MassHealthPanel } from './MassHealthPanel';
+import { HealthCostsPanel } from './HealthCostsPanel';
 import { Clock, Syringe } from 'lucide-react';
 
 export default async function SanidadPage() {
-  const [kpis, withdrawals, upcoming, products, lots, categories, catalogs] = await Promise.all([
+  const [kpis, withdrawals, upcoming, products, lots, categories, catalogs, items] = await Promise.all([
     apiSafe<any>('/health/kpis'),
     apiSafe<any[]>('/health/withdrawals'),
     apiSafe<any[]>('/health/upcoming-vaccinations?days=60'),
@@ -19,6 +20,7 @@ export default async function SanidadPage() {
     apiSafe<any[]>('/lots'),
     apiSafe<any[]>('/catalogs/categories'),
     apiSafe<any>('/config/catalogs'),
+    apiSafe<any[]>('/inventory/items'),
   ]);
   const diagnoses = catalogs?.diagnoses ?? [];
   if (!kpis) return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
@@ -65,6 +67,8 @@ export default async function SanidadPage() {
       <ControlPanel />
 
       <MassHealthPanel products={products ?? []} lots={lots ?? []} categories={categories ?? []} />
+
+      <HealthCostsPanel />
 
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
         <div id="retiros" className="col-span-3 space-y-4 scroll-mt-4">
@@ -147,7 +151,7 @@ export default async function SanidadPage() {
         <ClinicalCasesPanel diagnoses={diagnoses} />
       </div>
 
-      <MedicationsPanel products={products ?? []} />
+      <MedicationsPanel products={products ?? []} items={items ?? []} />
 
       <div id="planes" className="scroll-mt-4">
         <HealthPlansPanel lots={lots ?? []} categories={categories ?? []} />
