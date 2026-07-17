@@ -6,6 +6,7 @@ import { ReproCapture } from './ReproCapture';
 import { HerdStatus } from './HerdStatus';
 import { HeatsNotServedPanel } from './HeatsNotServedPanel';
 import { ReproDashboard } from './ReproDashboard';
+import { ReproByLotPanel } from './ReproByLotPanel';
 
 export default async function ReproPage() {
   const [kpis, bullsRes, lots] = await Promise.all([
@@ -43,6 +44,8 @@ export default async function ReproPage() {
       </div>
 
       <ReproDashboard />
+
+      <ReproByLotPanel />
 
       <div className="mt-4 grid grid-cols-5 gap-4 max-lg:grid-cols-1">
         <div id="captura-repro" className="col-span-3 scroll-mt-4">

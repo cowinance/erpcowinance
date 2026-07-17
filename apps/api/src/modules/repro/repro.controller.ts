@@ -75,6 +75,11 @@ export class ReproController {
     return this.repro.toPrepare(days ? Number(days) : undefined);
   }
 
+  @Get('reproduction/by-lot')
+  byLot() {
+    return this.repro.reproByLot();
+  }
+
   @Get('reproduction/protocols')
   listProtocols() {
     return this.repro.listProtocols();

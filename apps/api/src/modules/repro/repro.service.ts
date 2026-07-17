@@ -19,6 +19,72 @@ export class ReproService {
     private readonly embryos: EmbryosService,
   ) {}
 
+  /**
+   * Guardas de servicio (integración Sanidad + Genética, E6): antes de registrar un servicio se valida
+   * que el animal no tenga un RETIRO sanitario activo ni un CASO clínico grave abierto, y que el toro no
+   * sea un pariente cercano de la vaca (consanguinidad). Cualquiera de estas condiciones BLOQUEA (409)
+   * salvo `force=true`, en cuyo caso devuelve las advertencias que se saltearon. No re-implementa
+   * sanidad: consulta directamente las tablas (treatments/clinical_cases), sin acoplar módulos.
+   */
+  private async serviceGuards(animalId: string, sireId: string | null, force: boolean): Promise<string[]> {
+    const t = this.db.tenant;
+    const warnings: string[] = [];
+    const wd = await this.db.one<{ id: string }>(
+      `SELECT id FROM treatments WHERE tenant_id=$1 AND animal_id=$2 AND deleted_at IS NULL
+         AND (meat_withdrawal_until >= CURRENT_DATE OR milk_withdrawal_until >= now()) LIMIT 1`,
+      [t, animalId],
+    );
+    if (wd) warnings.push('withdrawal_active');
+    const sc = await this.db.one<{ id: string }>(
+      `SELECT id FROM clinical_cases WHERE tenant_id=$1 AND animal_id=$2 AND deleted_at IS NULL
+         AND status IN ('open','in_treatment','observation') AND severity='severe' LIMIT 1`,
+      [t, animalId],
+    );
+    if (sc) warnings.push('open_severe_case');
+    if (sireId) {
+      // Consanguinidad: mismo padre/madre, o padre/hijo directo entre toro y vaca.
+      const rel = await this.db.one<{ n: number }>(
+        `SELECT count(*)::int AS n
+         FROM animals dam, animals sire
+         WHERE dam.id=$2 AND sire.id=$3 AND dam.tenant_id=$1
+           AND ( sire.id = dam.sire_id                                  -- toro = padre de la vaca
+              OR dam.id = sire.dam_id                                   -- vaca = madre del toro
+              OR (dam.sire_id IS NOT NULL AND dam.sire_id = sire.sire_id) -- mismo padre
+              OR (dam.dam_id  IS NOT NULL AND dam.dam_id  = sire.dam_id)  -- misma madre
+              OR (sire.dam_id IS NOT NULL AND sire.dam_id = dam.id) )`,
+        [t, animalId, sireId],
+      );
+      if ((rel?.n ?? 0) > 0) warnings.push('consanguinity');
+    }
+    if (warnings.length && !force)
+      throw new ConflictException({ code: 'service.blocked', title: 'Servicio bloqueado', reasons: warnings });
+    return warnings;
+  }
+
+  /**
+   * Estado reproductivo AGREGADO por lote (E6): reusa `herdStatus` (regla única) y agrupa por lote —
+   * cabezas, preñez %, listas para servicio, diagnóstico pendiente y abiertas. Rankea por «listas».
+   */
+  async reproByLot() {
+    const herd = await this.herdStatus();
+    const byLot = new Map<string, any>();
+    for (const r of herd.rows) {
+      const key = r.lot_id ?? 'none';
+      if (!byLot.has(key)) byLot.set(key, { lot_id: r.lot_id, lot: r.lot ?? 'Sin lote', total: 0, pregnant: 0, due_soon: 0, ready_for_service: 0, diagnosis_pending: 0, open: 0 });
+      const g = byLot.get(key);
+      g.total++;
+      if (r.status === 'pregnant' || r.status === 'due_soon') g.pregnant++;
+      if (r.status === 'due_soon') g.due_soon++;
+      if (r.status === 'ready_for_service') g.ready_for_service++;
+      if (r.status === 'diagnosis_pending') g.diagnosis_pending++;
+      if (r.status === 'open') g.open++;
+    }
+    const rows = [...byLot.values()]
+      .map((g) => ({ ...g, pregnancy_rate_pct: g.total ? +((g.pregnant / g.total) * 100).toFixed(1) : null }))
+      .sort((a, b) => b.ready_for_service - a.ready_for_service || b.total - a.total);
+    return { rows };
+  }
+
   /** id determinista uuid-like a partir de una clave de idempotencia + discriminante. */
   private deriveId(baseKey: string, discriminator: string): string {
     const h = createHash('sha1').update(`${baseKey}:${discriminator}`).digest('hex');
@@ -53,6 +119,8 @@ export class ReproService {
     const id = idempotencyKey ? this.deriveId(idempotencyKey, animalId) : randomUUID();
     const existing = await this.db.one<any>(`SELECT id, type, occurred_at FROM breeding_events WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
     if (existing) return { ...existing, tag: animal.tag, already: true };
+    // Guardas (E6): retiro sanitario activo / caso clínico grave / consanguinidad. Bloquea salvo force.
+    const warnings = await this.serviceGuards(animalId, body?.sire_id ?? null, body?.force === true);
     // Consumo de pajuela/embrión (G-2): solo en AI con partida o en transferencia con embrión. Se
     // descuenta ANTES de registrar el servicio (regla única del saldo); si no alcanza (403), no queda
     // ni el servicio ni el consumo (en una request comparten la misma tx). Móvil/sync aún no lo envía.
@@ -72,7 +140,7 @@ export class ReproService {
       { method: body.method, sire_id: body?.sire_id ?? null, expected_due: computeExpectedDueDateFromService(new Date(occurredAt)) },
       occurredAt,
     );
-    return { ...row, tag: animal.tag };
+    return { ...row, tag: animal.tag, warnings };
   }
 
   /**
@@ -742,7 +810,7 @@ export class ReproService {
       const opKey = `protocol:${assignmentId}:${stepIndex}`;
       try {
         if (kind === 'insemination') {
-          await this.service(animal_id, { method: 'ai', occurred_at: occurredAt, sire_id: body.sire_id, semen_batch_id: body.semen_batch_id, protocol_id: assignment.protocol_id }, this.deriveId(opKey, animal_id));
+          await this.service(animal_id, { method: 'ai', occurred_at: occurredAt, sire_id: body.sire_id, semen_batch_id: body.semen_batch_id, protocol_id: assignment.protocol_id, force: true }, this.deriveId(opKey, animal_id));
           eventsCreated++;
         } else if (kind === 'hormonal' || kind === 'device_removal') {
           const id = this.deriveId(opKey, animal_id);

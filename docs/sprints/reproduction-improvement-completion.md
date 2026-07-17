@@ -164,6 +164,42 @@ abiertos), por toro (servicios/concepciones/tasa), abortos con causa, abiertas d
 **758 tests** (754 → +4), 0 ciclos. Verificado en web: Resumen con KPIs reales (17 servicios, concepción
 100 %, 11 partos, 1 aborto, 68 d intervalo, 120 d abiertos); «Por toro» (226: 5/5/100 %, 231: 4/4/100 %) + CSV.
 
-### Siguiente
-**Etapa 6 — Integración Lotes / Sanidad / Genética:** estado repro agregado por lote, bloquear/advertir
-servicio si hay retiro activo o caso sanitario grave, y desempeño por toro/semen (ya iniciado en E5).
+---
+
+## Etapa 6 — Integración Lotes / Sanidad / Genética ✅ (cierre del módulo)
+
+Sin esquema nuevo. Integra sin acoplar módulos (consulta directa de tablas).
+
+**Backend (`repro.service`):**
+- `reproByLot()` (`GET /reproduction/by-lot`): **estado reproductivo agregado por lote** — cabezas,
+  preñez %, listas para servicio, diagnóstico pendiente, abiertas; rankeado por «listas». Reusa
+  `herdStatus` (regla única).
+- **Guardas del servicio** (`serviceGuards`, en `service()`): antes de registrar un servicio valida
+  **retiro sanitario activo** (treatments) y **caso clínico grave abierto** (clinical_cases) —Sanidad—
+  y **consanguinidad** (mismo padre/madre o padre-hija/madre-hijo entre toro y vaca) —Genética—.
+  Cualquiera **bloquea (409 `service.blocked` con `reasons`)** salvo `force=true`, que registra el
+  servicio y devuelve las `warnings` salteadas. La inseminación de protocolo (E4) fuerza (acción
+  deliberada de grupo). No acopla módulos: consulta las tablas directamente.
+
+**Web:** panel **«Reproducción por lote»** (preñez %, listas, diag. pendiente, abiertas por lote);
+checkbox **«Forzar»** en la captura de Servicio (ignora retiro / caso grave / consanguinidad) y las
+`warnings` se muestran en el mensaje de éxito.
+
+**Tests (4 nuevos):** `repro-integration.integration` — retiro bloquea (force lo permite con advertencia),
+caso grave bloquea, consanguinidad bloquea (force lo permite), estado agregado por lote. **762 tests**
+(758 → +4), 0 ciclos. Verificado en web: by-lot (3 lotes), servicio bloqueado por retiro (409) y forzado
+(201 + warnings), panel por lote + checkbox forzar.
+
+---
+
+## Estado final del módulo Reproducción
+
+**COMPLETO (6/6 etapas).** De registro de eventos a sistema de gestión reproductiva operativo: estado
+rico derivado de eventos + días abiertos/postparto + alertas (E1), servicios/diagnósticos/partos
+robustos con idempotencia + aborto + tareas postparto (E2), dashboard operativo (E3), protocolos
+completos que registran eventos reales (E4), KPIs + reportes con CSV (E5), e integración Lotes/Sanidad/
+Genética (E6). **762 tests**, 0 ciclos, verificado end-to-end en cada etapa. Esquema: +columnas
+(pregnancies loss_cause/loss_gestational_days) y tabla `repro_protocol_assignment_animals`; el resto
+reutiliza y respeta las reglas únicas del sistema (movimientos, tareas, alertas, inventario, sanidad,
+genética) sin duplicar lógica. La regla `computeReproStatus` es la fuente única del estado, consumida
+por ficha/lista/lote/dashboard/alertas/reportes.

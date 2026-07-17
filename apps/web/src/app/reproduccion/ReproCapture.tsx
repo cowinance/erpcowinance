@@ -42,8 +42,8 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
     } else if (tab === 'Servicio') {
       res = await submit(
         `/animals/${animal.id}/services`,
-        { method, sire_id: fd.get('sire_id') || undefined, occurred_at: date },
-        () => `Servicio (${method === 'ai' ? 'IA' : 'monta natural'}) registrado para ${animal.tag}`,
+        { method, sire_id: fd.get('sire_id') || undefined, occurred_at: date, force: fd.get('force') === 'on' },
+        (r) => `Servicio (${method === 'ai' ? 'IA' : 'monta natural'}) registrado para ${animal.tag}${(r.warnings ?? []).length ? ` ⚠ (${(r.warnings).join(', ')})` : ''}`,
       );
     } else if (tab === 'Diagnóstico') {
       res = await submit(
@@ -169,6 +169,9 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
                 </Select>
               </Field>
             )}
+            <label className="flex items-center gap-2 text-label text-ink-2">
+              <input type="checkbox" name="force" className="size-4 accent-brand" /> Forzar (ignorar retiro sanitario / caso grave / consanguinidad)
+            </label>
           </>
         )}
 
