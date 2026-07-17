@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidCatalogEntryError, assertBreedPurpose, normalizeCatalogCode, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from './catalog';
+import { InvalidCatalogEntryError, assertBreedPurpose, assertUnitSystem, normalizeCatalogCode, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from './catalog';
+
+describe('assertUnitSystem', () => {
+  it('acepta metric/imperial y rechaza el resto', () => {
+    expect(assertUnitSystem('metric')).toBe('metric');
+    expect(assertUnitSystem('imperial')).toBe('imperial');
+    expect(() => assertUnitSystem('metrico')).toThrow(InvalidCatalogEntryError);
+    expect(() => assertUnitSystem('')).toThrow(InvalidCatalogEntryError);
+  });
+});
 
 describe('normalizeCurrencyCode', () => {
   it('normaliza a mayúsculas y exige 3 letras ISO 4217', () => {

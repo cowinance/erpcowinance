@@ -16,12 +16,14 @@ interface Diagnosis { id: string; code: string; name: string; category: string |
 interface Catalogs { species: Species[]; breeds: Breed[]; categories: Category[]; units: Unit[]; diagnoses: Diagnosis[] }
 interface Currency { code: string; name: string; symbol: string }
 interface CurrencySettings { default_currency: string | null; companies: { id: string; name: string; functional_currency: string }[]; currencies: Currency[] }
+interface OrgParams { country_code: string; default_currency: string; default_locale: string; timezone: string; unit_system: string; data_region: string }
+interface Flag { key: string; label: string; description: string; enabled: boolean }
 
 const PURPOSES: [string, string][] = [['beef', 'Carne'], ['dairy', 'Leche'], ['dual', 'Doble'], ['wool', 'Lana'], ['work', 'Trabajo']];
 const PURPOSE_ES = Object.fromEntries(PURPOSES) as Record<string, string>;
-const TABS = ['Moneda', 'Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
+const TABS = ['Moneda', 'Parámetros', 'Funciones', 'Razas', 'Diagnósticos', 'Categorías', 'Unidades', 'Especies'] as const;
 
-export function ConfigView({ catalogs, currency }: { catalogs: Catalogs; currency: CurrencySettings | null }) {
+export function ConfigView({ catalogs, currency, params, flags }: { catalogs: Catalogs; currency: CurrencySettings | null; params: OrgParams | null; flags: Flag[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<(typeof TABS)[number]>('Moneda');
   const [busy, setBusy] = useState(false);
@@ -64,6 +66,8 @@ export function ConfigView({ catalogs, currency }: { catalogs: Catalogs; currenc
       {error && <p role="alert" className="text-label text-danger">{error}</p>}
 
       {tab === 'Moneda' && <CurrencyTab currency={currency} busy={busy} call={call} />}
+      {tab === 'Parámetros' && <ParamsTab params={params} busy={busy} call={call} />}
+      {tab === 'Funciones' && <FlagsTab flags={flags} busy={busy} call={call} />}
       {tab === 'Razas' && <BreedsTab catalogs={catalogs} busy={busy} call={call} />}
       {tab === 'Diagnósticos' && <DiagnosesTab diagnoses={catalogs.diagnoses} busy={busy} call={call} />}
       {tab === 'Categorías' && <CategoriesTab categories={catalogs.categories} />}
@@ -111,6 +115,66 @@ function CurrencyTab({ currency, busy, call }: { currency: CurrencySettings | nu
         </ul>
       </Card>
     </div>
+  );
+}
+
+function ParamsTab({ params, busy, call }: { params: OrgParams | null; busy: boolean; call: Call }) {
+  const [unitSystem, setUnitSystem] = useState(params?.unit_system ?? 'metric');
+  const [locale, setLocale] = useState(params?.default_locale ?? '');
+  const [timezone, setTimezone] = useState(params?.timezone ?? '');
+  if (!params) return <Card><p className="py-3 text-center text-label text-ink-3">No se pudieron cargar los parámetros.</p></Card>;
+
+  return (
+    <Card className="max-w-lg">
+      <CardTitle>Parámetros de la organización</CardTitle>
+      <p className="mb-3 text-label text-ink-3">País {params.country_code} · región {params.data_region}. Estos ajustes definen cómo se formatean fechas, números y unidades en toda la app.</p>
+      <div className="space-y-3">
+        <label className="block text-label text-ink-2">Sistema de unidades
+          <div className="mt-1"><Select value={unitSystem} onChange={(e) => setUnitSystem(e.target.value)} aria-label="Sistema de unidades">
+            <option value="metric">Métrico (kg, km, ha)</option>
+            <option value="imperial">Imperial (lb, mi, ac)</option>
+          </Select></div>
+        </label>
+        <label className="block text-label text-ink-2">Locale
+          <div className="mt-1"><Input value={locale} onChange={(e) => setLocale(e.target.value)} placeholder="es-AR" aria-label="Locale" /></div>
+        </label>
+        <label className="block text-label text-ink-2">Zona horaria
+          <div className="mt-1"><Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="America/Argentina/Buenos_Aires" aria-label="Zona horaria" /></div>
+        </label>
+        <Button size="sm" loading={busy} disabled={busy || !locale.trim() || !timezone.trim()} onClick={() => call('PUT', '/config/params', { unit_system: unitSystem, default_locale: locale, timezone })}>
+          Guardar parámetros
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function FlagsTab({ flags, busy, call }: { flags: Flag[]; busy: boolean; call: Call }) {
+  return (
+    <Card className="max-w-2xl">
+      <CardTitle>Funciones opcionales</CardTitle>
+      <p className="mb-3 text-label text-ink-3">Activá o desactivá funciones para tu finca. Los cambios se aplican por organización.</p>
+      <ul className="divide-y divide-subtle">
+        {flags.map((f) => (
+          <li key={f.key} className="flex items-center justify-between gap-4 py-3">
+            <div>
+              <div className="text-body font-medium">{f.label}</div>
+              <div className="text-label text-ink-3">{f.description}</div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={f.enabled}
+              aria-label={f.label}
+              disabled={busy}
+              onClick={() => call('PUT', '/config/feature-flags', { key: f.key, enabled: !f.enabled })}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${f.enabled ? 'bg-brand' : 'bg-sunken border border-subtle'}`}
+            >
+              <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${f.enabled ? 'left-4' : 'left-0.5'}`} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

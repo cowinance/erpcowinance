@@ -75,9 +75,26 @@ Los catálogos tienen dos modelos distintos en el esquema:
   «La Esperanza S.A.» muestran USD). El seed de fábrica sigue naciendo en ARS/AR; esta pantalla es la
   vía para operar en USD.
 
+## 6-ter. Feature flags y parámetros (3ª entrega)
+
+- **Pestaña «Funciones» (feature flags):** registro de banderas conocidas (`FLAG_REGISTRY` en
+  `feature-flags.service.ts` — fuente única de qué banderas existen y su default) con toggle por tenant.
+  `GET /config/feature-flags` (estado resuelto: valor guardado o default) y `PUT /config/feature-flags`
+  (upsert por tenant+flag_key). El código consumidor pregunta `isEnabled(key)`; `FeatureFlagsService`
+  se exporta del módulo para eso. Banderas iniciales: benchmarking regional, captura por voz, push,
+  acceso de asesores. **El gating de cada función sobre su bandera es incremental** (el mecanismo queda
+  listo; conectar cada pantalla es follow-up).
+- **Pestaña «Parámetros»:** edita los parámetros operativos de la organización que la app ya lee —
+  `unit_system` (métrico/imperial), `default_locale`, `timezone`. `GET/PUT /config/params`.
+- **Regla única (dominio):** `assertUnitSystem` (metric/imperial).
+- **Fix RLS (tabla dormida):** `feature_flags` traía la policy dispersa sobre `app.current_tenant`
+  (habría denegado en prod). Se agregó a `RLS_TABLES` (policy estándar `app.tenant_id`) y se dropeó la
+  dispersa. `system_settings` ya estaba activa (la usa el mapa de posteo de Finanzas). RLS 90 → 91 tablas.
+
 ## 7. Estado del roadmap
 
-**Configuración · Catálogos maestros + Moneda → COMPLETAS.** El módulo dejó de ser placeholder.
+**Configuración · Catálogos + Moneda + Parámetros + Feature flags → COMPLETAS.** El módulo dejó de ser
+placeholder y cubre las cuatro partes de A3 salvo el motor de reglas declarativas.
 
 **Siguiente en A3 (a elección):** monedas y tipos de cambio (desbloquea multi-moneda de Tesorería),
 feature flags por tenant, o parámetros de negocio. También pendiente el hardening de RLS de los

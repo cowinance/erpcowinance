@@ -21,6 +21,17 @@ export function normalizeCatalogCode(code: unknown): string {
   return c;
 }
 
+export const UNIT_SYSTEMS = ['metric', 'imperial'] as const;
+export type UnitSystem = (typeof UNIT_SYSTEMS)[number];
+
+/** Sistema de unidades de la organización (métrico/imperial). */
+export function assertUnitSystem(value: unknown): UnitSystem {
+  if (!(UNIT_SYSTEMS as readonly string[]).includes(String(value))) {
+    throw new InvalidCatalogEntryError(`Sistema de unidades inválido: ${String(value)}`);
+  }
+  return value as UnitSystem;
+}
+
 /** Código de moneda ISO 4217: 3 letras. Normaliza a mayúsculas; la existencia en el catálogo la valida el servicio. */
 export function normalizeCurrencyCode(code: unknown): string {
   const c = String(code ?? '').trim().toUpperCase();

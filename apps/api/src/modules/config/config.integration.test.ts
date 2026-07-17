@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { CatalogsService } from './catalogs.service';
+import { FeatureFlagsService } from './feature-flags.service';
 
 /**
  * Integración de Configuración (A3 · catálogos maestros): lectura de catálogos globales + extensión por
@@ -13,6 +14,7 @@ import { CatalogsService } from './catalogs.service';
 describe('config — catálogos maestros', () => {
   let db: DbService;
   let svc: CatalogsService;
+  let flags: FeatureFlagsService;
   let originalCwd: string;
   let tmp: string;
   let speciesId: string;
@@ -26,6 +28,7 @@ describe('config — catálogos maestros', () => {
     db = new DbService();
     await db.onModuleInit();
     svc = new CatalogsService(db);
+    flags = new FeatureFlagsService(db);
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE deleted_at IS NULL LIMIT 1`))[0].id;
     globalBreedId = (await db.query<{ id: string }>(`SELECT id FROM breeds WHERE tenant_id IS NULL AND deleted_at IS NULL LIMIT 1`))[0].id;
   }, 120_000);
@@ -95,5 +98,32 @@ describe('config — catálogos maestros', () => {
   it('rechaza moneda con formato inválido (400) y código desconocido (400)', async () => {
     await expect(svc.setCurrency({ code: 'US' })).rejects.toMatchObject({ status: 400 }); // formato
     await expect(svc.setCurrency({ code: 'XYZ' })).rejects.toMatchObject({ status: 400 }); // no está en el catálogo
+  });
+
+  it('parámetros de organización: lee y actualiza unit_system/locale/timezone', async () => {
+    const before: any = await svc.orgSettings();
+    expect(before.unit_system).toBe('metric'); // default del demo
+    const after: any = await svc.setParams({ unit_system: 'imperial', default_locale: 'en-US', timezone: 'America/Chicago' });
+    expect(after.unit_system).toBe('imperial');
+    expect(after.default_locale).toBe('en-US');
+    await expect(svc.setParams({ unit_system: 'metrico', default_locale: 'es', timezone: 'UTC' })).rejects.toMatchObject({ status: 400 });
+    await expect(svc.setParams({ unit_system: 'metric', default_locale: '', timezone: 'UTC' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('feature flags: default del registro, toggle por tenant e isEnabled', async () => {
+    const initial: any[] = await flags.list();
+    const bench = initial.find((f) => f.key === 'regional_benchmarking');
+    expect(bench.enabled).toBe(false); // default del registro (sin fila)
+    expect(await flags.isEnabled('regional_benchmarking')).toBe(false);
+
+    const after: any[] = await flags.set({ key: 'regional_benchmarking', enabled: true });
+    expect(after.find((f) => f.key === 'regional_benchmarking').enabled).toBe(true);
+    expect(await flags.isEnabled('regional_benchmarking')).toBe(true);
+
+    // Upsert idempotente: apagar vuelve a false.
+    await flags.set({ key: 'regional_benchmarking', enabled: false });
+    expect(await flags.isEnabled('regional_benchmarking')).toBe(false);
+
+    await expect(flags.set({ key: 'no_existe', enabled: true })).rejects.toMatchObject({ status: 400 });
   });
 });

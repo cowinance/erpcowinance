@@ -352,6 +352,8 @@ export class DbService implements OnModuleInit {
     'journal_lines',
     // F-2: mapa de cuentas de posteo (k/v por company).
     'system_settings',
+    // A3 (Configuración): banderas de funcionalidad por tenant (tabla dormida activada).
+    'feature_flags',
     // F-3a: facturas (documento fiscal ligado a venta/compra).
     'invoices',
     // F-3b: pagos + imputaciones + cuentas bancarias.
@@ -495,6 +497,8 @@ export class DbService implements OnModuleInit {
     }
     // F-2: misma policy dispersa en system_settings (mapa de cuentas de posteo).
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_system_settings ON "system_settings";');
+    // A3 (Configuración): misma policy dispersa (app.current_tenant) en feature_flags.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_feature_flags ON "feature_flags";');
     // F-3a: misma policy dispersa en invoices.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_invoices ON "invoices";');
     // F-3b: mismas policies dispersas en pagos/imputaciones/bancos.

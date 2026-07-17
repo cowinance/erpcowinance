@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvalidCatalogEntryError, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from '@cowinance/domain';
+import { InvalidCatalogEntryError, assertUnitSystem, normalizeCurrencyCode, validateBreedInput, validateDiagnosisInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -109,6 +109,29 @@ export class CatalogsService {
     await this.db.query(`UPDATE organizations SET default_currency=$1, updated_at=now() WHERE id=$2`, [code, t]);
     await this.db.query(`UPDATE companies SET functional_currency=$1, updated_at=now() WHERE tenant_id=$2 AND deleted_at IS NULL`, [code, t]);
     return this.currencySettings();
+  }
+
+  /** Parámetros operativos de la organización que la app ya lee (formateo, unidades, zona horaria). */
+  async orgSettings() {
+    const org = await this.db.one<any>(
+      `SELECT country_code, default_currency, default_locale, timezone, unit_system, data_region FROM organizations WHERE id=$1`,
+      [this.db.tenant],
+    );
+    return org ?? null;
+  }
+
+  /** Actualiza los parámetros editables de la organización (sistema de unidades, locale, zona horaria). */
+  async setParams(body: { unit_system?: unknown; default_locale?: unknown; timezone?: unknown }) {
+    const unitSystem = this.validate(() => assertUnitSystem(body?.unit_system));
+    const locale = String(body?.default_locale ?? '').trim();
+    const timezone = String(body?.timezone ?? '').trim();
+    if (!locale) throw new BadRequestException({ code: 'config.locale_required', title: 'El locale es obligatorio' });
+    if (!timezone) throw new BadRequestException({ code: 'config.timezone_required', title: 'La zona horaria es obligatoria' });
+    await this.db.query(
+      `UPDATE organizations SET unit_system=$1, default_locale=$2, timezone=$3, updated_at=now() WHERE id=$4`,
+      [unitSystem, locale, timezone, this.db.tenant],
+    );
+    return this.orgSettings();
   }
 
   /** Ejecuta una validación de dominio y traduce su error a 400. */

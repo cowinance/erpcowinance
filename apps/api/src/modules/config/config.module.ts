@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigController } from './config.controller';
 import { CatalogsService } from './catalogs.service';
+import { FeatureFlagsService } from './feature-flags.service';
 
 /**
  * Configuración (A3 · Configuración y catálogos maestros): el "customizing" del ERP. Primera entrega —
@@ -9,6 +10,7 @@ import { CatalogsService } from './catalogs.service';
  */
 @Module({
   controllers: [ConfigController],
-  providers: [CatalogsService],
+  providers: [CatalogsService, FeatureFlagsService],
+  exports: [FeatureFlagsService], // otros módulos preguntan isEnabled(key).
 })
 export class ConfigModule {}
