@@ -1,17 +1,19 @@
 import { Module } from '@nestjs/common';
 import { HrController } from './hr.controller';
 import { PayrollController } from './payroll.controller';
+import { WorkLogsController } from './work-logs.controller';
 import { EmployeesService } from './employees.service';
 import { PayrollService } from './payroll.service';
+import { WorkLogsService } from './work-logs.service';
 import { FinanceModule } from '../finance/finance.module';
 
 /**
- * RRHH: empleados (H-1) + liquidaciones (H-2). Depende (unidireccional) de Finanzas para postear el
- * asiento de nómina reusando LedgerService + el mapa de roles de PostingService.
+ * RRHH: empleados (H-1) + liquidaciones (H-2) + partes de trabajo (WL-1). Depende (unidireccional) de
+ * Finanzas para postear el asiento de nómina reusando LedgerService + el mapa de roles de PostingService.
  */
 @Module({
   imports: [FinanceModule],
-  controllers: [HrController, PayrollController],
-  providers: [EmployeesService, PayrollService],
+  controllers: [HrController, PayrollController, WorkLogsController],
+  providers: [EmployeesService, PayrollService, WorkLogsService],
 })
 export class HrModule {}

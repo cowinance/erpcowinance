@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const TABS: [string, string][] = [
   ['/rrhh', 'Empleados'],
   ['/rrhh/liquidaciones', 'Liquidaciones'],
+  ['/rrhh/partes', 'Partes de trabajo'],
 ];
 
 /** Navegación local del módulo RRHH (H-3). Sigue el patrón de CommerceNav/FinanceNav. */
