@@ -55,6 +55,36 @@ reescrito (4: estados desde eventos, días, repetidora, `toPrepare`, `statusAler
 → +11), 0 ciclos. Verificado en web: herd-status con 12 preñadas / 16 listas / 4 abiertas / 4 próximas a
 parir; alerta `open_too_long` (4) derivada en la agenda; página con estados ricos + «próximas a preparar».
 
+---
+
+## Etapa 2 — Servicios/diagnósticos/partos robustos ✅
+
+**Esquema:** `pregnancies` + `loss_cause`, `loss_gestational_days` (para el registro de aborto).
+
+**Servicio (`repro.service`):**
+- **Idempotencia por `Idempotency-Key`** en celo, servicio, diagnóstico (preñada) y parto — id
+  determinista por (key, animal); reprocesar devuelve `already: true` sin duplicar.
+- **Celo** enriquecido: intensidad + comportamiento (en payload de timeline). `heatsNotServed(days)` =
+  celos detectados sin servicio ni preñez abierta posterior (`GET /reproduction/heats-not-served`).
+- **Servicio grupal** `bulkService(body)`: monta natural por lote/selección, reusa la regla única
+  `service` por vientre, idempotente por operación (`POST /reproduction/services/bulk`).
+- **Diagnóstico** amplía a **dudosa**: no crea/cierra preñez, deja traza y **agenda un recontrol**
+  (tarea +14 d). `empty` sigue cerrando la preñez abierta como perdida.
+- **Aborto dedicado** `abortion(body)`: cierra la preñez como `aborted` con **causa + edad gestacional**,
+  timeline `abortion` y **tarea de revisión sanitaria** (`POST /abortions`).
+- **Parto** robustecido: envuelto en `db.tx`, idempotente (sin duplicar crías), y **agenda tareas
+  postparto** vía TaskService server-authored: «Revisión postparto» (+30 d) y «Preparar para servicio»
+  (al cumplir el VWP configurado). Padre desde la preñez; crías dadas de alta.
+
+**Web (`ReproCapture`):** nueva pestaña **Aborto** (causa + edad gestacional); celo con intensidad y
+comportamiento; diagnóstico con opción **Dudosa (recontrol)**; tarjeta **Celos sin servir**.
+
+**Tests (6 nuevos):** `service-diagnosis-calving.integration` — servicio idempotente, dudoso→recontrol,
+aborto→preñez aborted+causa/edad+revisión, parto→cría+preñez cerrada+tareas postparto (idempotente sin
+duplicar), servicio grupal por lote, celos sin servir. **748 tests** (742 → +6), 0 ciclos. Verificado en
+web: servicio idempotente (`already`), dudoso (recontrol +14 d), aborto (preñez cerrada), parto con crías
++ tareas «Revisión postparto»/«Preparar para servicio», celos sin servir.
+
 ### Siguiente
-**Etapa 2 — Servicios/diagnósticos/partos robustos:** idempotencia, diagnóstico dudosa/pérdida, aborto
-dedicado (causa + edad gestacional), tareas de revisión postparto + preparación al parir, celo→servicio.
+**Etapa 3 — Dashboard reproductivo operativo:** próximas a preparar, diagnóstico pendiente, partos
+próximos, abiertas críticas, protocolos activos, KPIs principales, acciones rápidas y filtros.

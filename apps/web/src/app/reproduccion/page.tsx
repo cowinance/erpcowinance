@@ -5,6 +5,7 @@ import { formatDate } from '@/lib/format';
 import { ReproCapture } from './ReproCapture';
 import { HerdStatus } from './HerdStatus';
 import { ToPreparePanel } from './ToPreparePanel';
+import { HeatsNotServedPanel } from './HeatsNotServedPanel';
 import { Baby } from 'lucide-react';
 
 const DIAG_METHOD: Record<string, string> = { ultrasound: 'Ecografía', palpation: 'Palpación', blood: 'Sangre', visual: 'Visual' };
@@ -95,8 +96,9 @@ export default async function ReproPage() {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 grid grid-cols-2 gap-4 max-lg:grid-cols-1">
         <ToPreparePanel />
+        <HeatsNotServedPanel />
       </div>
 
       <div className="mt-4">

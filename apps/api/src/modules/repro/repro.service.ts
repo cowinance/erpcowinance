@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError, computeReproStatus, DEFAULT_REPRO_CONFIG } from '@cowinance/domain';
 import type { ReproConfig, ReproFacts } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
@@ -19,27 +19,40 @@ export class ReproService {
     private readonly embryos: EmbryosService,
   ) {}
 
-  /** Detección de celo. */
-  async heat(animalId: string, body: any) {
+  /** id determinista uuid-like a partir de una clave de idempotencia + discriminante. */
+  private deriveId(baseKey: string, discriminator: string): string {
+    const h = createHash('sha1').update(`${baseKey}:${discriminator}`).digest('hex');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  }
+
+  /** Detección de celo — idempotente por Idempotency-Key. Registra intensidad y comportamiento. */
+  async heat(animalId: string, body: any, idempotencyKey?: string) {
     const animal = await this.requireFemale(animalId);
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    const id = idempotencyKey ? this.deriveId(idempotencyKey, animalId) : randomUUID();
+    const payload = { intensity: body?.intensity ?? null, behavior: body?.behavior ?? null, notes: body?.notes ?? null };
+    const existing = await this.db.one<any>(`SELECT id, occurred_at FROM breeding_events WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
+    if (existing) return { ...existing, tag: animal.tag, already: true };
     const row = await this.db.one<any>(
-      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, notes, created_by)
-       VALUES ($1,$2,'heat',$3,$4,$5) RETURNING id, occurred_at`,
-      [this.db.tenant, animalId, occurredAt, body?.notes ?? null, this.db.user],
+      `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, notes, created_by)
+       VALUES ($1,$2,$3,'heat',$4,$5,$6) ON CONFLICT (id) DO NOTHING RETURNING id, occurred_at`,
+      [id, this.db.tenant, animalId, occurredAt, JSON.stringify(payload), this.db.user],
     );
-    await insertAnimalEvent(this.db, animalId, 'heat', { notes: body?.notes ?? null }, occurredAt);
+    await insertAnimalEvent(this.db, animalId, 'heat', payload, occurredAt);
     return { ...row, tag: animal.tag };
   }
 
-  /** Servicio: monta natural, inseminación artificial o transferencia embrionaria. */
-  async service(animalId: string, body: any) {
+  /** Servicio: monta natural, inseminación artificial o transferencia embrionaria. Idempotente. */
+  async service(animalId: string, body: any, idempotencyKey?: string) {
     const animal = await this.requireFemale(animalId);
     const method =
       body?.method === 'natural' ? 'service_natural' : body?.method === 'ai' ? 'service_ai' : body?.method === 'embryo_transfer' ? 'embryo_transfer' : null;
     if (!method)
       throw new BadRequestException({ code: 'service.invalid_method', title: "method debe ser 'natural', 'ai' o 'embryo_transfer'" });
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    const id = idempotencyKey ? this.deriveId(idempotencyKey, animalId) : randomUUID();
+    const existing = await this.db.one<any>(`SELECT id, type, occurred_at FROM breeding_events WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
+    if (existing) return { ...existing, tag: animal.tag, already: true };
     // Consumo de pajuela/embrión (G-2): solo en AI con partida o en transferencia con embrión. Se
     // descuenta ANTES de registrar el servicio (regla única del saldo); si no alcanza (403), no queda
     // ni el servicio ni el consumo (en una request comparten la misma tx). Móvil/sync aún no lo envía.
@@ -48,9 +61,9 @@ export class ReproService {
     if (semenBatchId) await this.semen.adjustStraws(semenBatchId, -1, 'insemination');
     if (embryoId) await this.embryos.adjustStraws(embryoId, -1, 'transfer');
     const row = await this.db.one<any>(
-      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, type, occurred_at`,
-      [this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.notes ?? null, this.db.user],
+      `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, technician_id, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING RETURNING id, type, occurred_at`,
+      [id, this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.technician_id ?? null, body?.notes ?? null, this.db.user],
     );
     await insertAnimalEvent(
       this.db,
@@ -62,12 +75,78 @@ export class ReproService {
     return { ...row, tag: animal.tag };
   }
 
+  /**
+   * Servicio GRUPAL (monta natural de toro sobre un lote, o selección): aplica la regla única `service`
+   * por vientre activo, idempotente por (Idempotency-Key, animal). Salta machos/no-vientres.
+   */
+  async bulkService(body: any, idempotencyKey?: string) {
+    if (!body?.method) throw new BadRequestException({ code: 'service.missing_method', title: 'method es obligatorio' });
+    let animalIds: string[] = Array.isArray(body?.animal_ids) ? body.animal_ids : [];
+    if (!animalIds.length && body?.lot_id) {
+      const rows = await this.db.query<{ id: string }>(
+        `SELECT a.id FROM animals a JOIN animal_categories c ON c.id = a.category_id AND c.code IN ('vaca','vaquillona')
+         WHERE a.tenant_id = $1 AND a.status = 'active' AND a.deleted_at IS NULL AND a.current_lot_id = $2`,
+        [this.db.tenant, body.lot_id],
+      );
+      animalIds = rows.map((r) => r.id);
+    }
+    if (!animalIds.length) throw new BadRequestException({ code: 'service.no_targets', title: 'Indicá animal_ids o un lot_id con vientres' });
+    const baseKey = idempotencyKey ?? randomUUID();
+    const applied: string[] = [];
+    const skipped: { animal_id: string; reason: string }[] = [];
+    for (const animalId of animalIds) {
+      try {
+        await this.service(animalId, body, this.deriveId(baseKey, animalId));
+        applied.push(animalId);
+      } catch (e: any) {
+        skipped.push({ animal_id: animalId, reason: e?.response?.code ?? 'error' });
+      }
+    }
+    return { applied: applied.length, skipped: skipped.length, skipped_detail: skipped };
+  }
+
+  /** Celos detectados sin servicio posterior (para decidir a quién servir). */
+  async heatsNotServed(days = 30) {
+    return this.db.query(
+      `SELECT h.animal_id, ai.value AS tag, l.name AS lot, max(h.occurred_at)::text AS last_heat
+       FROM breeding_events h
+       JOIN animals a ON a.id = h.animal_id AND a.status = 'active' AND a.deleted_at IS NULL
+       LEFT JOIN lots l ON l.id = a.current_lot_id
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+       WHERE h.tenant_id = $1 AND h.type = 'heat' AND h.deleted_at IS NULL
+         AND h.occurred_at >= CURRENT_DATE - ($2 || ' days')::interval
+         AND NOT EXISTS (SELECT 1 FROM breeding_events s WHERE s.animal_id = h.animal_id AND s.deleted_at IS NULL
+                          AND s.type IN ('service_natural','service_ai','embryo_transfer') AND s.occurred_at >= h.occurred_at)
+         AND NOT EXISTS (SELECT 1 FROM pregnancies p WHERE p.animal_id = h.animal_id AND p.status = 'open' AND p.deleted_at IS NULL)
+       GROUP BY h.animal_id, ai.value, l.name
+       ORDER BY last_heat DESC LIMIT 100`,
+      [this.db.tenant, days],
+    );
+  }
+
   /** Diagnóstico de gestación (ecografía/palpación). */
-  async diagnose(body: any) {
+  async diagnose(body: any, idempotencyKey?: string) {
     if (!body?.animal_id || !body?.result)
-      throw new BadRequestException({ code: 'diagnosis.missing_fields', title: 'animal_id y result (pregnant|empty) son obligatorios' });
+      throw new BadRequestException({ code: 'diagnosis.missing_fields', title: 'animal_id y result (pregnant|empty|doubtful) son obligatorios' });
+    if (!['pregnant', 'empty', 'doubtful'].includes(body.result))
+      throw new BadRequestException({ code: 'diagnosis.invalid_result', title: "result debe ser 'pregnant', 'empty' o 'doubtful'" });
     const animal = await this.requireFemale(body.animal_id);
     const diagnosisDate = (body.diagnosis_date ?? new Date().toISOString()).slice(0, 10);
+
+    if (body.result === 'doubtful') {
+      // Dudosa: no crea/cierra preñez; deja traza y agenda un RECONTROL (tarea) a los 14 días.
+      return this.db.tx(async (q) => {
+        await q.query(
+          `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
+           VALUES ($1,$2,'pregnancy_doubtful',$3,$4,now(),'manual')`,
+          [this.db.tenant, body.animal_id, JSON.stringify({ method: body.method ?? 'ultrasound' }), diagnosisDate],
+        );
+        const farm = (await q.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`, [this.db.tenant]))?.id ?? null;
+        const due = new Date(new Date(diagnosisDate).getTime() + 14 * 86400000).toISOString();
+        await this.tasks.createTask(q, { title: `Recontrol de diagnóstico — caravana ${animal.tag ?? '—'}`, type: 'breeding', dueDate: due, priority: 'normal', relatedType: 'animal', relatedId: body.animal_id, farmId: farm }, { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user });
+        return { tag: animal.tag, result: 'doubtful', recheck_due: due.slice(0, 10) };
+      });
+    }
 
     if (body.result === 'pregnant') {
       const open = await this.db.one<any>(
@@ -76,6 +155,10 @@ export class ReproService {
       );
       if (open)
         throw new BadRequestException({ code: 'diagnosis.already_pregnant', title: `${animal.tag} ya tiene una preñez abierta` });
+
+      const pregnancyId = idempotencyKey ? this.deriveId(idempotencyKey, body.animal_id) : randomUUID();
+      const dup = await this.db.one<any>(`SELECT id, diagnosis_date, expected_due_date FROM pregnancies WHERE id = $1 AND tenant_id = $2`, [pregnancyId, this.db.tenant]);
+      if (dup) return { ...dup, tag: animal.tag, result: 'pregnant', already: true };
 
       const lastService = await this.db.one<any>(
         `SELECT id, occurred_at FROM breeding_events
@@ -89,15 +172,15 @@ export class ReproService {
         : computeExpectedDueDateFromDiagnosis(new Date(diagnosisDate));
 
       const row = await this.db.one<any>(
-        `INSERT INTO pregnancies (tenant_id, animal_id, breeding_event_id, diagnosis_date, method, expected_due_date, status, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,'open',$7) RETURNING id, diagnosis_date, expected_due_date`,
-        [this.db.tenant, body.animal_id, lastService?.id ?? null, diagnosisDate, body.method ?? 'ultrasound', expectedDue, this.db.user],
+        `INSERT INTO pregnancies (id, tenant_id, animal_id, breeding_event_id, diagnosis_date, method, expected_due_date, status, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8) ON CONFLICT (id) DO NOTHING RETURNING id, diagnosis_date, expected_due_date`,
+        [pregnancyId, this.db.tenant, body.animal_id, lastService?.id ?? null, diagnosisDate, body.method ?? 'ultrasound', expectedDue, this.db.user],
       );
       await insertAnimalEvent(this.db, body.animal_id, 'pregnancy_diagnosed', { method: body.method ?? 'ultrasound', expected_due_date: expectedDue }, diagnosisDate);
       return { ...row, tag: animal.tag, result: 'pregnant' };
     }
 
-    // Vacía: si había preñez abierta, se marca perdida (aborto/reabsorción)
+    // Vacía: si había preñez abierta, se marca perdida (reabsorción). Vuelve a estado abierta/elegible.
     const open = await this.db.one<any>(
       `UPDATE pregnancies SET status = 'lost', closed_at = $3, updated_at = now()
        WHERE animal_id = $1 AND status = 'open' AND deleted_at IS NULL AND tenant_id = $2 RETURNING id`,
@@ -107,62 +190,94 @@ export class ReproService {
     return { tag: animal.tag, result: 'empty', previous_pregnancy_lost: !!open };
   }
 
-  /** Parto: cierra la preñez, registra el parto y da de alta las crías. */
-  async calving(body: any) {
+  /**
+   * Aborto / pérdida reproductiva: cierra la preñez abierta como 'aborted' con causa y edad
+   * gestacional aproximada, deja traza en timeline y agenda una TAREA de revisión sanitaria. Idempotente.
+   */
+  async abortion(body: any, idempotencyKey?: string) {
+    if (!body?.animal_id) throw new BadRequestException({ code: 'abortion.missing_fields', title: 'animal_id es obligatorio' });
+    const animal = await this.requireFemale(body.animal_id);
+    const occurredAt = (body.occurred_at ?? new Date().toISOString()).slice(0, 10);
+    return this.db.tx(async (q) => {
+      const open = await q.one<any>(
+        `UPDATE pregnancies SET status = 'aborted', closed_at = $3, loss_cause = $4, loss_gestational_days = $5, updated_at = now()
+         WHERE animal_id = $1 AND tenant_id = $2 AND status = 'open' AND deleted_at IS NULL RETURNING id`,
+        [body.animal_id, this.db.tenant, occurredAt, body.cause ?? null, body.gestational_age_days ?? null],
+      );
+      await q.query(
+        `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
+         VALUES ($1,$2,'abortion',$3,$4,now(),'manual')`,
+        [this.db.tenant, body.animal_id, JSON.stringify({ cause: body.cause ?? null, gestational_age_days: body.gestational_age_days ?? null, had_open_pregnancy: !!open }), occurredAt],
+      );
+      const farm = (await q.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`, [this.db.tenant]))?.id ?? null;
+      await this.tasks.createTask(q, { title: `Revisión por aborto — caravana ${animal.tag ?? '—'}`, type: 'health', dueDate: new Date().toISOString(), priority: 'high', relatedType: 'animal', relatedId: body.animal_id, farmId: farm }, { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user });
+      return { tag: animal.tag, result: 'aborted', pregnancy_closed: !!open, occurred_at: occurredAt };
+    });
+  }
+
+  /** Parto: cierra la preñez, registra el parto, da de alta las crías y agenda tareas postparto. Idempotente. */
+  async calving(body: any, idempotencyKey?: string) {
     if (!body?.dam_id)
       throw new BadRequestException({ code: 'calving.missing_fields', title: 'dam_id es obligatorio' });
     const dam = await this.requireFemale(body.dam_id);
     const calvingDate = (body.calving_date ?? new Date().toISOString()).slice(0, 10);
     const offspring: any[] = Array.isArray(body.offspring) && body.offspring.length ? body.offspring : [{ sex: 'F', vitality: 'live' }];
+    const calvingId = idempotencyKey ? this.deriveId(idempotencyKey, body.dam_id) : randomUUID();
+    const config = await this.reproConfig();
 
-    const pregnancy = await this.db.one<any>(
-      `UPDATE pregnancies SET status = 'calved', closed_at = $3, updated_at = now()
-       WHERE animal_id = $1 AND tenant_id = $2 AND status = 'open' AND deleted_at IS NULL RETURNING id, breeding_event_id`,
-      [body.dam_id, this.db.tenant, calvingDate],
-    );
-    const sire = pregnancy?.breeding_event_id
-      ? await this.db.one<any>(`SELECT sire_id FROM breeding_events WHERE id = $1`, [pregnancy.breeding_event_id])
-      : null;
+    return this.db.tx(async (q) => {
+      const existing = await q.one<any>(`SELECT id, calving_date::text AS calving_date FROM calvings WHERE id = $1 AND tenant_id = $2`, [calvingId, this.db.tenant]);
+      if (existing) return { ...existing, dam_tag: dam.tag, already: true };
 
-    const calving = await this.db.one<any>(
-      `INSERT INTO calvings (tenant_id, pregnancy_id, dam_id, calving_date, ease, offspring_count, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, calving_date`,
-      [this.db.tenant, pregnancy?.id ?? null, body.dam_id, calvingDate, body.ease ?? null, offspring.length, body.notes ?? null, this.db.user],
-    );
-
-    const species = await this.db.one<any>(`SELECT id FROM species WHERE code = 'bovine'`);
-    const calves: { animal_id: string | null; sex: string; vitality: string; tag: string | null }[] = [];
-    for (const o of offspring) {
-      let calfId: string | null = null;
-      if (o.vitality !== 'stillborn') {
-        const catCode = newbornCategoryCode(o.sex);
-        const cat = await this.db.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [catCode]);
-        const damRow = await this.db.one<any>(`SELECT farm_id, current_lot_id, current_paddock_id FROM animals WHERE id = $1`, [body.dam_id]);
-        const calf = await this.db.one<any>(
-          `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, sire_id, breeding_method_origin, current_lot_id, current_paddock_id, status, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,'born',$7,$8,$9,$10,$11,'active',$12) RETURNING id`,
-          [this.db.tenant, damRow.farm_id, species.id, cat?.id ?? null, o.sex ?? 'F', calvingDate, body.dam_id, sire?.sire_id ?? null, 'natural', damRow.current_lot_id, damRow.current_paddock_id, this.db.user],
-        );
-        calfId = calf.id;
-        if (o.tag) {
-          await this.db.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`, [
-            this.db.tenant,
-            calfId,
-            String(o.tag),
-          ]);
-        }
-        await insertAnimalEvent(this.db, calfId!, 'birth', { dam_tag: dam.tag, birth_weight_kg: o.birth_weight_kg ?? null }, calvingDate);
-      }
-      await this.db.query(
-        `INSERT INTO calving_offspring (tenant_id, calving_id, animal_id, birth_weight_kg, vitality, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [this.db.tenant, calving.id, calfId, o.birth_weight_kg ?? null, o.vitality ?? 'live', this.db.user],
+      const pregnancy = await q.one<any>(
+        `UPDATE pregnancies SET status = 'calved', closed_at = $3, updated_at = now()
+         WHERE animal_id = $1 AND tenant_id = $2 AND status = 'open' AND deleted_at IS NULL RETURNING id, breeding_event_id`,
+        [body.dam_id, this.db.tenant, calvingDate],
       );
-      calves.push({ animal_id: calfId, sex: o.sex, vitality: o.vitality ?? 'live', tag: o.tag ?? null });
-    }
+      const sire = pregnancy?.breeding_event_id
+        ? await q.one<any>(`SELECT sire_id FROM breeding_events WHERE id = $1`, [pregnancy.breeding_event_id])
+        : null;
 
-    await insertAnimalEvent(this.db, body.dam_id, 'calving', { offspring: calves.length, ease: body.ease ?? null }, calvingDate);
-    return { ...calving, dam_tag: dam.tag, offspring: calves };
+      const calving = await q.one<any>(
+        `INSERT INTO calvings (id, tenant_id, pregnancy_id, dam_id, calving_date, ease, offspring_count, notes, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING RETURNING id, calving_date`,
+        [calvingId, this.db.tenant, pregnancy?.id ?? null, body.dam_id, calvingDate, body.ease ?? null, offspring.length, body.notes ?? null, this.db.user],
+      );
+
+      const species = await q.one<any>(`SELECT id FROM species WHERE code = 'bovine'`);
+      const damRow = await q.one<any>(`SELECT farm_id, current_lot_id, current_paddock_id FROM animals WHERE id = $1`, [body.dam_id]);
+      const calves: { animal_id: string | null; sex: string; vitality: string; tag: string | null }[] = [];
+      for (const o of offspring) {
+        let calfId: string | null = null;
+        if (o.vitality !== 'stillborn') {
+          const cat = await q.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [newbornCategoryCode(o.sex)]);
+          const calf = await q.one<any>(
+            `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, sire_id, breeding_method_origin, current_lot_id, current_paddock_id, status, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,'born',$7,$8,$9,$10,$11,'active',$12) RETURNING id`,
+            [this.db.tenant, damRow.farm_id, species.id, cat?.id ?? null, o.sex ?? 'F', calvingDate, body.dam_id, sire?.sire_id ?? null, 'natural', damRow.current_lot_id, damRow.current_paddock_id, this.db.user],
+          );
+          calfId = calf.id;
+          if (o.tag) await q.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`, [this.db.tenant, calfId, String(o.tag)]);
+          await q.query(`INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source) VALUES ($1,$2,'birth',$3,$4,now(),'manual')`, [this.db.tenant, calfId, JSON.stringify({ dam_tag: dam.tag, birth_weight_kg: o.birth_weight_kg ?? null }), calvingDate]);
+        }
+        await q.query(
+          `INSERT INTO calving_offspring (tenant_id, calving_id, animal_id, birth_weight_kg, vitality, created_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [this.db.tenant, calving.id, calfId, o.birth_weight_kg ?? null, o.vitality ?? 'live', this.db.user],
+        );
+        calves.push({ animal_id: calfId, sex: o.sex, vitality: o.vitality ?? 'live', tag: o.tag ?? null });
+      }
+
+      await q.query(`INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source) VALUES ($1,$2,'calving',$3,$4,now(),'manual')`, [this.db.tenant, body.dam_id, JSON.stringify({ offspring: calves.length, ease: body.ease ?? null }), calvingDate]);
+
+      // Tareas postparto (server-authored → sincronizan + agenda): revisión postparto (+30 d) y
+      // preparación para nuevo servicio (al cumplir el VWP configurado).
+      const reviewDue = new Date(new Date(calvingDate).getTime() + 30 * 86400000).toISOString();
+      const prepDue = new Date(new Date(calvingDate).getTime() + config.vwpDays * 86400000).toISOString();
+      await this.tasks.createTask(q, { title: `Revisión postparto — caravana ${dam.tag ?? '—'}`, type: 'breeding', dueDate: reviewDue, priority: 'normal', relatedType: 'animal', relatedId: body.dam_id, farmId: damRow.farm_id }, { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user });
+      await this.tasks.createTask(q, { title: `Preparar para servicio — caravana ${dam.tag ?? '—'}`, type: 'breeding', dueDate: prepDue, priority: 'normal', relatedType: 'animal', relatedId: body.dam_id, farmId: damRow.farm_id }, { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user });
+
+      return { ...calving, dam_tag: dam.tag, offspring: calves };
+    });
   }
 
   /**

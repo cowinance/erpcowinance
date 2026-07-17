@@ -535,6 +535,8 @@ CREATE TABLE "pregnancies" (
   "expected_due_date" date,
   "status" varchar(255) DEFAULT 'open' NOT NULL CHECK ("status" IN ('open','calved','aborted','lost')),
   "closed_at" date,
+  "loss_cause" varchar(255),
+  "loss_gestational_days" smallint,
   "created_at" timestamptz DEFAULT now() NOT NULL,
   "updated_at" timestamptz DEFAULT now() NOT NULL,
   "created_by" uuid,

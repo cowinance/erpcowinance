@@ -24,7 +24,11 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
     let res = null;
 
     if (tab === 'Celo') {
-      res = await submit(`/animals/${animal.id}/heats`, { occurred_at: date, notes: fd.get('notes') || undefined }, () => `Celo registrado para ${animal.tag}`);
+      res = await submit(
+        `/animals/${animal.id}/heats`,
+        { occurred_at: date, intensity: fd.get('intensity') || undefined, behavior: fd.get('behavior') || undefined, notes: fd.get('notes') || undefined },
+        () => `Celo registrado para ${animal.tag}`,
+      );
     } else if (tab === 'Servicio') {
       res = await submit(
         `/animals/${animal.id}/services`,
@@ -38,7 +42,15 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
         (r) =>
           r.result === 'pregnant'
             ? `${animal.tag} preñada — parto probable ${new Date(r.expected_due_date).toLocaleDateString('es-AR')}`
-            : `${animal.tag} vacía${r.previous_pregnancy_lost ? ' (preñez anterior perdida)' : ''}`,
+            : r.result === 'doubtful'
+              ? `${animal.tag}: diagnóstico dudoso — recontrol agendado`
+              : `${animal.tag} vacía${r.previous_pregnancy_lost ? ' (preñez anterior perdida)' : ''}`,
+      );
+    } else if (tab === 'Aborto') {
+      res = await submit(
+        '/abortions',
+        { animal_id: animal.id, occurred_at: date, cause: fd.get('cause') || undefined, gestational_age_days: fd.get('gest_days') ? Number(fd.get('gest_days')) : undefined },
+        () => `Aborto registrado para ${animal.tag} — revisión agendada`,
       );
     } else if (tab === 'Parto') {
       res = await submit(
@@ -74,7 +86,7 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
 
   return (
     <form onSubmit={handle}>
-      <Tabs tabs={['Celo', 'Servicio', 'Diagnóstico', 'Parto', 'Destete']} active={tab} onChange={setTab} />
+      <Tabs tabs={['Celo', 'Servicio', 'Diagnóstico', 'Parto', 'Aborto', 'Destete']} active={tab} onChange={setTab} />
       <div className="space-y-3">
         <div>
           <span className="mb-1 block text-label font-medium text-ink-2">{tab === 'Parto' ? 'Madre *' : tab === 'Destete' ? 'Ternero/a *' : 'Hembra *'}</span>
@@ -86,9 +98,30 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
         </Field>
 
         {tab === 'Celo' && (
-          <Field label="Notas" htmlFor="notes">
-            <Input id="notes" name="notes" controlSize="md" placeholder="Intensidad, observador…" />
-          </Field>
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Intensidad" htmlFor="intensity">
+                <Select id="intensity" name="intensity" controlSize="md" defaultValue="">
+                  <option value="">—</option>
+                  <option value="low">Baja</option>
+                  <option value="medium">Media</option>
+                  <option value="high">Alta</option>
+                </Select>
+              </Field>
+              <Field label="Comportamiento" htmlFor="behavior">
+                <Select id="behavior" name="behavior" controlSize="md" defaultValue="">
+                  <option value="">—</option>
+                  <option value="mounting">Monta a otras</option>
+                  <option value="standing">Se deja montar</option>
+                  <option value="mucus">Flujo mucoso</option>
+                  <option value="restless">Inquieta</option>
+                </Select>
+              </Field>
+            </div>
+            <Field label="Notas" htmlFor="notes">
+              <Input id="notes" name="notes" controlSize="md" placeholder="Observador…" />
+            </Field>
+          </>
         )}
 
         {tab === 'Servicio' && (
@@ -135,6 +168,7 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
               <Select id="result" name="result" required controlSize="md">
                 <option value="pregnant">Preñada</option>
                 <option value="empty">Vacía</option>
+                <option value="doubtful">Dudosa (recontrol)</option>
               </Select>
             </Field>
             <Field label="Método" htmlFor="diag_method">
@@ -182,6 +216,17 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
               </Field>
             </div>
           </>
+        )}
+
+        {tab === 'Aborto' && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Causa probable" htmlFor="cause">
+              <Input id="cause" name="cause" controlSize="md" placeholder="Infecciosa, nutricional…" />
+            </Field>
+            <Field label="Edad gestacional (días)" htmlFor="gest_days">
+              <Input id="gest_days" name="gest_days" type="number" controlSize="md" placeholder="120" />
+            </Field>
+          </div>
         )}
 
         {tab === 'Destete' && (

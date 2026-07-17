@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import { ReproService } from './repro.service';
 
 @Controller()
@@ -6,23 +6,38 @@ export class ReproController {
   constructor(private readonly repro: ReproService) {}
 
   @Post('animals/:id/heats')
-  heat(@Param('id') id: string, @Body() body: any) {
-    return this.repro.heat(id, body);
+  heat(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.repro.heat(id, body, key);
   }
 
   @Post('animals/:id/services')
-  service(@Param('id') id: string, @Body() body: any) {
-    return this.repro.service(id, body);
+  service(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.repro.service(id, body, key);
+  }
+
+  @Post('reproduction/services/bulk')
+  bulkService(@Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.repro.bulkService(body, key);
+  }
+
+  @Get('reproduction/heats-not-served')
+  heatsNotServed(@Query('days') days?: string) {
+    return this.repro.heatsNotServed(days ? Number(days) : undefined);
   }
 
   @Post('pregnancy-diagnoses')
-  diagnose(@Body() body: any) {
-    return this.repro.diagnose(body);
+  diagnose(@Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.repro.diagnose(body, key);
+  }
+
+  @Post('abortions')
+  abortion(@Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.repro.abortion(body, key);
   }
 
   @Post('calvings')
-  calving(@Body() body: any) {
-    return this.repro.calving(body);
+  calving(@Body() body: any, @Headers('idempotency-key') key?: string) {
+    return this.repro.calving(body, key);
   }
 
   @Post('weanings')
