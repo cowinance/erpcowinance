@@ -103,6 +103,8 @@ export class DashboardHomeService {
     };
 
     // ── Agenda combinada: health/repro (alerts.agenda, ya ordenada) + tareas vencidas/hoy ──
+    // Ítems de tarea en el contrato de la agenda web (AgendaAttention): related_type='task' +
+    // action='complete_task' → renderiza el botón «✓» y usa related_id como taskId.
     const taskAgenda = (openTasks as any[])
       .filter((t) => t.bucket === 'overdue' || t.bucket === 'today')
       .map((t) => ({
@@ -111,12 +113,11 @@ export class DashboardHomeService {
         severity: t.bucket === 'overdue' ? (t.priority === 'urgent' ? 'critical' : 'warning') : 'info',
         due_at: t.due_date ? new Date(t.due_date).toISOString() : null,
         title: t.title,
-        message: t.days_overdue != null ? `${t.days_overdue} d vencida` : 'Vence hoy',
-        related_type: t.related_type,
-        related_id: t.related_id,
+        message: (t.days_overdue != null ? `${t.days_overdue} d vencida` : 'Vence hoy') + (t.related_name ? ` · ${t.related_name}` : ''),
+        related_type: 'task',
+        related_id: t.id,
         tag: t.related_name ?? null,
-        action: 'view_task',
-        task_id: t.id,
+        action: 'complete_task',
       }));
     const SEV_A: Record<string, number> = { critical: 0, warning: 1, info: 2 };
     const combinedAgenda = [...(agenda as any[]), ...taskAgenda].sort((a, b) => {
