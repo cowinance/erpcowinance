@@ -21,8 +21,14 @@ import { AlertsService } from '../alerts/alerts.service';
  * targeting multiusuario se difiere al vertical de miembros.
  */
 
-/** Categorías notificables: acciones de campo del hato. Excluye las de sistema (sync). */
-const NOTIFIABLE_CATEGORIES = ['health', 'reproduction'];
+/**
+ * Categorías notificables: acciones de campo del hato. Las de sistema (sync_device_stale,
+ * sync_conflicts) son 'task' pero NO se notifican (se filtran por código abajo); las tareas
+ * operativas (task_overdue/task_due_today/task_urgent, Tareas E6) SÍ se notifican.
+ */
+const NOTIFIABLE_CATEGORIES = ['health', 'reproduction', 'task'];
+/** Reglas 'task' de sistema que NO deben notificar (solo viven en la agenda/alertas). */
+const NON_NOTIFIABLE_RULES = ['sync_device_stale', 'sync_conflicts'];
 
 export interface NotificationDto {
   id: string;
@@ -57,9 +63,11 @@ export class NotificationService {
     const t = this.db.tenant;
     await this.alerts.evaluate();
     const open = await this.db.query<{ id: string; title: string; message: string | null }>(
-      `SELECT id, title, message FROM alerts
-       WHERE tenant_id = $1 AND status = 'open' AND category = ANY($2) AND deleted_at IS NULL`,
-      [t, NOTIFIABLE_CATEGORIES],
+      `SELECT al.id, al.title, al.message FROM alerts al
+       LEFT JOIN alert_rules ar ON ar.id = al.rule_id
+       WHERE al.tenant_id = $1 AND al.status = 'open' AND al.category = ANY($2) AND al.deleted_at IS NULL
+         AND COALESCE(ar.condition->>'code', '') <> ALL($3)`,
+      [t, NOTIFIABLE_CATEGORIES, NON_NOTIFIABLE_RULES],
     );
     const devices = await this.db.query<{ id: string; push_token: string }>(
       `SELECT id, push_token FROM sync_devices

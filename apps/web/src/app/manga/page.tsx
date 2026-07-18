@@ -124,6 +124,7 @@ export default function MangaPage() {
   const [online, setOnline] = useState(true);
 
   const [animal, setAnimal] = useState<Animal | null>(null);
+  const [animalTasks, setAnimalTasks] = useState<any[]>([]);
   const [tag, setTag] = useState('');
   const [kg, setKg] = useState('');
   const [cc, setCc] = useState<number | null>(null);
@@ -206,9 +207,16 @@ export default function MangaPage() {
         body: JSON.stringify({ identifier: id }),
       });
       if (!res.ok) return fail(`SIN ANIMAL ${id.toUpperCase()}`);
-      setAnimal(await res.json());
+      const found = await res.json();
+      setAnimal(found);
       setTag('');
       soundOk();
+      // Integración Tareas (E6): traer las tareas PENDIENTES del animal escaneado.
+      setAnimalTasks([]);
+      fetch(`${API_URL}/tasks/board?related_type=animal&related_id=${found.id}&status=open`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => setAnimalTasks(Array.isArray(d) ? d : []))
+        .catch(() => setAnimalTasks([]));
       vibrate(40);
     } catch {
       fail('SIN CONEXIÓN CON LA API');
@@ -558,6 +566,37 @@ export default function MangaPage() {
                 </div>
               ) : null;
             })()}
+
+            {/* Tareas pendientes del animal (integración Tareas E6): completar en 1 toque. */}
+            {animalTasks.length > 0 && (
+              <div className="w-full max-w-2xl rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3">
+                <div className="mb-2 text-[13px] font-bold tracking-[0.12em] text-white/50 uppercase">Tareas pendientes ({animalTasks.length})</div>
+                <div className="space-y-1.5">
+                  {animalTasks.map((tk) => (
+                    <div key={tk.id} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-[16px] text-white/90">
+                        {tk.days_overdue != null && <span className="mr-1.5 font-bold text-[#f87171]">●</span>}
+                        {tk.title}
+                      </span>
+                      <button
+                        onClick={async () => {
+                          const res = await fetch(`${API_URL}/tasks/${tk.id}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() } });
+                          if (res.ok) {
+                            setAnimalTasks((ts) => ts.filter((x) => x.id !== tk.id));
+                            setRecords((r) => [{ key: crypto.randomUUID(), tag: animal.tag, action: 'Tarea', detail: tk.title.slice(0, 30), at: Date.now(), status: 'saved' }, ...r]);
+                            soundSaved();
+                            vibrate(40);
+                          } else fail('NO SE PUDO COMPLETAR');
+                        }}
+                        className="h-9 shrink-0 rounded-lg bg-[#4ade80] px-3 text-[15px] font-bold text-black"
+                      >
+                        ✓ Hecho
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {mode === 'Pesaje' ? (
               <>

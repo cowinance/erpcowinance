@@ -36,6 +36,9 @@ const RULES: RuleDef[] = [
   { code: 'repeat_breeder', name: 'Repetidora', category: 'reproduction', severity: 'warning', defaultDays: 3, paramLabel: 'Servicios sin preñez' },
   { code: 'sync_device_stale', name: 'Dispositivo sin sincronizar', category: 'task', severity: 'info', defaultDays: 7, paramLabel: 'Días sin sincronizar' },
   { code: 'sync_conflicts', name: 'Conflictos de sincronización', category: 'task', severity: 'warning' },
+  { code: 'task_overdue', name: 'Tarea vencida', category: 'task', severity: 'warning' },
+  { code: 'task_due_today', name: 'Tarea para hoy', category: 'task', severity: 'info' },
+  { code: 'task_urgent', name: 'Tarea urgente', category: 'task', severity: 'warning' },
 ];
 
 interface Desired {
@@ -386,6 +389,37 @@ export class AlertsService {
         tag: v.tag ?? null,
       });
     }
+    }
+
+    // Tareas vencidas / para hoy / urgentes (Tareas E6). Dedup por (regla, task id): una alerta por
+    // tarea y regla; mutuamente excluyentes por fecha para no notificar la misma tarea dos veces.
+    if (cfg.get('task_overdue')!.active) {
+      const rows = await this.db.query<any>(
+        `SELECT id AS rid, title, due_date::text AS due, priority FROM tasks
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND status IN ('pending','in_progress') AND due_date::date < CURRENT_DATE LIMIT 500`,
+        [t],
+      );
+      for (const r of rows)
+        out.push({ code: 'task_overdue', category: 'task', severity: 'warning', title: `Tarea vencida: ${r.title}`, message: `Venció el ${fmt(r.due)}`, related_type: 'task', related_id: r.rid, due_at: iso(r.due), tag: null });
+    }
+    if (cfg.get('task_due_today')!.active) {
+      const rows = await this.db.query<any>(
+        `SELECT id AS rid, title, priority FROM tasks
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND status IN ('pending','in_progress') AND due_date::date = CURRENT_DATE LIMIT 500`,
+        [t],
+      );
+      for (const r of rows)
+        out.push({ code: 'task_due_today', category: 'task', severity: 'info', title: `Tarea para hoy: ${r.title}`, message: 'Vence hoy', related_type: 'task', related_id: r.rid, due_at: null, tag: null });
+    }
+    if (cfg.get('task_urgent')!.active) {
+      const rows = await this.db.query<any>(
+        `SELECT id AS rid, title, due_date::text AS due FROM tasks
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND status IN ('pending','in_progress') AND priority = 'urgent'
+           AND (due_date IS NULL OR due_date::date > CURRENT_DATE) LIMIT 500`,
+        [t],
+      );
+      for (const r of rows)
+        out.push({ code: 'task_urgent', category: 'task', severity: 'warning', title: `Tarea urgente: ${r.title}`, message: r.due ? `Vence el ${fmt(r.due)}` : 'Sin fecha', related_type: 'task', related_id: r.rid, due_at: iso(r.due), tag: null });
     }
 
     // Tareas sanitarias programadas (de planes) por vencer o vencidas
