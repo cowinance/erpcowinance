@@ -117,4 +117,35 @@ export class TasksController {
   assignees() {
     return this.tasks.assignees();
   }
+
+  /** Acción masiva sobre varias tareas (E3). Debe ir ANTES de la ruta paramétrica. */
+  @Post('tasks/bulk')
+  bulk(@Body() body: any) {
+    return this.tasks.bulk(
+      { ids: body?.ids ?? [], action: body?.action, dueDate: body?.due_date ?? null, reason: body?.reason ?? null, assignedTo: body?.assigned_to ?? null, priority: body?.priority },
+      { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user },
+    );
+  }
+
+  /** Cambia la prioridad (E3, server-authored → server-origin). */
+  @Post('tasks/:id/priority')
+  priority(@Param('id') id: string, @Body() body: any) {
+    return this.db
+      .tx((q) => this.tasks.setPriority(q, { taskId: id, priority: body?.priority }, { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user }))
+      .then((r) => ({ id, changed: r.changed }));
+  }
+
+  /** Agrega un comentario/nota a la tarea (E3). */
+  @Post('tasks/:id/comment')
+  comment(@Param('id') id: string, @Body() body: any) {
+    return this.db
+      .tx((q) => this.tasks.addComment(q, { taskId: id, text: body?.text }, { origin: 'rest', emitServerOrigin: false, actorUserId: this.db.user }))
+      .then(() => ({ id, ok: true }));
+  }
+
+  /** Detalle de una tarea (E3): datos completos + relacionado + responsable + historial. */
+  @Get('tasks/:id')
+  detail(@Param('id') id: string) {
+    return this.tasks.detail(id);
+  }
 }

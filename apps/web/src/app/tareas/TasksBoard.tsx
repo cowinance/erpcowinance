@@ -74,6 +74,8 @@ export function TasksBoard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const isClosedTab = tab === 'done' || tab === 'canceled';
 
@@ -144,6 +146,32 @@ export function TasksBoard() {
     }
   }
 
+  async function bulk(action: string, extra?: any) {
+    if (selected.size === 0) return;
+    setBusy('bulk');
+    try {
+      const res = await fetch(`${API_URL}/tasks/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ ids: [...selected], action, ...extra }),
+      });
+      const r = await res.json().catch(() => null);
+      if (res.ok && r) {
+        if (r.skipped) alert(`${r.applied} aplicadas · ${r.skipped} salteadas (estado no válido).`);
+        setSelected(new Set());
+        await load();
+      } else alert(r?.message?.title ?? 'Error');
+    } finally {
+      setBusy(null);
+    }
+  }
+  const toggleSel = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+
   return (
     <div className="space-y-5">
       {kpis && <KpiRow kpis={kpis} />}
@@ -190,12 +218,34 @@ export function TasksBoard() {
       ) : visible.length === 0 ? (
         <p className="py-10 text-center text-body text-ink-3">Nada en esta vista.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2 pb-16">
           {visible.map((t) => (
-            <TaskCard key={t.id} task={t} busy={busy} assignees={assignees} onAction={action} />
+            <TaskCard key={t.id} task={t} busy={busy} assignees={assignees} onAction={action} selected={selected.has(t.id)} onToggle={() => toggleSel(t.id)} onOpen={() => setDetailId(t.id)} />
           ))}
         </div>
       )}
+
+      {/* Barra de acciones masivas */}
+      {selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[95vw] flex-wrap items-center gap-2 rounded-full border border-subtle bg-surface px-4 py-2 shadow-[var(--shadow-2)]">
+          <span className="text-label font-medium">{selected.size} seleccionada{selected.size === 1 ? '' : 's'}</span>
+          <button onClick={() => bulk('complete')} disabled={busy === 'bulk'} className="h-8 rounded-md bg-success px-2.5 text-label font-medium text-white">Completar</button>
+          <Select controlSize="sm" value="" onChange={(e) => e.target.value && bulk('assign', { assigned_to: e.target.value === 'none' ? null : e.target.value })}>
+            <option value="">Asignar…</option>
+            <option value="none">Sin asignar</option>
+            {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+          </Select>
+          <Select controlSize="sm" value="" onChange={(e) => e.target.value && bulk('priority', { priority: e.target.value })}>
+            <option value="">Prioridad…</option>
+            {Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </Select>
+          <input type="date" onChange={(e) => e.target.value && bulk('reschedule', { due_date: e.target.value })} className="h-8 rounded-md border border-strong bg-surface px-2 text-label" title="Reprogramar" />
+          <button onClick={() => { if (confirm(`¿Cancelar ${selected.size} tarea(s)?`)) bulk('cancel'); }} disabled={busy === 'bulk'} className="h-8 rounded-md border border-danger/40 px-2.5 text-label font-medium text-danger">Cancelar</button>
+          <button onClick={() => setSelected(new Set())} className="text-label text-ink-3 hover:text-ink">Deseleccionar</button>
+        </div>
+      )}
+
+      {detailId && <TaskDetail id={detailId} assignees={assignees} onClose={() => setDetailId(null)} onChanged={load} />}
     </div>
   );
 }
@@ -235,7 +285,7 @@ function TabBtn({ active, onClick, label, count, danger }: { active: boolean; on
   );
 }
 
-function TaskCard({ task, busy, assignees, onAction }: { task: Task; busy: string | null; assignees: Assignee[]; onAction: (url: string, body?: any) => void }) {
+function TaskCard({ task, busy, assignees, onAction, selected, onToggle, onOpen }: { task: Task; busy: string | null; assignees: Assignee[]; onAction: (url: string, body?: any) => void; selected: boolean; onToggle: () => void; onOpen: () => void }) {
   const [expand, setExpand] = useState(false);
   const [newDue, setNewDue] = useState(task.due_date?.slice(0, 10) ?? '');
   const [reason, setReason] = useState('');
@@ -244,11 +294,13 @@ function TaskCard({ task, busy, assignees, onAction }: { task: Task; busy: strin
   const isOpen = task.status === 'pending' || task.status === 'in_progress';
 
   return (
-    <div className="rounded-[10px] border border-subtle bg-surface px-4 py-3 shadow-[var(--shadow-1)]">
+    <div className={`rounded-[10px] border px-4 py-3 shadow-[var(--shadow-1)] ${selected ? 'border-brand bg-brand-soft/40' : 'border-subtle bg-surface'}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <input type="checkbox" checked={selected} onChange={onToggle} className="mt-1 size-4 shrink-0 accent-brand" aria-label={`Seleccionar ${task.title}`} />
+          <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-ink">{task.title}</span>
+            <button onClick={onOpen} className="truncate text-left font-medium text-ink hover:text-brand hover:underline">{task.title}</button>
             {task.status === 'in_progress' && <span className="rounded-full bg-info/15 px-2 py-0.5 text-caption font-medium text-info">En curso</span>}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-label text-ink-3">
@@ -261,6 +313,7 @@ function TaskCard({ task, busy, assignees, onAction }: { task: Task; busy: strin
             {!task.assignee_name && isOpen && <span className="italic">· sin asignar</span>}
           </div>
           {task.description && <p className="mt-1 line-clamp-1 text-label text-ink-3">{task.description}</p>}
+          </div>
         </div>
         {isOpen && (
           <div className="flex shrink-0 items-center gap-1.5">
@@ -350,3 +403,117 @@ function CreateTask({ assignees, onCreated }: { assignees: Assignee[]; onCreated
     </Card>
   );
 }
+
+const EVENT_LABEL: Record<string, string> = {
+  created: 'Creada',
+  status_change: 'Cambio de estado',
+  rescheduled: 'Reprogramada',
+  assigned: 'Asignación',
+  priority_change: 'Cambio de prioridad',
+  comment: 'Comentario',
+};
+
+/** Ficha de tarea (E3): datos completos + relacionado + responsable + historial + comentarios. */
+function TaskDetail({ id, assignees, onClose, onChanged }: { id: string; assignees: Assignee[]; onClose: () => void; onChanged: () => void }) {
+  const [task, setTask] = useState<any>(null);
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const d = await fetch(`${API_URL}/tasks/${id}`, { headers: authHeaders() }).then((r) => r.json());
+    setTask(d);
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
+
+  async function act(url: string, body?: any) {
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body ?? {}) });
+      if (!res.ok) { const b = await res.json().catch(() => null); alert(b?.message?.title ?? 'Error'); return; }
+      await load();
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const mod = task ? (MODULE[task.type] ?? MODULE.general) : MODULE.general;
+  const isOpen = task && (task.status === 'pending' || task.status === 'in_progress');
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <div className="h-full w-full max-w-md overflow-y-auto bg-surface p-5 shadow-[var(--shadow-2)]" onClick={(e) => e.stopPropagation()}>
+        {!task ? (
+          <p className="py-10 text-center text-body text-ink-3">Cargando…</p>
+        ) : (
+          <>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <h2 className="text-lg font-semibold">{task.title}</h2>
+              <button onClick={onClose} className="text-ink-3 hover:text-ink">✕</button>
+            </div>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 text-caption font-medium ${mod.cls}`}>{mod.label}</span>
+              <span className={`rounded-full px-2 py-0.5 text-caption font-medium ${(PRIORITY[task.priority] ?? PRIORITY.normal).cls}`}>{(PRIORITY[task.priority] ?? PRIORITY.normal).label}</span>
+              <span className="rounded-full bg-ink-3/10 px-2 py-0.5 text-caption font-medium text-ink-2">{STATUS_LABEL[task.status] ?? task.status}</span>
+            </div>
+
+            <dl className="mb-4 space-y-1.5 text-label">
+              <Row k="Vence" v={task.due_date ? formatDate(task.due_date) : 'sin fecha'} />
+              {task.related_name && <Row k="Relacionado" v={`${task.related_type}: ${task.related_name}`} />}
+              <Row k="Responsable" v={task.assignee_name ?? 'sin asignar'} />
+              <Row k="Creada por" v={task.creator_name ?? '—'} />
+              <Row k="Creada" v={formatDate(task.created_at)} />
+              {task.completed_at && <Row k="Completada" v={formatDate(task.completed_at)} />}
+              {task.description && <Row k="Descripción" v={task.description} />}
+            </dl>
+
+            {isOpen && (
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                {task.status === 'pending' && <button onClick={() => act(`/tasks/${id}/start`)} disabled={busy} className="h-8 rounded-md border border-strong px-2.5 text-label font-medium text-ink-2 hover:bg-sunken">Iniciar</button>}
+                <button onClick={() => act(`/tasks/${id}/complete`)} disabled={busy} className="h-8 rounded-md bg-success px-2.5 text-label font-medium text-white">Completar</button>
+                <Select controlSize="sm" value={task.assigned_to ?? ''} onChange={(e) => act(`/tasks/${id}/assign`, { assigned_to: e.target.value || null })}>
+                  <option value="">Sin asignar</option>
+                  {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+                </Select>
+                <button onClick={() => { if (confirm('¿Cancelar esta tarea?')) act(`/tasks/${id}/cancel`); }} disabled={busy} className="h-8 rounded-md border border-danger/40 px-2.5 text-label font-medium text-danger">Cancelar</button>
+              </div>
+            )}
+
+            <h3 className="mb-2 text-label font-semibold text-ink-2">Historial</h3>
+            <div className="relative ml-1.5 space-y-2.5 border-l border-subtle pl-4">
+              {(task.history ?? []).map((h: any, i: number) => (
+                <div key={i} className="relative">
+                  <div className="absolute top-1 -left-[21px] size-2 rounded-full bg-ink-3/50" />
+                  <div className="text-label">
+                    <span className="font-medium">{EVENT_LABEL[h.kind] ?? h.kind}</span>
+                    {/* from/to legible solo para estado/prioridad/reprogramación (no UUIDs de asignación). */}
+                    {['status_change', 'priority_change', 'rescheduled'].includes(h.kind) && (h.from_value != null || h.to_value != null) ? (
+                      <span className="text-ink-3"> · {h.from_value ?? '—'} → {h.to_value ?? '—'}</span>
+                    ) : null}
+                  </div>
+                  {h.note && <div className="text-label text-ink-2">{h.note}</div>}
+                  <div className="text-caption text-ink-3">{formatDate(h.occurred_at)}{h.actor_name ? ` · ${h.actor_name}` : ''}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Agregar comentario…" fullWidth />
+              <Button size="sm" onClick={async () => { if (!comment.trim()) return; await act(`/tasks/${id}/comment`, { text: comment.trim() }); setComment(''); }} disabled={busy || !comment.trim()}>Enviar</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-24 shrink-0 text-ink-3">{k}</dt>
+      <dd className="text-ink">{v}</dd>
+    </div>
+  );
+}
+

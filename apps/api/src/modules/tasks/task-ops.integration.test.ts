@@ -141,6 +141,61 @@ describe('TaskService · centro operativo (E1)', () => {
     expect(found.some((r: any) => r.id === todayId)).toBe(false);
   });
 
+  it('detalle: datos completos + historial con actor; comentario aparece en el historial', async () => {
+    const id = await mk({ title: 'Con detalle' });
+    await db.tx((q) => tasks.startTask(q, { taskId: id }, ctx()));
+    await db.tx((q) => tasks.addComment(q, { taskId: id, text: 'Revisar mañana temprano' }, ctx()));
+    const d: any = await tasks.detail(id);
+    expect(d.title).toBe('Con detalle');
+    expect(d.status).toBe('in_progress');
+    expect(Array.isArray(d.history)).toBe(true);
+    const kinds = d.history.map((h: any) => h.kind);
+    expect(kinds).toContain('created');
+    expect(kinds).toContain('status_change');
+    const comment = d.history.find((h: any) => h.kind === 'comment');
+    expect(comment.note).toBe('Revisar mañana temprano');
+    expect(comment.actor_name).toBeTruthy();
+  });
+
+  it('cambia prioridad (diff-aware) + historial priority_change', async () => {
+    const id = await mk({ priority: 'normal' });
+    const r = await db.tx((q) => tasks.setPriority(q, { taskId: id, priority: 'urgent' }, ctx()));
+    expect(r.changed).toBe(true);
+    expect((await row(id)).status).toBeTruthy();
+    const pr = (await db.query<any>(`SELECT priority FROM tasks WHERE id=$1`, [id]))[0].priority;
+    expect(pr).toBe('urgent');
+    const ev = (await events(id)).find((e: any) => e.kind === 'priority_change');
+    expect(ev.to_value).toBe('urgent');
+    // No-op si misma prioridad.
+    const r2 = await db.tx((q) => tasks.setPriority(q, { taskId: id, priority: 'urgent' }, ctx()));
+    expect(r2.changed).toBe(false);
+  });
+
+  it('bulk: completa varias; saltea las inválidas sin abortar el resto', async () => {
+    const a = await mk();
+    const b = await mk();
+    const already = await mk();
+    await db.tx((q) => tasks.completeTask(q, { taskId: already }, ctx())); // ya done → done→done no-op (ok)
+    await db.tx((q) => tasks.cancelTask(q, { taskId: b }, ctx())); // canceled → completar la saltea
+    const res = await tasks.bulk({ ids: [a, b, already, '00000000-0000-0000-0000-000000000000'], action: 'complete' }, ctx());
+    // a: pending→done ok; already: done→done ok (idempotente); b: canceled→done rechazo; inexistente: not_found
+    expect(res.applied).toBe(2);
+    expect(res.skipped).toBe(2);
+    expect((await row(a)).status).toBe('done');
+    expect((await row(b)).status).toBe('canceled'); // no cambió
+  });
+
+  it('bulk asignar y bulk prioridad', async () => {
+    const a = await mk();
+    const b = await mk();
+    const r1 = await tasks.bulk({ ids: [a, b], action: 'assign', assignedTo: userId }, ctx());
+    expect(r1.applied).toBe(2);
+    expect((await row(a)).assigned_to).toBe(userId);
+    const r2 = await tasks.bulk({ ids: [a, b], action: 'priority', priority: 'high' }, ctx());
+    expect(r2.applied).toBe(2);
+    expect((await db.query<any>(`SELECT priority FROM tasks WHERE id=$1`, [a]))[0].priority).toBe('high');
+  });
+
   it('kpis: vencidas, completadas, cumplimiento, carga por responsable y módulo', async () => {
     const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
     await mk({ title: 'KPI vencida crítica', dueDate: past, priority: 'urgent' });

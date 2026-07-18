@@ -318,6 +318,110 @@ export class TaskService {
     return { changed: true, syncOp };
   }
 
+  /** Cambia la prioridad (E3). Diff-aware; versiona `priority` (sync); historial priority_change. */
+  async setPriority(q: Q, input: { taskId: string; priority: TaskPriority }, ctx: TaskContext): Promise<{ changed: boolean; syncOp: PutOp | null }> {
+    const t = this.db.tenant;
+    const PRIORITIES = new Set<TaskPriority>(['low', 'normal', 'high', 'urgent']);
+    if (!PRIORITIES.has(input.priority)) throw new BadRequestException({ code: 'task.invalid_priority', title: 'Prioridad inválida' });
+    const existing = await q.one<{ id: string; priority: string }>(
+      `SELECT id, priority FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [input.taskId, t],
+    );
+    if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+    if (existing.priority === input.priority) return { changed: false, syncOp: null };
+
+    const hlc = ctx.hlc ?? this.serverClock.tick();
+    await q.query(`UPDATE tasks SET priority = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [input.taskId, t, input.priority]);
+    const existingV = (await this.versions.read(q, 'tasks', input.taskId)) ?? {};
+    await this.versions.write(q, 'tasks', input.taskId, { ...existingV, priority: hlc });
+    const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { priority: input.priority }, hlc };
+    if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:priority:${input.taskId}:${hlc}`);
+    await this.recordEvent(q, input.taskId, 'priority_change', { from: existing.priority, to: input.priority }, ctx);
+    return { changed: true, syncOp };
+  }
+
+  /** Agrega un comentario/nota a la tarea (E3). Historial kind='comment'. Server-authored. */
+  async addComment(q: Q, input: { taskId: string; text: string }, ctx: TaskContext): Promise<void> {
+    const text = (input.text ?? '').trim();
+    if (!text) throw new BadRequestException({ code: 'task.empty_comment', title: 'El comentario está vacío' });
+    const existing = await q.one<{ id: string }>(`SELECT id FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [input.taskId, this.db.tenant]);
+    if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+    await this.recordEvent(q, input.taskId, 'comment', { note: text }, ctx);
+  }
+
+  /**
+   * Detalle de una tarea (E3): datos completos + relacionado + responsable + creador + historial
+   * (task_events con nombre del actor). Cualquier estado. Una sola vista para la ficha de tarea.
+   */
+  async detail(taskId: string): Promise<Record<string, unknown>> {
+    const t = this.db.tenant;
+    const task = await this.db.one<any>(
+      `SELECT tk.id, tk.title, tk.description, tk.type, tk.due_date, tk.priority, tk.status,
+              tk.related_type, tk.related_id, tk.assigned_to, tk.completed_at, tk.created_at, tk.rule_key, tk.recurrence_id,
+              COALESCE(u.full_name, u.email) AS assignee_name,
+              COALESCE(cu.full_name, cu.email) AS creator_name,
+              CASE tk.related_type WHEN 'animal' THEN ai.value WHEN 'lot' THEN l.name WHEN 'paddock' THEN p.name ELSE NULL END AS related_name
+       FROM tasks tk
+       LEFT JOIN users u ON u.id = tk.assigned_to
+       LEFT JOIN users cu ON cu.id = tk.created_by
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers ai WHERE ai.animal_id = tk.related_id AND ai.type='visual' AND ai.deleted_at IS NULL AND ai.retired_at IS NULL ORDER BY ai.created_at DESC LIMIT 1) ai ON tk.related_type='animal'
+       LEFT JOIN lots l ON tk.related_type='lot' AND l.id = tk.related_id
+       LEFT JOIN paddocks p ON tk.related_type='paddock' AND p.id = tk.related_id
+       WHERE tk.id = $1 AND tk.tenant_id = $2 AND tk.deleted_at IS NULL`,
+      [taskId, t],
+    );
+    if (!task) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+    const history = await this.db.query<any>(
+      `SELECT e.kind, e.from_value, e.to_value, e.note, e.occurred_at, COALESCE(u.full_name, u.email) AS actor_name
+       FROM task_events e LEFT JOIN users u ON u.id = e.actor_user_id
+       WHERE e.task_id = $1 AND e.tenant_id = $2 ORDER BY e.occurred_at, e.created_at`,
+      [taskId, t],
+    );
+    return { ...task, history };
+  }
+
+  /**
+   * Acción MASIVA sobre varias tareas (E3): completar/iniciar/cancelar/reprogramar/asignar/prioridad.
+   * Reusa la regla única por tarea dentro de UNA tx. Robusta: un rechazo de dominio (transición
+   * inválida, no encontrada) SALTEA esa tarea sin abortar el resto (el throw es previo a cualquier
+   * escritura de esa fila). Errores no-dominio se propagan (abortan la tx). Idempotente por método.
+   */
+  async bulk(
+    input: { ids: string[]; action: string; dueDate?: string | null; reason?: string | null; assignedTo?: string | null; priority?: TaskPriority },
+    ctx: TaskContext,
+  ): Promise<{ applied: number; skipped: number; results: { id: string; ok: boolean; reason?: string }[] }> {
+    const ids = [...new Set(input.ids ?? [])].filter(Boolean);
+    if (!ids.length) throw new BadRequestException({ code: 'task.bulk_empty', title: 'Sin tareas seleccionadas' });
+    const ACTIONS = new Set(['complete', 'start', 'cancel', 'reschedule', 'assign', 'priority']);
+    if (!ACTIONS.has(input.action)) throw new BadRequestException({ code: 'task.bulk_action_invalid', title: `Acción masiva inválida: ${input.action}` });
+
+    return this.db.tx(async (q) => {
+      let applied = 0;
+      let skipped = 0;
+      const results: { id: string; ok: boolean; reason?: string }[] = [];
+      for (const id of ids) {
+        try {
+          if (input.action === 'complete') await this.completeTask(q, { taskId: id }, ctx);
+          else if (input.action === 'start') await this.startTask(q, { taskId: id }, ctx);
+          else if (input.action === 'cancel') await this.cancelTask(q, { taskId: id, reason: input.reason ?? null }, ctx);
+          else if (input.action === 'reschedule') await this.rescheduleTask(q, { taskId: id, dueDate: input.dueDate ?? null, reason: input.reason ?? null }, ctx);
+          else if (input.action === 'assign') await this.assignTask(q, { taskId: id, assignedTo: input.assignedTo ?? null }, ctx);
+          else if (input.action === 'priority') await this.setPriority(q, { taskId: id, priority: input.priority as TaskPriority }, ctx);
+          applied++;
+          results.push({ id, ok: true });
+        } catch (e) {
+          // Solo los rechazos de dominio (HttpException, previos a escritura) saltean; el resto aborta.
+          if (e instanceof BadRequestException || e instanceof NotFoundException) {
+            skipped++;
+            const resp = (e as any).getResponse?.() as { code?: string } | undefined;
+            results.push({ id, ok: false, reason: resp?.code ?? 'rejected' });
+          } else throw e;
+        }
+      }
+      return { applied, skipped, results };
+    });
+  }
+
   /** Lectura mínima (P6-1: verificación + preparación de la lista web de P6-2). */
   async list(status?: string): Promise<Record<string, unknown>[]> {
     const args: unknown[] = [this.db.tenant];
