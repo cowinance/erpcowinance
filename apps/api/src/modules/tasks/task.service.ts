@@ -47,6 +47,9 @@ export interface CreateTaskInput {
   relatedType?: string | null;
   relatedId?: string | null;
   farmId?: string | null;
+  assignedTo?: string | null;
+  /** Clave de dedup para tareas AUTOGENERADAS (E4): una viva por (tenant, rule_key). */
+  ruleKey?: string | null;
 }
 
 export interface CompleteTaskInput {
@@ -55,8 +58,12 @@ export interface CompleteTaskInput {
   completedAt?: string;
 }
 
-/** Campos de la tarea que viajan por sync (put/LWW) y se versionan. */
-const TASK_SYNC_FIELDS = ['title', 'description', 'type', 'status', 'due_date', 'priority', 'related_type', 'related_id', 'completed_at'] as const;
+/** Campos de la tarea que viajan por sync (put/LWW) y se versionan. `assigned_to` se suma
+ * (mejora a centro operativo) para que la asignación converja en devices ("asignadas a mí"). */
+const TASK_SYNC_FIELDS = ['title', 'description', 'type', 'status', 'due_date', 'priority', 'related_type', 'related_id', 'completed_at', 'assigned_to'] as const;
+
+/** Estados desde los que se puede reprogramar / iniciar / seguir mutando (no terminales). */
+const OPEN_STATUSES = new Set(['pending', 'in_progress']);
 
 @Injectable()
 export class TaskService {
@@ -84,6 +91,8 @@ export class TaskService {
     const description = input.description ?? null;
     const relatedType = input.relatedType ?? null;
     const relatedId = input.relatedId ?? null;
+    const assignedTo = input.assignedTo ?? null;
+    const ruleKey = input.ruleKey ?? null;
     // Resolver la finca por el MISMO `q` de la operación (no `this.db`, que iría al pool y
     // haría deadlock con la única conexión de PGlite dentro de una tx). farm_id es nullable.
     const farmId =
@@ -93,10 +102,10 @@ export class TaskService {
     const hlc = ctx.hlc ?? this.serverClock.tick();
 
     await q.query(
-      `INSERT INTO tasks (id, tenant_id, farm_id, title, description, type, due_date, priority, status, related_type, related_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11)
+      `INSERT INTO tasks (id, tenant_id, farm_id, title, description, type, due_date, priority, status, related_type, related_id, assigned_to, rule_key, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11,$12,$13)
        ON CONFLICT (id) DO NOTHING`,
-      [taskId, t, farmId, title, description, type, dueDate, priority, relatedType, relatedId, ctx.actorUserId],
+      [taskId, t, farmId, title, description, type, dueDate, priority, relatedType, relatedId, assignedTo, ruleKey, ctx.actorUserId],
     );
 
     const fields: Record<string, unknown> = {
@@ -109,12 +118,29 @@ export class TaskService {
       related_type: relatedType,
       related_id: relatedId,
       completed_at: null,
+      assigned_to: assignedTo,
     };
     await this.versions.write(q, 'tasks', taskId, Object.fromEntries(TASK_SYNC_FIELDS.map((f) => [f, hlc])));
 
     const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: taskId, fields, hlc };
     if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:create:${taskId}`);
+    await this.recordEvent(q, taskId, 'created', { to: 'pending' }, ctx);
     return { taskId, syncOp };
+  }
+
+  /** Registra un evento de trazabilidad de la tarea (historial). Server-authored, no sincroniza. */
+  private async recordEvent(
+    q: Q,
+    taskId: string,
+    kind: 'created' | 'status_change' | 'rescheduled' | 'assigned' | 'priority_change' | 'comment',
+    data: { from?: string | null; to?: string | null; note?: string | null },
+    ctx: TaskContext,
+  ): Promise<void> {
+    await q.query(
+      `INSERT INTO task_events (tenant_id, task_id, kind, from_value, to_value, note, actor_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [this.db.tenant, taskId, kind, data.from ?? null, data.to ?? null, data.note ?? null, ctx.actorUserId ?? null],
+    );
   }
 
   /**
@@ -132,8 +158,9 @@ export class TaskService {
     if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
 
     if (existing.status === 'done') return { status: 'done', changed: false, syncOp: null }; // idempotente
-    if (existing.status !== 'pending')
-      throw new BadRequestException({ code: 'task.invalid_transition', title: `Transición no permitida en P6-1: ${existing.status} → done` });
+    // Transiciones válidas → done: pending → done, in_progress → done.
+    if (!OPEN_STATUSES.has(existing.status))
+      throw new BadRequestException({ code: 'task.invalid_transition', title: `Transición no permitida: ${existing.status} → done` });
 
     const completedAt = input.completedAt ?? new Date().toISOString();
     const hlc = ctx.hlc ?? this.serverClock.tick();
@@ -148,6 +175,7 @@ export class TaskService {
 
     const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { status: 'done', completed_at: completedAt }, hlc };
     if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:complete:${input.taskId}`);
+    await this.recordEvent(q, input.taskId, 'status_change', { from: existing.status, to: 'done' }, ctx);
     return { status: 'done', changed: true, syncOp };
   }
 
@@ -156,7 +184,7 @@ export class TaskService {
    * `canceled → canceled` no-op; cualquier otra transición se rechaza (`done` es terminal).
    * Versiona `status`. Emite server-origin SOLO si `ctx.emitServerOrigin`.
    */
-  async cancelTask(q: Q, input: { taskId: string }, ctx: TaskContext): Promise<{ status: string; changed: boolean; syncOp: PutOp | null }> {
+  async cancelTask(q: Q, input: { taskId: string; reason?: string | null }, ctx: TaskContext): Promise<{ status: string; changed: boolean; syncOp: PutOp | null }> {
     const t = this.db.tenant;
     const existing = await q.one<{ id: string; status: string }>(
       `SELECT id, status FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
@@ -165,7 +193,8 @@ export class TaskService {
     if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
 
     if (existing.status === 'canceled') return { status: 'canceled', changed: false, syncOp: null }; // idempotente
-    if (existing.status !== 'pending')
+    // pending → canceled, in_progress → canceled. `done` es terminal.
+    if (!OPEN_STATUSES.has(existing.status))
       throw new BadRequestException({ code: 'task.invalid_transition', title: `Transición no permitida: ${existing.status} → canceled` });
 
     const hlc = ctx.hlc ?? this.serverClock.tick();
@@ -176,7 +205,105 @@ export class TaskService {
 
     const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { status: 'canceled' }, hlc };
     if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:cancel:${input.taskId}`);
+    await this.recordEvent(q, input.taskId, 'status_change', { from: existing.status, to: 'canceled', note: input.reason ?? null }, ctx);
     return { status: 'canceled', changed: true, syncOp };
+  }
+
+  /**
+   * Inicia una tarea (`pending → in_progress`, mejora a centro operativo). `in_progress → in_progress`
+   * no-op idempotente; `done`/`canceled` terminales → rechazo. Versiona `status`, historial.
+   */
+  async startTask(q: Q, input: { taskId: string }, ctx: TaskContext): Promise<{ status: string; changed: boolean; syncOp: PutOp | null }> {
+    const t = this.db.tenant;
+    const existing = await q.one<{ id: string; status: string }>(
+      `SELECT id, status FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [input.taskId, t],
+    );
+    if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+    if (existing.status === 'in_progress') return { status: 'in_progress', changed: false, syncOp: null };
+    if (existing.status !== 'pending')
+      throw new BadRequestException({ code: 'task.invalid_transition', title: `Transición no permitida: ${existing.status} → in_progress` });
+
+    const hlc = ctx.hlc ?? this.serverClock.tick();
+    await q.query(`UPDATE tasks SET status = 'in_progress', updated_at = now() WHERE id = $1 AND tenant_id = $2`, [input.taskId, t]);
+    const existingV = (await this.versions.read(q, 'tasks', input.taskId)) ?? {};
+    await this.versions.write(q, 'tasks', input.taskId, { ...existingV, status: hlc });
+
+    const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { status: 'in_progress' }, hlc };
+    if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:start:${input.taskId}`);
+    await this.recordEvent(q, input.taskId, 'status_change', { from: existing.status, to: 'in_progress' }, ctx);
+    return { status: 'in_progress', changed: true, syncOp };
+  }
+
+  /**
+   * Reprograma la tarea (cambia `due_date`, con motivo opcional). Permitido en estados abiertos
+   * (`pending`/`in_progress`); `done`/`canceled` → rechazo. Diff-aware (misma fecha = no-op).
+   * Versiona `due_date`, deja historial `rescheduled` (from/to + motivo). Emite server-origin opcional.
+   */
+  async rescheduleTask(
+    q: Q,
+    input: { taskId: string; dueDate: string | null; reason?: string | null },
+    ctx: TaskContext,
+  ): Promise<{ changed: boolean; syncOp: PutOp | null }> {
+    const t = this.db.tenant;
+    const existing = await q.one<{ id: string; status: string; due_date: string | null }>(
+      `SELECT id, status, due_date::text AS due_date FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [input.taskId, t],
+    );
+    if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+    if (!OPEN_STATUSES.has(existing.status))
+      throw new BadRequestException({ code: 'task.invalid_transition', title: `No se puede reprogramar una tarea ${existing.status}` });
+
+    const newDue = input.dueDate ?? null;
+    const curDue = existing.due_date ?? null;
+    // due_date es timestamptz → comparar por instante (una fecha y su timestamptz coinciden).
+    const same =
+      (curDue == null && newDue == null) ||
+      (curDue != null && newDue != null && new Date(curDue).getTime() === new Date(newDue).getTime());
+    if (same) return { changed: false, syncOp: null }; // no-op
+
+    const hlc = ctx.hlc ?? this.serverClock.tick();
+    await q.query(`UPDATE tasks SET due_date = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [input.taskId, t, newDue]);
+    const existingV = (await this.versions.read(q, 'tasks', input.taskId)) ?? {};
+    await this.versions.write(q, 'tasks', input.taskId, { ...existingV, due_date: hlc });
+
+    const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { due_date: newDue }, hlc };
+    if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:reschedule:${input.taskId}:${hlc}`);
+    await this.recordEvent(q, input.taskId, 'rescheduled', { from: curDue, to: newDue, note: input.reason ?? null }, ctx);
+    return { changed: true, syncOp };
+  }
+
+  /**
+   * Asigna la tarea a un usuario/empleado (o la desasigna con null). Diff-aware. Versiona
+   * `assigned_to` (sincroniza → "asignadas a mí" en devices). Historial `assigned`.
+   */
+  async assignTask(
+    q: Q,
+    input: { taskId: string; assignedTo: string | null },
+    ctx: TaskContext,
+  ): Promise<{ changed: boolean; syncOp: PutOp | null }> {
+    const t = this.db.tenant;
+    const existing = await q.one<{ id: string; status: string; assigned_to: string | null }>(
+      `SELECT id, status, assigned_to FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [input.taskId, t],
+    );
+    if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
+    const newAssignee = input.assignedTo ?? null;
+    if ((existing.assigned_to ?? null) === newAssignee) return { changed: false, syncOp: null };
+    if (newAssignee) {
+      const user = await q.one<{ id: string }>(`SELECT id FROM users WHERE id = $1`, [newAssignee]);
+      if (!user) throw new BadRequestException({ code: 'task.invalid_assignee', title: 'Usuario responsable inexistente' });
+    }
+
+    const hlc = ctx.hlc ?? this.serverClock.tick();
+    await q.query(`UPDATE tasks SET assigned_to = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [input.taskId, t, newAssignee]);
+    const existingV = (await this.versions.read(q, 'tasks', input.taskId)) ?? {};
+    await this.versions.write(q, 'tasks', input.taskId, { ...existingV, assigned_to: hlc });
+
+    const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { assigned_to: newAssignee }, hlc };
+    if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:assign:${input.taskId}:${hlc}`);
+    await this.recordEvent(q, input.taskId, 'assigned', { from: existing.assigned_to, to: newAssignee }, ctx);
+    return { changed: true, syncOp };
   }
 
   /** Lectura mínima (P6-1: verificación + preparación de la lista web de P6-2). */

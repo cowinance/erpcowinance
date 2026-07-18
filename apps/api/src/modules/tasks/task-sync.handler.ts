@@ -76,9 +76,22 @@ export class TaskSyncHandler implements SyncHandler, OnModuleInit {
         } else {
           await this.tasks.completeTask(q, { taskId: op.rowId, completedAt }, { origin: 'sync', emitServerOrigin: false, hlc: op.hlc, actorUserId: this.db.user });
         }
+      } else if (fields['status'] === 'in_progress') {
+        // INICIAR offline (mejora a centro operativo): pending → in_progress.
+        await this.tasks.startTask(q, { taskId: op.rowId }, { origin: 'sync', emitServerOrigin: false, hlc: op.hlc, actorUserId: this.db.user });
+      } else if (fields['status'] === 'canceled') {
+        // CANCELAR offline.
+        await this.tasks.cancelTask(q, { taskId: op.rowId }, { origin: 'sync', emitServerOrigin: false, hlc: op.hlc, actorUserId: this.db.user });
+      } else if (fields['due_date'] !== undefined && fields['status'] === undefined) {
+        // REPROGRAMAR offline: solo cambia due_date (sin cambio de estado).
+        await this.tasks.rescheduleTask(
+          q,
+          { taskId: op.rowId, dueDate: (fields['due_date'] as string | null) ?? null },
+          { origin: 'sync', emitServerOrigin: false, hlc: op.hlc, actorUserId: this.db.user },
+        );
       } else {
-        // Fila existente, put que no es pending→done → fuera del contrato P6-1.
-        conflicts.push({ type: 'semantic', entity_id: op.rowId, detail: 'Cambio no soportado en P6-1 (task.unsupported_change)' });
+        // Fila existente, put fuera del contrato soportado → conflicto semántico.
+        conflicts.push({ type: 'semantic', entity_id: op.rowId, detail: 'Cambio no soportado (task.unsupported_change)' });
       }
     } catch (e) {
       if (e instanceof HttpException) {

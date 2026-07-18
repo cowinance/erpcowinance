@@ -45,12 +45,44 @@ export class TasksController {
       .then((r) => ({ id, status: r.status }));
   }
 
-  /** Cancela una tarea (server-authored → server-origin). */
+  /** Cancela una tarea (server-authored → server-origin). Motivo opcional. */
   @Post('tasks/:id/cancel')
-  cancel(@Param('id') id: string) {
+  cancel(@Param('id') id: string, @Body() body: any) {
     return this.db
-      .tx((q) => this.tasks.cancelTask(q, { taskId: id }, { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user }))
+      .tx((q) => this.tasks.cancelTask(q, { taskId: id, reason: body?.reason ?? null }, { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user }))
       .then((r) => ({ id, status: r.status }));
+  }
+
+  /** Inicia una tarea: pending → in_progress (server-authored → server-origin). */
+  @Post('tasks/:id/start')
+  start(@Param('id') id: string) {
+    return this.db
+      .tx((q) => this.tasks.startTask(q, { taskId: id }, { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user }))
+      .then((r) => ({ id, status: r.status }));
+  }
+
+  /** Reprograma una tarea: cambia due_date con motivo opcional (server-authored → server-origin). */
+  @Post('tasks/:id/reschedule')
+  reschedule(@Param('id') id: string, @Body() body: any) {
+    return this.db
+      .tx((q) =>
+        this.tasks.rescheduleTask(
+          q,
+          { taskId: id, dueDate: body?.due_date ?? null, reason: body?.reason ?? null },
+          { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user },
+        ),
+      )
+      .then((r) => ({ id, changed: r.changed }));
+  }
+
+  /** Asigna/reasigna la tarea a un usuario (null = desasignar). server-authored → server-origin. */
+  @Post('tasks/:id/assign')
+  assign(@Param('id') id: string, @Body() body: any) {
+    return this.db
+      .tx((q) =>
+        this.tasks.assignTask(q, { taskId: id, assignedTo: body?.assigned_to ?? null }, { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user }),
+      )
+      .then((r) => ({ id, changed: r.changed }));
   }
 
   /** Lista mínima (verificación + P6-2). */

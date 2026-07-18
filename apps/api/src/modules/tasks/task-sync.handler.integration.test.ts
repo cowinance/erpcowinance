@@ -143,4 +143,22 @@ describe('TaskSyncHandler · integración', () => {
     const n = (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM tasks WHERE id = $1`, [id]))[0].n;
     expect(n).toBe(1);
   });
+
+  it('iniciar offline: put status=in_progress → in_progress; sin eco server-origin (E1)', async () => {
+    const id = randomUUID();
+    await apply(put(id, { title: 'Iniciar por sync' }));
+    const conflicts = await apply(put(id, { status: 'in_progress' }));
+    expect(conflicts).toEqual([]);
+    expect((await taskRow(id)).status).toBe('in_progress');
+    expect(await changesets(`task:start:${id}`)).toHaveLength(0);
+  });
+
+  it('reprogramar offline: put solo con due_date → cambia due_date; sin eco (E1)', async () => {
+    const id = randomUUID();
+    await apply(put(id, { title: 'Reprogramar por sync' }));
+    const conflicts = await apply(put(id, { due_date: '2026-09-10' }));
+    expect(conflicts).toEqual([]);
+    const due = (await db.query<any>(`SELECT due_date::text AS d FROM tasks WHERE id=$1`, [id]))[0].d;
+    expect(due).toContain('2026-09-10');
+  });
 });
