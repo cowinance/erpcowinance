@@ -5,8 +5,35 @@ import { WeightChart } from '@/components/WeightChart';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { EmptyFarmState } from '@/components/EmptyFarmState';
 import { EVENT_LABELS, relativeTime } from '@/lib/format';
-import { Plus } from 'lucide-react';
+import { Plus, Zap, CheckSquare, Stethoscope, Syringe, Heart, Baby, ArrowLeftRight, AlertTriangle, Scale, Scissors, StickyNote, Tag } from 'lucide-react';
 import { AgendaAttention } from '@/components/AgendaAttention';
+
+/** Acciones rápidas del Inicio (Home E3): actuar, no solo mirar. Rutas existentes + anchors de captura. */
+const QUICK_ACTIONS = [
+  { label: 'Modo manga', href: '/manga', Icon: Zap },
+  { label: 'Crear animal', href: '/animales/nuevo', Icon: Plus },
+  { label: 'Nueva tarea', href: '/tareas', Icon: CheckSquare },
+  { label: 'Tratamiento', href: '/sanidad#captura', Icon: Stethoscope },
+  { label: 'Vacuna', href: '/sanidad#captura', Icon: Syringe },
+  { label: 'Servicio', href: '/reproduccion#captura-repro', Icon: Heart },
+  { label: 'Parto', href: '/reproduccion#captura-repro', Icon: Baby },
+  { label: 'Mover', href: '/animales', Icon: ArrowLeftRight },
+  { label: 'Tareas vencidas', href: '/tareas?bucket=overdue', Icon: AlertTriangle },
+];
+
+/** Ícono + color por tipo de evento para diferenciar la actividad reciente visualmente. */
+const EVENT_STYLE: Record<string, { Icon: any; cls: string }> = {
+  birth: { Icon: Baby, cls: 'text-info' },
+  weighing: { Icon: Scale, cls: 'text-brand' },
+  treatment: { Icon: Stethoscope, cls: 'text-danger' },
+  vaccination: { Icon: Syringe, cls: 'text-danger' },
+  pregnancy_diagnosed: { Icon: Heart, cls: 'text-info' },
+  pregnancy_negative: { Icon: Heart, cls: 'text-warning' },
+  note: { Icon: StickyNote, cls: 'text-ink-3' },
+  identifier_added: { Icon: Tag, cls: 'text-ink-2' },
+  edit: { Icon: StickyNote, cls: 'text-ink-3' },
+  cull: { Icon: Scissors, cls: 'text-warning' },
+};
 
 /**
  * Inicio como CENTRO DE CONTROL DIARIO (Home E2). Consume el endpoint agregado /dashboard/home
@@ -139,6 +166,19 @@ export default async function Dashboard() {
             })}
           </div>
 
+          {/* Acciones rápidas — actuar desde el Inicio (Home E3) */}
+          <div className="mb-5 flex flex-wrap gap-2">
+            {QUICK_ACTIONS.map(({ label, href, Icon }) => (
+              <Link
+                key={label}
+                href={href}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-subtle bg-surface px-3 text-label font-medium text-ink-2 shadow-[var(--shadow-1)] transition-colors hover:bg-sunken hover:text-ink"
+              >
+                <Icon size={15} className="text-ink-3" /> {label}
+              </Link>
+            ))}
+          </div>
+
           {/* KPIs integrados */}
           <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
             <KpiCard label="Animales activos" value={k.active_animals} hint={k.new_this_month ? `+${k.new_this_month} este mes` : 'sin altas este mes'} tone={k.new_this_month ? 'success' : undefined} />
@@ -186,16 +226,25 @@ export default async function Dashboard() {
             <Card>
               <CardTitle>Actividad reciente</CardTitle>
               <div className="space-y-0.5">
-                {(home.recent_activity ?? []).slice(0, 8).map((e: any, i: number) => (
-                  <Link key={i} href={`/animales/${e.animal_id}`} className="flex items-center gap-3 rounded-md px-2 py-1.5 text-body hover:bg-sunken">
-                    <span className="w-32 shrink-0 font-medium">{EVENT_LABELS[e.event_type] ?? e.event_type}</span>
-                    <span className="text-ink-2">
-                      caravana <TagMono>{e.tag ?? '—'}</TagMono>
-                      {e.event_type === 'weighing' && e.payload?.weight_kg && <span className="tnum"> · {e.payload.weight_kg} kg</span>}
-                    </span>
-                    <span className="ml-auto shrink-0 text-label text-ink-3">{relativeTime(e.occurred_at)}</span>
-                  </Link>
-                ))}
+                {(home.recent_activity ?? []).slice(0, 9).map((e: any, i: number) => {
+                  const st = EVENT_STYLE[e.event_type] ?? { Icon: StickyNote, cls: 'text-ink-3' };
+                  const Icon = st.Icon;
+                  return (
+                    <Link key={i} href={`/animales/${e.animal_id}`} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-body hover:bg-sunken">
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-sunken">
+                        <Icon size={13} className={st.cls} />
+                      </span>
+                      <span className="w-28 shrink-0 font-medium">{EVENT_LABELS[e.event_type] ?? e.event_type}</span>
+                      <span className="min-w-0 flex-1 truncate text-ink-2">
+                        <TagMono>{e.tag ?? '—'}</TagMono>
+                        {e.event_type === 'weighing' && e.payload?.weight_kg && <span className="tnum"> · {e.payload.weight_kg} kg</span>}
+                        {e.lot_name && <span className="text-ink-3"> · {e.lot_name}</span>}
+                        {e.actor_name && <span className="text-ink-3"> · {e.actor_name.split(' ')[0]}</span>}
+                      </span>
+                      <span className="shrink-0 text-label text-ink-3">{relativeTime(e.occurred_at)}</span>
+                    </Link>
+                  );
+                })}
               </div>
             </Card>
           </div>

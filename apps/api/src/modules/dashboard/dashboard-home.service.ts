@@ -32,7 +32,7 @@ export class DashboardHomeService {
   ) {}
 
   async home() {
-    const [base, taskK, alertK, agenda, healthK, reproK, openTasks, noWeigh]: any[] = await Promise.all([
+    const [base, taskK, alertK, agenda, healthK, reproK, openTasks, noWeigh, recent]: any[] = await Promise.all([
       this.dashboard.kpis(),
       this.tasks.kpis(),
       this.alerts.kpis(),
@@ -41,6 +41,7 @@ export class DashboardHomeService {
       this.repro.kpis(),
       this.tasks.board({ status: 'open' }),
       this.noRecentWeighing(),
+      this.recentActivity(),
     ]);
 
     // Señales repro-derivadas contadas desde la agenda (evita recomputar herdStatus).
@@ -132,7 +133,7 @@ export class DashboardHomeService {
       priority,
       farm_status,
       agenda: combinedAgenda,
-      recent_activity: base.recent_events,
+      recent_activity: recent,
       by_category: base.by_category,
       weight_series: base.weight_series,
       counts: {
@@ -141,6 +142,24 @@ export class DashboardHomeService {
         alerts: { open: alertK.open, critical: alertK.critical, warning: alertK.warning },
       },
     };
+  }
+
+  /** Actividad reciente ENRIQUECIDA (Home E3): tipo + caravana + lote + responsable + fecha. */
+  private async recentActivity(): Promise<any[]> {
+    return this.db.query<any>(
+      `SELECT e.event_type, e.payload, e.occurred_at, e.source, e.animal_id,
+              ai.value AS tag,
+              COALESCE(u.full_name, u.email) AS actor_name,
+              l.name AS lot_name
+       FROM animal_events e
+       LEFT JOIN animals a ON a.id = e.animal_id
+       LEFT JOIN lots l ON l.id = a.current_lot_id
+       LEFT JOIN users u ON u.id = e.created_by
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = e.animal_id AND x.type='visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+       WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
+       ORDER BY e.occurred_at DESC LIMIT 12`,
+      [this.db.tenant],
+    );
   }
 
   /** Conteo barato de animales activos sin pesaje en 90 días (umbral, no regla de negocio). */
