@@ -1,0 +1,100 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { DbService } from '../../db/db.service';
+import { DashboardService } from './dashboard.service';
+import { DashboardHomeService } from './dashboard-home.service';
+import { TaskService } from '../tasks/task.service';
+import { AlertsService } from '../alerts/alerts.service';
+import { HealthService } from '../health/health.service';
+import { ReproService } from '../repro/repro.service';
+import { SyncVersionStore } from '../sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+
+/**
+ * Inicio E1 — endpoint agregado `/dashboard/home`. Verifica que COMPONE los servicios reales
+ * (dashboard/tasks/alerts/health/repro) sin duplicar reglas: KPIs integrados, atención prioritaria
+ * ordenada por severidad, estado general y agenda combinada ordenada por urgencia.
+ */
+describe('DashboardHomeService · home agregado (E1)', () => {
+  let db: DbService;
+  let home: DashboardHomeService;
+  let tasks: TaskService;
+  let userId: string;
+  let farmId: string;
+  let originalCwd: string;
+  let tmp: string;
+  const ctx = () => ({ origin: 'rest' as const, emitServerOrigin: true, actorUserId: userId });
+
+  beforeAll(async () => {
+    originalCwd = process.cwd();
+    tmp = mkdtempSync(join(tmpdir(), 'home-'));
+    process.chdir(tmp);
+    process.env.SEED_DEMO = 'on';
+    db = new DbService();
+    await db.onModuleInit();
+    tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any);
+    const alerts = new AlertsService(db, repro as any);
+    const health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
+    home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);
+    userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
+    farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
+  }, 120_000);
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('compone KPIs de varios módulos + estado general + agenda combinada', async () => {
+    const h: any = await home.home();
+    // KPIs integrados (dashboard + tasks + alerts + health + repro).
+    expect(h.kpis).toHaveProperty('active_animals');
+    expect(h.kpis).toHaveProperty('overdue_tasks');
+    expect(h.kpis).toHaveProperty('critical_alerts');
+    expect(h.kpis).toHaveProperty('in_treatment');
+    expect(h.kpis).toHaveProperty('diagnosis_pending');
+    expect(h.kpis).toHaveProperty('no_recent_weighing');
+    // Estado general.
+    expect(h.farm_status).toHaveProperty('operation');
+    expect(['ok', 'late', 'critical']).toContain(h.farm_status.operation);
+    expect(['stable', 'attention']).toContain(h.farm_status.health);
+    // Agenda combinada y actividad reciente presentes.
+    expect(Array.isArray(h.agenda)).toBe(true);
+    expect(Array.isArray(h.recent_activity)).toBe(true);
+    expect(Array.isArray(h.priority)).toBe(true);
+  });
+
+  it('la atención prioritaria solo trae ítems con volumen, ordenados por severidad', async () => {
+    // Tarea vencida crítica → debe aparecer arriba de todo en prioridad.
+    await db.query(
+      `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, created_by)
+       VALUES ($1,$2,'Cerrar tranquera rota','maintenance', CURRENT_DATE - 3, 'urgent','pending',$3)`,
+      [db.tenant, farmId, userId],
+    );
+    const h: any = await home.home();
+    expect(h.kpis.overdue_tasks).toBeGreaterThanOrEqual(1);
+    expect(h.priority.every((p: any) => p.count > 0)).toBe(true);
+    // Ordenado: severidad critical antes que warning/info.
+    const rank: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+    for (let i = 1; i < h.priority.length; i++) {
+      expect(rank[h.priority[i - 1].severity]).toBeLessThanOrEqual(rank[h.priority[i].severity]);
+    }
+    // Tareas vencidas está presente y con href a la vista filtrada.
+    const overdue = h.priority.find((p: any) => p.code === 'tasks_overdue');
+    expect(overdue).toBeTruthy();
+    expect(overdue.href).toContain('/tareas');
+    // Estado operativo refleja la crítica.
+    expect(['late', 'critical']).toContain(h.farm_status.operation);
+  });
+
+  it('la agenda combinada ordena por fecha (vencidas primero)', async () => {
+    const h: any = await home.home();
+    const dues = h.agenda.map((a: any) => a.due_at ?? '9999-12-31');
+    for (let i = 1; i < dues.length; i++) expect(dues[i - 1] <= dues[i]).toBe(true);
+    // Incluye la tarea vencida (category 'task').
+    expect(h.agenda.some((a: any) => a.category === 'task')).toBe(true);
+  });
+});
