@@ -58,6 +58,18 @@ export interface CompleteTaskInput {
   completedAt?: string;
 }
 
+export interface TaskBoardFilters {
+  status?: string; // pending|in_progress|done|canceled|open|all (default: open)
+  priority?: string;
+  assignedTo?: string; // uuid | 'me' | 'unassigned'
+  type?: string; // módulo (health|breeding|feeding|maintenance|crop|general)
+  bucket?: string; // overdue|today|next7|month|nodate|later|done|canceled
+  relatedType?: string;
+  relatedId?: string;
+  q?: string;
+  limit?: number;
+}
+
 /** Campos de la tarea que viajan por sync (put/LWW) y se versionan. `assigned_to` se suma
  * (mejora a centro operativo) para que la asignación converja en devices ("asignadas a mí"). */
 const TASK_SYNC_FIELDS = ['title', 'description', 'type', 'status', 'due_date', 'priority', 'related_type', 'related_id', 'completed_at', 'assigned_to'] as const;
@@ -319,5 +331,166 @@ export class TaskService {
        FROM tasks WHERE ${where.join(' AND ')} ORDER BY due_date NULLS LAST, created_at`,
       args,
     );
+  }
+
+  /** Usuarios del tenant asignables como responsables (E2). Vía user_role_assignments. */
+  async assignees(): Promise<Record<string, unknown>[]> {
+    return this.db.query(
+      `SELECT DISTINCT u.id, u.full_name, u.email
+       FROM user_role_assignments ura JOIN users u ON u.id = ura.user_id
+       WHERE ura.tenant_id = $1 ORDER BY u.full_name`,
+      [this.db.tenant],
+    );
+  }
+
+  /**
+   * Tablero operativo (E2): lista ENRIQUECIDA para la agenda. Joins de nombres
+   * (responsable/animal/lote/potrero), bucket derivado (vencidas/hoy/próx7/mes/sin-fecha/
+   * completadas/canceladas), días de atraso y módulo. Filtros: estado, prioridad, responsable
+   * (uuid|'me'|'unassigned'), tipo/módulo, bucket, relacionado (animal/lote) y búsqueda por título.
+   * Por defecto muestra las ABIERTAS (pending+in_progress); done/canceled con `status` explícito.
+   */
+  async board(filters: TaskBoardFilters = {}): Promise<Record<string, unknown>[]> {
+    const t = this.db.tenant;
+    const args: unknown[] = [t];
+    const where = [`t.tenant_id = $1`, `t.deleted_at IS NULL`];
+
+    const status = filters.status;
+    if (!status || status === 'open') where.push(`t.status IN ('pending','in_progress')`);
+    else if (status !== 'all') {
+      args.push(status);
+      where.push(`t.status = $${args.length}`);
+    }
+    if (filters.priority) {
+      args.push(filters.priority);
+      where.push(`t.priority = $${args.length}`);
+    }
+    if (filters.type) {
+      args.push(filters.type);
+      where.push(`t.type = $${args.length}`);
+    }
+    if (filters.assignedTo === 'unassigned') where.push(`t.assigned_to IS NULL`);
+    else if (filters.assignedTo === 'me') {
+      args.push(this.db.user);
+      where.push(`t.assigned_to = $${args.length}`);
+    } else if (filters.assignedTo) {
+      args.push(filters.assignedTo);
+      where.push(`t.assigned_to = $${args.length}`);
+    }
+    if (filters.relatedType) {
+      args.push(filters.relatedType);
+      where.push(`t.related_type = $${args.length}`);
+    }
+    if (filters.relatedId) {
+      args.push(filters.relatedId);
+      where.push(`t.related_id = $${args.length}`);
+    }
+    if (filters.q) {
+      args.push(`%${filters.q}%`);
+      where.push(`(t.title ILIKE $${args.length} OR t.description ILIKE $${args.length})`);
+    }
+
+    const bucketExpr = `CASE
+        WHEN t.status = 'done' THEN 'done'
+        WHEN t.status = 'canceled' THEN 'canceled'
+        WHEN t.due_date IS NULL THEN 'nodate'
+        WHEN t.due_date::date < CURRENT_DATE THEN 'overdue'
+        WHEN t.due_date::date = CURRENT_DATE THEN 'today'
+        WHEN t.due_date::date <= CURRENT_DATE + 7 THEN 'next7'
+        WHEN t.due_date::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month - 1 day')::date THEN 'month'
+        ELSE 'later' END`;
+
+    if (filters.bucket) {
+      args.push(filters.bucket);
+      where.push(`(${bucketExpr}) = $${args.length}`);
+    }
+    const limit = Math.min(Math.max(filters.limit ?? 500, 1), 1000);
+    args.push(limit);
+
+    return this.db.query(
+      `SELECT t.id, t.title, t.description, t.type, t.due_date, t.priority, t.status,
+              t.related_type, t.related_id, t.assigned_to, t.completed_at, t.created_at,
+              t.rule_key, t.recurrence_id,
+              COALESCE(u.full_name, u.email) AS assignee_name,
+              CASE t.related_type WHEN 'animal' THEN ai.value WHEN 'lot' THEN l.name WHEN 'paddock' THEN p.name ELSE NULL END AS related_name,
+              CASE WHEN t.status IN ('pending','in_progress') AND t.due_date IS NOT NULL AND t.due_date::date < CURRENT_DATE
+                   THEN (CURRENT_DATE - t.due_date::date) ELSE NULL END AS days_overdue,
+              ${bucketExpr} AS bucket
+       FROM tasks t
+       LEFT JOIN users u ON u.id = t.assigned_to
+       LEFT JOIN LATERAL (
+         SELECT value FROM animal_identifiers ai WHERE ai.animal_id = t.related_id AND ai.type='visual' AND ai.deleted_at IS NULL AND ai.retired_at IS NULL
+         ORDER BY ai.created_at DESC LIMIT 1) ai ON t.related_type = 'animal'
+       LEFT JOIN lots l ON t.related_type = 'lot' AND l.id = t.related_id
+       LEFT JOIN paddocks p ON t.related_type = 'paddock' AND p.id = t.related_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY (t.due_date IS NULL), t.due_date,
+                CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+                t.created_at
+       LIMIT $${args.length}`,
+      args,
+    );
+  }
+
+  /**
+   * KPIs del tablero (E2): vencidas, completadas hoy/semana, cumplimiento %, atraso promedio,
+   * críticas vencidas, carga por responsable, por módulo y tendencia semanal de cumplimiento.
+   * Una sola fuente para el encabezado del tablero. Ventana de 30 días para tasas.
+   */
+  async kpis(): Promise<Record<string, unknown>> {
+    const t = this.db.tenant;
+    const [totals, byAssignee, byModule, trend] = await Promise.all([
+      this.db.one<any>(
+        `SELECT
+           count(*) FILTER (WHERE status IN ('pending','in_progress') AND due_date::date < CURRENT_DATE)::int AS overdue,
+           count(*) FILTER (WHERE status IN ('pending','in_progress') AND due_date::date < CURRENT_DATE AND priority IN ('high','urgent'))::int AS critical_overdue,
+           count(*) FILTER (WHERE status IN ('pending','in_progress'))::int AS open,
+           count(*) FILTER (WHERE status = 'done' AND completed_at::date = CURRENT_DATE)::int AS done_today,
+           count(*) FILTER (WHERE status = 'done' AND completed_at >= date_trunc('week', CURRENT_DATE))::int AS done_week,
+           count(*) FILTER (WHERE status = 'done' AND completed_at >= CURRENT_DATE - 30)::int AS done_30d,
+           round(avg((completed_at::date - due_date::date)) FILTER (
+             WHERE status = 'done' AND completed_at >= CURRENT_DATE - 30 AND due_date IS NOT NULL AND completed_at::date > due_date::date
+           ), 1)::float AS avg_delay_days
+         FROM tasks WHERE tenant_id = $1 AND deleted_at IS NULL`,
+        [t],
+      ),
+      this.db.query<any>(
+        `SELECT COALESCE(u.full_name, u.email, 'Sin asignar') AS name, t.assigned_to,
+                count(*)::int AS open,
+                count(*) FILTER (WHERE t.due_date::date < CURRENT_DATE)::int AS overdue
+         FROM tasks t LEFT JOIN users u ON u.id = t.assigned_to
+         WHERE t.tenant_id = $1 AND t.deleted_at IS NULL AND t.status IN ('pending','in_progress')
+         GROUP BY t.assigned_to, u.full_name, u.email ORDER BY open DESC LIMIT 12`,
+        [t],
+      ),
+      this.db.query<any>(
+        `SELECT type, count(*)::int AS open
+         FROM tasks WHERE tenant_id = $1 AND deleted_at IS NULL AND status IN ('pending','in_progress')
+         GROUP BY type ORDER BY open DESC`,
+        [t],
+      ),
+      this.db.query<any>(
+        `SELECT to_char(date_trunc('week', completed_at), 'YYYY-MM-DD') AS week, count(*)::int AS done
+         FROM tasks WHERE tenant_id = $1 AND deleted_at IS NULL AND status = 'done'
+           AND completed_at >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 weeks'
+         GROUP BY 1 ORDER BY 1`,
+        [t],
+      ),
+    ]);
+    const done30 = totals?.done_30d ?? 0;
+    const overdue = totals?.overdue ?? 0;
+    const compliancePct = done30 + overdue > 0 ? Math.round((100 * done30) / (done30 + overdue)) : null;
+    return {
+      overdue,
+      critical_overdue: totals?.critical_overdue ?? 0,
+      open: totals?.open ?? 0,
+      done_today: totals?.done_today ?? 0,
+      done_week: totals?.done_week ?? 0,
+      avg_delay_days: totals?.avg_delay_days ?? null,
+      compliance_pct: compliancePct,
+      by_assignee: byAssignee,
+      by_module: byModule,
+      weekly_trend: trend,
+    };
   }
 }

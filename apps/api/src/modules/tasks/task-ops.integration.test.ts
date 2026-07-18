@@ -109,4 +109,51 @@ describe('TaskService · centro operativo (E1)', () => {
     expect(r2.changed).toBe(true);
     expect((await row(id)).assigned_to).toBeNull();
   });
+
+  it('board: buckets derivados, días de atraso, filtros por bucket/responsable/búsqueda', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const past = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    const soon = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    const overdueId = await mk({ title: 'Revisar aguada vencida', dueDate: past });
+    const todayId = await mk({ title: 'Vacunar hoy', dueDate: today });
+    await mk({ title: 'Mover lote pronto', dueDate: soon });
+    const mineId = await mk({ title: 'Asignada a mí', dueDate: today, assignedTo: userId });
+
+    const all = await tasks.board();
+    const byId = Object.fromEntries(all.map((r: any) => [r.id, r]));
+    expect(byId[overdueId].bucket).toBe('overdue');
+    expect(byId[overdueId].days_overdue).toBeGreaterThanOrEqual(4);
+    expect(byId[todayId].bucket).toBe('today');
+
+    // Filtro por bucket.
+    const overdueOnly = await tasks.board({ bucket: 'overdue' });
+    expect(overdueOnly.every((r: any) => r.bucket === 'overdue')).toBe(true);
+    expect(overdueOnly.some((r: any) => r.id === overdueId)).toBe(true);
+
+    // Filtro "asignadas a mí".
+    const mine = await tasks.board({ assignedTo: 'me' });
+    expect(mine.some((r: any) => r.id === mineId)).toBe(true);
+    expect(mine.every((r: any) => r.assignee_name)).toBe(true);
+
+    // Búsqueda por título.
+    const found = await tasks.board({ q: 'aguada' });
+    expect(found.some((r: any) => r.id === overdueId)).toBe(true);
+    expect(found.some((r: any) => r.id === todayId)).toBe(false);
+  });
+
+  it('kpis: vencidas, completadas, cumplimiento, carga por responsable y módulo', async () => {
+    const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    await mk({ title: 'KPI vencida crítica', dueDate: past, priority: 'urgent' });
+    const doneId = await mk({ title: 'KPI a completar', dueDate: new Date().toISOString().slice(0, 10) });
+    await db.tx((q) => tasks.completeTask(q, { taskId: doneId }, ctx()));
+
+    const k: any = await tasks.kpis();
+    expect(k.overdue).toBeGreaterThanOrEqual(1);
+    expect(k.critical_overdue).toBeGreaterThanOrEqual(1);
+    expect(k.done_today).toBeGreaterThanOrEqual(1);
+    expect(k.compliance_pct).not.toBeNull();
+    expect(Array.isArray(k.by_assignee)).toBe(true);
+    expect(Array.isArray(k.by_module)).toBe(true);
+    expect(Array.isArray(k.weekly_trend)).toBe(true);
+  });
 });

@@ -90,4 +90,31 @@ export class TasksController {
   list(@Query('status') status?: string) {
     return this.tasks.list(status);
   }
+
+  /** Tablero operativo enriquecido (E2): joins + bucket + días de atraso + filtros. */
+  @Get('tasks/board')
+  board(
+    @Query('status') status?: string,
+    @Query('priority') priority?: string,
+    @Query('assigned_to') assignedTo?: string,
+    @Query('type') type?: string,
+    @Query('bucket') bucket?: string,
+    @Query('related_type') relatedType?: string,
+    @Query('related_id') relatedId?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.tasks.board({ status, priority, assignedTo, type, bucket, relatedType, relatedId, q });
+  }
+
+  /** KPIs del tablero (E2). */
+  @Get('tasks/kpis')
+  kpis() {
+    return this.tasks.kpis();
+  }
+
+  /** Usuarios asignables como responsables (E2). */
+  @Get('tasks/assignees')
+  assignees() {
+    return this.tasks.assignees();
+  }
 }
