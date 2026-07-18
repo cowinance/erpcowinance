@@ -76,6 +76,7 @@ export function TasksBoard() {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [showRecur, setShowRecur] = useState(false);
 
   const isClosedTab = tab === 'done' || tab === 'canceled';
 
@@ -213,6 +214,7 @@ export function TasksBoard() {
           >
             {busy === 'materialize' ? 'Generando…' : 'Generar automáticas'}
           </button>
+          <button onClick={() => setShowRecur(true)} className="h-8 rounded-md border border-strong px-3 text-label font-medium text-ink-2 hover:bg-sunken" title="Tareas recurrentes (bebederos, saleros, cercas…)">Recurrentes</button>
           <Button size="sm" onClick={() => setCreating((v) => !v)}>{creating ? 'Cerrar' : '+ Nueva tarea'}</Button>
         </div>
       </div>
@@ -263,6 +265,96 @@ export function TasksBoard() {
       )}
 
       {detailId && <TaskDetail id={detailId} assignees={assignees} onClose={() => setDetailId(null)} onChanged={load} />}
+      {showRecur && <RecurrencesManager assignees={assignees} onClose={() => setShowRecur(false)} onChanged={load} />}
+    </div>
+  );
+}
+
+/** Gestor de tareas recurrentes (E5): crear plantilla + listar + desactivar. */
+function RecurrencesManager({ assignees, onClose, onChanged }: { assignees: Assignee[]; onClose: () => void; onChanged: () => void }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [title, setTitle] = useState('');
+  const [interval, setInterval] = useState('7');
+  const [anchor, setAnchor] = useState('due_date');
+  const [type, setType] = useState('maintenance');
+  const [priority, setPriority] = useState('normal');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const d = await fetch(`${API_URL}/tasks/recurrences`, { headers: authHeaders() }).then((r) => r.json());
+    setRows(Array.isArray(d) ? d : []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function create() {
+    if (!title.trim() || Number(interval) <= 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/tasks/recurrences`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ title: title.trim(), interval_days: Number(interval), anchor, type, priority }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => null); alert(b?.message?.title ?? 'Error'); return; }
+      setTitle('');
+      await load();
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deactivate(id: string) {
+    await fetch(`${API_URL}/tasks/recurrences/${id}/deactivate`, { method: 'POST', headers: authHeaders() });
+    await load();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <div className="h-full w-full max-w-md overflow-y-auto bg-surface p-5 shadow-[var(--shadow-2)]" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <h2 className="text-lg font-semibold">Tareas recurrentes</h2>
+          <button onClick={onClose} className="text-ink-3 hover:text-ink">✕</button>
+        </div>
+        <p className="mb-4 text-label text-ink-3">Bebederos, saleros, cercas, limpieza de corral… Se genera una tarea por vez; al completarla, se agenda la siguiente.</p>
+
+        <div className="mb-5 space-y-2 rounded-[10px] border border-subtle p-3">
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título (ej. Revisar bebederos)" fullWidth />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-label text-ink-3">Cada
+              <Input type="number" value={interval} onChange={(e) => setInterval(e.target.value)} className="mt-1" /></label>
+            <label className="text-label text-ink-3">Contar desde
+              <Select value={anchor} onChange={(e) => setAnchor(e.target.value)} className="mt-1">
+                <option value="due_date">Fecha prevista</option>
+                <option value="completed_at">Fecha de completado</option>
+              </Select></label>
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              {Object.entries(MODULE).filter(([k]) => k !== 'health').map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </Select>
+            <Select value={priority} onChange={(e) => setPriority(e.target.value)}>
+              {Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </Select>
+          </div>
+          <Button size="sm" onClick={create} loading={busy} disabled={!title.trim()}>Crear recurrente</Button>
+        </div>
+
+        <h3 className="mb-2 text-label font-semibold text-ink-2">Activas y pasadas</h3>
+        {rows.length === 0 ? (
+          <p className="text-label text-ink-3">Sin recurrentes todavía.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {rows.map((r) => (
+              <div key={r.id} className={`flex items-center justify-between rounded-lg border border-subtle px-3 py-2 ${r.active ? '' : 'opacity-50'}`}>
+                <div className="min-w-0">
+                  <div className="truncate text-label font-medium">{r.title}</div>
+                  <div className="text-caption text-ink-3">cada {r.interval_days} d · próxima {r.next_due ? formatDate(r.next_due) : '—'}{r.active ? '' : ' · inactiva'}</div>
+                </div>
+                {r.active && <button onClick={() => deactivate(r.id)} className="shrink-0 text-caption font-medium text-danger hover:underline">Desactivar</button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

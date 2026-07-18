@@ -126,6 +126,22 @@ export class TasksController {
     return this.rules.materialize({ weighDays: body?.weigh_days, lotReviewDays: body?.lot_review_days });
   }
 
+  /** Recurrencias (E5): crear plantilla / listar / desactivar. Rutas estáticas (antes de :id). */
+  @Post('tasks/recurrences')
+  createRecurrence(@Body() body: any) {
+    return this.rules.createRecurrence(body);
+  }
+
+  @Get('tasks/recurrences')
+  listRecurrences() {
+    return this.rules.listRecurrences();
+  }
+
+  @Post('tasks/recurrences/:id/deactivate')
+  deactivateRecurrence(@Param('id') id: string) {
+    return this.rules.deactivateRecurrence(id);
+  }
+
   /** Acción masiva sobre varias tareas (E3). Debe ir ANTES de la ruta paramétrica. */
   @Post('tasks/bulk')
   bulk(@Body() body: any) {

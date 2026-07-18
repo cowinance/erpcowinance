@@ -50,6 +50,8 @@ export interface CreateTaskInput {
   assignedTo?: string | null;
   /** Clave de dedup para tareas AUTOGENERADAS (E4): una viva por (tenant, rule_key). */
   ruleKey?: string | null;
+  /** Plantilla de recurrencia que generó esta instancia (E5). */
+  recurrenceId?: string | null;
 }
 
 export interface CompleteTaskInput {
@@ -105,6 +107,7 @@ export class TaskService {
     const relatedId = input.relatedId ?? null;
     const assignedTo = input.assignedTo ?? null;
     const ruleKey = input.ruleKey ?? null;
+    const recurrenceId = input.recurrenceId ?? null;
 
     // Dedup de AUTOGENERADAS (E4): una tarea VIVA por (tenant, rule_key). Si ya existe una
     // pendiente/en-curso con esta clave, no se crea otra (idempotente; race-safe con el índice
@@ -125,10 +128,10 @@ export class TaskService {
     const hlc = ctx.hlc ?? this.serverClock.tick();
 
     await q.query(
-      `INSERT INTO tasks (id, tenant_id, farm_id, title, description, type, due_date, priority, status, related_type, related_id, assigned_to, rule_key, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11,$12,$13)
+      `INSERT INTO tasks (id, tenant_id, farm_id, title, description, type, due_date, priority, status, related_type, related_id, assigned_to, rule_key, recurrence_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11,$12,$13,$14)
        ON CONFLICT (id) DO NOTHING`,
-      [taskId, t, farmId, title, description, type, dueDate, priority, relatedType, relatedId, assignedTo, ruleKey, ctx.actorUserId],
+      [taskId, t, farmId, title, description, type, dueDate, priority, relatedType, relatedId, assignedTo, ruleKey, recurrenceId, ctx.actorUserId],
     );
 
     const fields: Record<string, unknown> = {
@@ -174,8 +177,8 @@ export class TaskService {
    */
   async completeTask(q: Q, input: CompleteTaskInput, ctx: TaskContext): Promise<{ status: string; changed: boolean; syncOp: PutOp | null }> {
     const t = this.db.tenant;
-    const existing = await q.one<{ id: string; status: string }>(
-      `SELECT id, status FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+    const existing = await q.one<{ id: string; status: string; recurrence_id: string | null; due_date: string | null }>(
+      `SELECT id, status, recurrence_id, due_date::text AS due_date FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
       [input.taskId, t],
     );
     if (!existing) throw new NotFoundException({ code: 'task.not_found', title: 'Tarea no encontrada' });
@@ -199,6 +202,21 @@ export class TaskService {
     const syncOp: PutOp = { kind: 'put', table: 'tasks', rowId: input.taskId, fields: { status: 'done', completed_at: completedAt }, hlc };
     if (ctx.emitServerOrigin) await this.serverOrigin.emit(q, [syncOp], `task:complete:${input.taskId}`);
     await this.recordEvent(q, input.taskId, 'status_change', { from: existing.status, to: 'done' }, ctx);
+
+    // Recurrencia (E5): al completar una instancia recurrente, avanza el `next_due` de la plantilla
+    // según el anclaje (due_date de la instancia + intervalo, o completed_at + intervalo). La próxima
+    // instancia la MATERIALIZA la generación cuando next_due llegue → una viva a la vez, sin duplicar.
+    if (existing.recurrence_id) {
+      const rec = await q.one<{ interval_days: number; anchor: string }>(
+        `SELECT interval_days, anchor FROM task_recurrences WHERE id = $1 AND tenant_id = $2 AND active = true AND deleted_at IS NULL`,
+        [existing.recurrence_id, t],
+      );
+      if (rec) {
+        const base = rec.anchor === 'completed_at' ? completedAt : (existing.due_date ?? completedAt);
+        const next = new Date(new Date(base).getTime() + rec.interval_days * 86400000).toISOString().slice(0, 10);
+        await q.query(`UPDATE task_recurrences SET next_due = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [existing.recurrence_id, t, next]);
+      }
+    }
     return { status: 'done', changed: true, syncOp };
   }
 
