@@ -709,6 +709,10 @@ export class DbService implements OnModuleInit {
   get user(): string {
     return requestContext.getStore()?.userId ?? this.userId;
   }
+  /** Rol del usuario de la request (claim `role` del JWT): owner/admin/veterinarian/foreman/… */
+  get role(): string | undefined {
+    return requestContext.getStore()?.role;
+  }
   /** Finca por defecto del tenant de boot (solo seed); las requests usan defaultFarm(). */
   get farm(): string {
     return this.farmId;

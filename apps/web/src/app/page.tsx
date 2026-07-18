@@ -21,6 +21,30 @@ const QUICK_ACTIONS = [
   { label: 'Tareas vencidas', href: '/tareas?bucket=overdue', Icon: AlertTriangle },
 ];
 
+/**
+ * Personalización por rol (Home E5, estructura preparada): qué códigos de prioridad y qué acciones
+ * rápidas se priorizan según el rol del usuario. owner/admin ven todo en el orden por severidad;
+ * veterinario prioriza sanidad; capataz/operario prioriza campo (tareas/manga/mover). Si mañana se
+ * agrega un rol de reproducción, basta sumarlo acá. Nunca OCULTA datos: solo reordena el énfasis.
+ */
+const ROLE_FOCUS: Record<string, { label: string; codes: string[]; actions: string[] }> = {
+  veterinarian: {
+    label: 'Veterinario',
+    codes: ['active_withdrawals', 'clinical_cases', 'vaccines_overdue', 'in_treatment', 'vaccines_due'],
+    actions: ['Tratamiento', 'Vacuna', 'Modo manga'],
+  },
+  foreman: {
+    label: 'Capataz',
+    codes: ['tasks_overdue', 'tasks_urgent', 'no_recent_weighing'],
+    actions: ['Modo manga', 'Nueva tarea', 'Mover'],
+  },
+  worker: {
+    label: 'Operario',
+    codes: ['tasks_overdue', 'tasks_urgent', 'no_recent_weighing'],
+    actions: ['Modo manga', 'Nueva tarea'],
+  },
+};
+
 /** Ícono + color por tipo de evento para diferenciar la actividad reciente visualmente. */
 const EVENT_STYLE: Record<string, { Icon: any; cls: string }> = {
   birth: { Icon: Baby, cls: 'text-info' },
@@ -85,8 +109,18 @@ export default async function Dashboard() {
   const today = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
   const neverPopulated = (k.total_animals ?? 0) === 0;
   const noActiveButHasHistory = !neverPopulated && (k.active_animals ?? 0) === 0;
-  const priority = (home.priority ?? []) as any[];
   const fs = home.farm_status ?? {};
+
+  // Personalización por rol (E5): reordena énfasis sin ocultar nada. owner/admin/otros → orden base.
+  const focus = ROLE_FOCUS[home.role as string];
+  const focusCodes = new Set(focus?.codes ?? []);
+  const priority = ([...(home.priority ?? [])] as any[]).sort((a, b) => (focusCodes.has(a.code) ? 0 : 1) - (focusCodes.has(b.code) ? 0 : 1));
+  const actionRank = (label: string) => {
+    const i = focus?.actions.indexOf(label) ?? -1;
+    return i === -1 ? 99 : i;
+  };
+  const quickActions = [...QUICK_ACTIONS].sort((a, b) => actionRank(a.label) - actionRank(b.label));
+  const allClear = priority.length === 0 && fs.operation === 'ok' && fs.health === 'stable' && fs.reproduction === 'stable';
 
   return (
     <div>
@@ -109,9 +143,12 @@ export default async function Dashboard() {
               <h1 className="text-xl font-semibold">
                 {greeting}, {me?.name?.split(' ')[0] ?? ''}
               </h1>
-              <p className="mt-0.5 text-body text-ink-3">
-                {today}
-                {farms?.[0]?.name ? ` · ${farms[0].name}` : ''}
+              <p className="mt-0.5 flex items-center gap-2 text-body text-ink-3">
+                <span>
+                  {today}
+                  {farms?.[0]?.name ? ` · ${farms[0].name}` : ''}
+                </span>
+                {focus && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-caption font-medium text-brand">Vista: {focus.label}</span>}
               </p>
             </div>
             <Link
@@ -121,6 +158,13 @@ export default async function Dashboard() {
               <Plus size={15} /> Capturar
             </Link>
           </div>
+
+          {/* Todo al día — estado vacío positivo (E5): sin urgencias y estado estable */}
+          {allClear && (
+            <div className="mb-5 flex items-center gap-2 rounded-[10px] border border-success/30 bg-success/5 px-4 py-3 text-body text-success">
+              <span className="text-lg">✓</span> Todo al día — sin urgencias en tu finca hoy.
+            </div>
+          )}
 
           {/* Atención prioritaria — arriba de todo (Home E2) */}
           {priority.length > 0 && (
@@ -166,9 +210,9 @@ export default async function Dashboard() {
             })}
           </div>
 
-          {/* Acciones rápidas — actuar desde el Inicio (Home E3) */}
+          {/* Acciones rápidas — actuar desde el Inicio (Home E3), priorizadas por rol (E5) */}
           <div className="mb-5 flex flex-wrap gap-2">
-            {QUICK_ACTIONS.map(({ label, href, Icon }) => (
+            {quickActions.map(({ label, href, Icon }) => (
               <Link
                 key={label}
                 href={href}
@@ -225,6 +269,9 @@ export default async function Dashboard() {
 
             <Card>
               <CardTitle>Actividad reciente</CardTitle>
+              {(home.recent_activity ?? []).length === 0 && (
+                <p className="py-6 text-center text-body text-ink-3">Sin actividad reciente todavía.</p>
+              )}
               <div className="space-y-0.5">
                 {(home.recent_activity ?? []).slice(0, 9).map((e: any, i: number) => {
                   const st = EVENT_STYLE[e.event_type] ?? { Icon: StickyNote, cls: 'text-ink-3' };

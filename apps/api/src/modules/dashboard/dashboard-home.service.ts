@@ -129,6 +129,7 @@ export class DashboardHomeService {
     });
 
     return {
+      role: this.db.role ?? null,
       kpis,
       priority,
       farm_status,
