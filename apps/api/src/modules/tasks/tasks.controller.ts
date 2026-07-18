@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { TaskService, TaskType } from './task.service';
+import { TaskRulesService } from './task-rules.service';
 
 /** Tipos de tarea que el endpoint general acepta — `health` queda reservado a Sanidad. */
 const GENERAL_TYPES = new Set<TaskType>(['general', 'breeding', 'feeding', 'maintenance', 'crop']);
@@ -9,6 +10,7 @@ const GENERAL_TYPES = new Set<TaskType>(['general', 'breeding', 'feeding', 'main
 export class TasksController {
   constructor(
     private readonly tasks: TaskService,
+    private readonly rules: TaskRulesService,
     private readonly db: DbService,
   ) {}
 
@@ -116,6 +118,12 @@ export class TasksController {
   @Get('tasks/assignees')
   assignees() {
     return this.tasks.assignees();
+  }
+
+  /** Materializa las reglas ganaderas automáticas por condición (E4). Deduplica por rule_key. */
+  @Post('tasks/materialize')
+  materialize(@Body() body: any) {
+    return this.rules.materialize({ weighDays: body?.weigh_days, lotReviewDays: body?.lot_review_days });
   }
 
   /** Acción masiva sobre varias tareas (E3). Debe ir ANTES de la ruta paramétrica. */

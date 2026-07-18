@@ -91,7 +91,7 @@ export class TaskService {
    * Crea una tarea en `pending`, atómica e idempotente por `id`. Escribe la fila + las
    * versiones LWW; emite server-origin SOLO si `ctx.emitServerOrigin`.
    */
-  async createTask(q: Q, input: CreateTaskInput, ctx: TaskContext): Promise<{ taskId: string; syncOp: PutOp }> {
+  async createTask(q: Q, input: CreateTaskInput, ctx: TaskContext): Promise<{ taskId: string; syncOp: PutOp | null; already?: boolean }> {
     const t = this.db.tenant;
     const title = (input.title ?? '').trim();
     if (!title) throw new BadRequestException({ code: 'task.missing_title', title: 'El título es obligatorio' });
@@ -105,6 +105,17 @@ export class TaskService {
     const relatedId = input.relatedId ?? null;
     const assignedTo = input.assignedTo ?? null;
     const ruleKey = input.ruleKey ?? null;
+
+    // Dedup de AUTOGENERADAS (E4): una tarea VIVA por (tenant, rule_key). Si ya existe una
+    // pendiente/en-curso con esta clave, no se crea otra (idempotente; race-safe con el índice
+    // único parcial ux_tasks_rule_key_live). Devuelve la existente.
+    if (ruleKey) {
+      const dup = await q.one<{ id: string }>(
+        `SELECT id FROM tasks WHERE tenant_id = $1 AND rule_key = $2 AND deleted_at IS NULL AND status IN ('pending','in_progress') LIMIT 1`,
+        [t, ruleKey],
+      );
+      if (dup) return { taskId: dup.id, syncOp: null, already: true };
+    }
     // Resolver la finca por el MISMO `q` de la operación (no `this.db`, que iría al pool y
     // haría deadlock con la única conexión de PGlite dentro de una tx). farm_id es nullable.
     const farmId =

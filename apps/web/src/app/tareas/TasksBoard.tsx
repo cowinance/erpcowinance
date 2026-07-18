@@ -195,7 +195,24 @@ export function TasksBoard() {
           <option value="unassigned">Sin asignar</option>
           {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
         </Select>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={async () => {
+              setBusy('materialize');
+              try {
+                const r = await fetch(`${API_URL}/tasks/materialize`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: '{}' }).then((x) => x.json());
+                alert(r?.total ? `${r.total} tarea(s) generada(s): pesaje ${r.created.weigh_due}, vacunas ${r.created.vaccine_due}, retiros ${r.created.withdrawal_end}, lotes ${r.created.lot_review}.` : 'Nada nuevo que generar.');
+                await load();
+              } finally {
+                setBusy(null);
+              }
+            }}
+            disabled={busy === 'materialize'}
+            className="h-8 rounded-md border border-strong px-3 text-label font-medium text-ink-2 hover:bg-sunken"
+            title="Genera tareas de pesaje/vacuna/retiro/lote desde el estado del hato (sin duplicar)"
+          >
+            {busy === 'materialize' ? 'Generando…' : 'Generar automáticas'}
+          </button>
           <Button size="sm" onClick={() => setCreating((v) => !v)}>{creating ? 'Cerrar' : '+ Nueva tarea'}</Button>
         </div>
       </div>

@@ -245,6 +245,14 @@ export class ReproService {
         [pregnancyId, this.db.tenant, body.animal_id, lastService?.id ?? null, diagnosisDate, body.method ?? 'ultrasound', expectedDue, this.db.user],
       );
       await insertAnimalEvent(this.db, body.animal_id, 'pregnancy_diagnosed', { method: body.method ?? 'ultrasound', expected_due_date: expectedDue }, diagnosisDate);
+      // E4 (Tareas): diagnóstico POSITIVO → tarea de seguimiento de preñez (dedup por preñez).
+      await this.db.tx((q) =>
+        this.tasks.createTask(
+          q,
+          { title: `Control de preñez — caravana ${animal.tag ?? '—'}`, type: 'breeding', dueDate: new Date(new Date(diagnosisDate).getTime() + 90 * 86400000).toISOString(), priority: 'normal', relatedType: 'animal', relatedId: body.animal_id, ruleKey: `preg_check:${pregnancyId}` },
+          { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user },
+        ),
+      );
       return { ...row, tag: animal.tag, result: 'pregnant' };
     }
 
@@ -255,6 +263,14 @@ export class ReproService {
       [body.animal_id, this.db.tenant, diagnosisDate],
     );
     await insertAnimalEvent(this.db, body.animal_id, 'pregnancy_negative', { method: body.method ?? 'ultrasound', previous_lost: !!open }, diagnosisDate);
+    // E4 (Tareas): diagnóstico NEGATIVO → tarea para nuevo servicio (dedup por animal).
+    await this.db.tx((q) =>
+      this.tasks.createTask(
+        q,
+        { title: `Preparar nuevo servicio — caravana ${animal.tag ?? '—'}`, type: 'breeding', dueDate: new Date().toISOString(), priority: 'normal', relatedType: 'animal', relatedId: body.animal_id, ruleKey: `reservice:${body.animal_id}` },
+        { origin: 'repro', emitServerOrigin: true, actorUserId: this.db.user },
+      ),
+    );
     return { tag: animal.tag, result: 'empty', previous_pregnancy_lost: !!open };
   }
 
