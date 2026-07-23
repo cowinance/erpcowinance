@@ -372,6 +372,9 @@ export class DbService implements OnModuleInit {
     'animal_identifiers',
     'animal_breeds',
     'animal_events',
+    // Movimientos de hacienda (P3): tabla-fact activa (recordMovement). Sin RLS quedaba fuera del
+    // backstop tenant que tienen el resto de las tablas de hechos (aunque las queries ya filtran).
+    'animal_movements',
     'weighings',
     'treatments',
     'vaccinations',
