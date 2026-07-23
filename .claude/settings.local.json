@@ -371,7 +371,21 @@
       "Bash(git reset *)",
       "Bash(curl -s -o /dev/null -w \"api /health: %{http_code}\\\\n\" http://localhost:3001/v1/health)",
       "Bash(curl -s -o /dev/null -w \"web: %{http_code}\\\\n\" http://localhost:3000)",
-      "Bash(awk '{printf \"MEMORY.md: %.1f KB\\\\n\", $1/1024}')"
+      "Bash(awk '{printf \"MEMORY.md: %.1f KB\\\\n\", $1/1024}')",
+      "Bash(curl -s -o /dev/null -w \"status %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(ps -p 1650 -o pid,command)",
+      "Bash(curl -s -o /dev/null -w \"  /v1/dashboard/kpis \\(sin auth, espera 401\\): %{http_code}\\\\n\" http://localhost:3001/v1/dashboard/kpis)",
+      "Bash(curl -s -o /dev/null -w \"  status: %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('.claude/launch.json'\\)\\);[print\\(c\\) for c in d['configurations'] if c['name']=='web']\")",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('package.json'\\)\\);print\\('root web:',d.get\\('scripts',{}\\).get\\('web'\\)\\)\")",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('apps/web/package.json'\\)\\);print\\('apps/web dev:',d.get\\('scripts',{}\\).get\\('dev'\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w \"ERP web \\(:55180\\): %{http_code}\\\\n\" http://localhost:55180/)",
+      "Bash(sed 's#/Users/josemontilla/Proyectos/app ganadera/##')",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('package.json'\\)\\);print\\({k:v for k,v in d.get\\('scripts',{}\\).items\\(\\) if 'test' in k or 'lint' in k or 'build' in k}\\)\")",
+      "Bash(echo \"TESTS_DONE exit=$?\")",
+      "Bash(timeout 240 npm run build --workspace @cowinance/web)",
+      "Bash(echo \"BUILD exit=$?\")",
+      "Bash(awk '/^CREATE TABLE \"/{t=$3; gsub\\(/\"/,\"\",t\\)} /\"tenant_id\" uuid NOT NULL/{print t}' packages/db/cowinance_schema.sql)"
     ]
   }
 }
