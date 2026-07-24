@@ -1,0 +1,165 @@
+name: Release
+
+# Construye, PRUEBA y publica las imágenes de producción.
+#
+# Corre después de los gates (`CI`), no en paralelo: publicar una imagen que no pasó el typecheck
+# ni los tests sería publicar algo que ya sabemos que está roto.
+#
+# El disparador manual permite reconstruir un tag sin tocar el código.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # publicar no se cancela a la mitad
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  release:
+    name: Construir · probar el stack · publicar
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Sin esto, un CI en rojo igual publicaría (workflow_run dispara con cualquier conclusión).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+      packages: write # publicar en GHCR
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Se construye ANTES de autenticar en el registro: si el build falla, nunca hubo sesión
+      # abierta contra el registro. Las imágenes quedan cargadas en el daemon local para el
+      # humo; recién se publican si ese humo pasa.
+      - name: Construir la imagen de la API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          load: true
+          tags: cowinance-api:candidata
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Construir la imagen de la web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          load: true
+          tags: cowinance-web:candidata
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:3001/v1' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── HUMO ────────────────────────────────────────────────────────────────
+      # El paso que da sentido a todo esto: levantar el stack REAL —las imágenes recién
+      # construidas, contra PostgreSQL de verdad— y comprobar que arranca, migra y sirve. Un
+      # `docker build` exitoso no dice nada sobre si el proceso levanta.
+      - name: Levantar el stack con las imágenes candidatas
+        run: |
+          cat > .env <<'EOF'
+          JWT_SECRET=humo-de-release-clave-de-48-caracteres-como-minimo
+          POSTGRES_PASSWORD=humo
+          APP_DB_PASSWORD=humo-app
+          SEED_DEMO=true
+          EOF
+          docker compose -f docker-compose.prod.yml up -d db
+          # `--no-build` con API_IMAGE/WEB_IMAGE apuntando a las imágenes recién construidas: lo
+          # que se prueba tiene que ser EXACTAMENTE lo que después se publica, no una
+          # reconstrucción parecida.
+          docker compose -f docker-compose.prod.yml up -d --no-build api web
+        env:
+          API_IMAGE: cowinance-api:candidata
+          WEB_IMAGE: cowinance-web:candidata
+
+      - name: readyz como puerta
+        run: |
+          # `readyz` responde recién cuando el esquema está cargado y las migraciones aplicadas:
+          # es la señal correcta para "esta imagen sirve", no un sleep arbitrario.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/v1/readyz > /dev/null; then
+              echo "readyz OK a los ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::readyz nunca respondió"
+          docker compose -f docker-compose.prod.yml logs api | tail -80
+          exit 1
+
+      - name: Las migraciones se aplicaron y la app responde
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.prod.yml logs api | grep -q "Migraciones pendientes" \
+            && echo "migraciones aplicadas en el arranque"
+
+          TOKEN=$(curl -fsS -X POST http://localhost:3001/v1/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"email":"cowinance@gmail.com","password":"cowinance"}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+          ACTIVOS=$(curl -fsS http://localhost:3001/v1/dashboard/home -H "authorization: Bearer $TOKEN" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["kpis"]["active_animals"])')
+          test "$ACTIVOS" -gt 0
+          echo "la API sirve datos reales (activos=$ACTIVOS)"
+
+          curl -fsS -o /dev/null http://localhost:3000/login
+          echo "la web sirve"
+
+      - name: Logs del stack si el humo falla
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail 120
+        env:
+          API_IMAGE: cowinance-api:candidata
+          WEB_IMAGE: cowinance-web:candidata
+
+      - name: Bajar el stack
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v
+        env:
+          API_IMAGE: cowinance-api:candidata
+          WEB_IMAGE: cowinance-web:candidata
+
+      # ── PUBLICAR ────────────────────────────────────────────────────────────
+      # Recién acá. Todo lo de arriba tuvo que pasar.
+      - name: Autenticar en GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Etiquetar y publicar
+        run: |
+          set -euo pipefail
+          # El SHA es la etiqueta que importa: identifica sin ambigüedad qué código corre en
+          # producción. `latest` es una comodidad para desplegar a mano, no una referencia para
+          # fijar en un despliegue.
+          SHA=${{ github.event.workflow_run.head_sha || github.sha }}
+          for app in api web; do
+            docker tag cowinance-$app:candidata ${{ env.IMAGE_BASE }}/$app:$SHA
+            docker tag cowinance-$app:candidata ${{ env.IMAGE_BASE }}/$app:latest
+            docker push ${{ env.IMAGE_BASE }}/$app:$SHA
+            docker push ${{ env.IMAGE_BASE }}/$app:latest
+            echo "publicado ${{ env.IMAGE_BASE }}/$app:$SHA"
+          done
+
+      - name: Resumen
+        run: |
+          SHA=${{ github.event.workflow_run.head_sha || github.sha }}
+          {
+            echo "### Imágenes publicadas"
+            echo ""
+            echo '```'
+            echo "${{ env.IMAGE_BASE }}/api:$SHA"
+            echo "${{ env.IMAGE_BASE }}/web:$SHA"
+            echo '```'
+            echo ""
+            echo "Pasaron: gates de CI · build · arranque con migraciones · readyz · login · lectura de datos · web."
+          } >> $GITHUB_STEP_SUMMARY

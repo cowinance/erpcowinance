@@ -293,9 +293,26 @@ software esté completo.
 2. ~~**Migraciones versionadas.**~~ **HECHO** — ver H-10.
 3. ~~**Almacenamiento de objetos** (S3/R2).~~ **HECHO** — ver H-11.
 4. ~~**Adaptador de email real.**~~ **HECHO** — ver H-12.
-5. **Pipeline de deploy** en el CI que ya existe: build de imágenes → migraciones → deploy, con
-   `readyz` como puerta.
-6. **Backups y restore probado.** Un backup que nunca se restauró no es un backup.
+5. ~~**Pipeline de deploy.**~~ **HECHO** — `.github/workflows/release.yml`: corre después de los
+   gates de CI, construye las dos imágenes, **levanta el stack con esas imágenes exactas** contra
+   PostgreSQL real, espera `readyz` (la señal de que el esquema cargó y las migraciones se
+   aplicaron, no un `sleep`), comprueba login + lectura + web, y **recién entonces** publica en
+   GHCR etiquetado con el SHA. El mismo `docker-compose.prod.yml` sirve para desplegar la imagen
+   publicada (`API_IMAGE=… up -d --no-build`), así lo que se despliega es exactamente lo que se
+   probó. *Verificado localmente*: la secuencia completa de humo pasa y los contenedores corren
+   la imagen candidata, no una reconstrucción.
+6. ~~**Backups y restore probado.**~~ **HECHO** — `deploy/backup/{backup,restore}.sh` +
+   `npm run verify:backup`, también como job de CI. El verificador no comprueba que `pg_dump`
+   corra: respalda, **DESTRUYE la base** (`DROP DATABASE`), restaura, compara fila por fila y
+   **arranca la app contra lo restaurado** para hacer login y leer. *Verificado*: 62 animales,
+   578 eventos, 363 pesajes y las 9 migraciones volvieron idénticos; la vista derivada
+   `v_weighings` —de la que depende la GDP en todos los canales— volvió con sus 363 filas; y
+   `/dashboard/home` compuso sobre la base restaurada.
+   Dos decisiones que evitan errores caros: el dump usa el rol **administrativo**, porque con el
+   de servicio la RLS lo dejaría **vacío en silencio**; y el restore exige `RESTORE_CONFIRM=si`,
+   porque el error más caro es ejecutarlo apuntando por accidente a producción.
+
+**Con esto el paso 1 queda cerrado: el producto es desplegable.**
 
 ### Paso 2 — Endurecimiento
 
@@ -355,6 +372,10 @@ software esté completo.
 | `modules/media/`, `modules/documents/` | H-11 · los dos escritores pasan por el puerto; se elimina el camino duplicado |
 | `infra/email/smtp-email-sender.ts` (+2 tests) | H-12 · envío real por SMTP |
 | `docker-compose.prod.yml`, `.env.example` | H-11/H-12 · las variables de S3 y SMTP, documentadas |
+| `.github/workflows/release.yml` | paso 1.5 · build → humo sobre el stack real → publicación en GHCR |
+| `deploy/backup/{backup,restore}.sh`, `scripts/verify-backup.mjs` | paso 1.6 · respaldo, restore y el ensayo que los prueba |
+| `.github/workflows/ci.yml` | paso 1.6 · `verify:backup` como job |
+| `docker-compose.prod.yml` | paso 1.5 · `API_IMAGE`/`WEB_IMAGE` para desplegar sin reconstruir |
 
 **Verificación tras los cambios: 980 tests verdes, typecheck limpio (5 proyectos + web), build de
 producción OK, 0 ciclos, y el stack de contenedores levantado de punta a punta contra

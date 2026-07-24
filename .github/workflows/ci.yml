@@ -135,3 +135,43 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 7
+
+  # El ensayo de recuperación. Un backup que nunca se restauró no es un backup: este job respalda,
+  # DESTRUYE la base y restaura, y después arranca la app contra lo restaurado. Corre en CI y no a
+  # mano porque el procedimiento se rompe callado —una migración nueva, un objeto que el dump no
+  # cubre— y el momento de enterarse no es durante un incidente.
+  verify-backup:
+    name: Backup y restore (ensayo completo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: imresamu/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # `pg_dump`/`pg_restore` se ejecutan DENTRO del contenedor de la base (el script lo busca
+      # por imagen), así la versión del cliente coincide siempre con la del servidor — la causa
+      # más común de que un restore falle justo cuando hace falta.
+      - name: Respaldar, destruir y restaurar
+        run: npm run verify:backup

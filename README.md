@@ -138,6 +138,51 @@ desarrollo el arranque avisa exactamente qué queda roto:
 Lo que este compose **no** resuelve (ver [la auditoría](docs/audits/auditoria-2026-07-24.md)):
 una sola instancia de API — el rate limit cuenta en memoria.
 
+### Publicar y desplegar
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) corre **después** de que los gates
+de CI pasen —publicar algo que ya sabemos roto no tiene sentido— y hace, en este orden:
+
+1. Construye las dos imágenes.
+2. **Levanta el stack con esas imágenes exactas** contra PostgreSQL real.
+3. Espera `readyz`: la señal de que el esquema cargó y las migraciones se aplicaron, no un `sleep`.
+4. Comprueba login, lectura de datos y que la web sirva.
+5. **Recién entonces** publica en GHCR, etiquetadas con el SHA del commit y `latest`.
+
+Desplegar una imagen ya publicada usa el **mismo** compose, sin reconstruir nada:
+
+```bash
+API_IMAGE=ghcr.io/<org>/<repo>/api:<sha> WEB_IMAGE=ghcr.io/<org>/<repo>/web:<sha> docker compose -f docker-compose.prod.yml up -d --no-build
+```
+
+Fijar el SHA y no `latest`: es lo único que identifica sin ambigüedad qué código está corriendo.
+Las migraciones pendientes se aplican solas al arrancar, así que el deploy es levantar el
+contenedor nuevo y esperar su `readyz`.
+
+### Backups
+
+```bash
+DATABASE_ADMIN_URL=postgres://postgres:clave@host:5432/cowinance ./deploy/backup/backup.sh
+RESTORE_CONFIRM=si DATABASE_ADMIN_URL=... ./deploy/backup/restore.sh backups/cowinance-<fecha>.dump
+```
+
+El dump usa el rol **administrativo** a propósito: con el rol de servicio, que tiene la RLS
+aplicada y no lleva `app.tenant_id` fijado, el backup saldría **vacío en silencio** — peor que no
+tener backup. `restore.sh` exige `RESTORE_CONFIRM=si` porque el error más caro de un restore es
+ejecutarlo apuntando por accidente a producción.
+
+Y lo que de verdad importa:
+
+```bash
+docker compose up -d db
+npm run verify:backup
+```
+
+Respalda, **destruye la base** (`DROP DATABASE`), restaura, compara los datos fila por fila y
+arranca la app contra lo restaurado para hacer login y leer. Corre también en CI: el procedimiento
+se rompe callado —una migración nueva, un objeto que el dump no cubre— y el momento de enterarse
+no es durante un incidente.
+
 ### Migraciones de esquema
 
 ```

@@ -40,6 +40,11 @@ services:
     restart: unless-stopped
 
   api:
+    # `image` + `build`: `up --build` construye y etiqueta con este nombre; `up --no-build` usa la
+    # imagen que ya exista. Eso permite las dos cosas con el MISMO compose: construir en local, y
+    # desplegar una imagen ya publicada y probada —
+    #   API_IMAGE=ghcr.io/<org>/<repo>/api:<sha> docker compose -f docker-compose.prod.yml up -d --no-build
+    image: ${API_IMAGE:-cowinance-api:local}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -86,6 +91,7 @@ services:
     restart: unless-stopped
 
   web:
+    image: ${WEB_IMAGE:-cowinance-web:local}
     build:
       context: .
       dockerfile: apps/web/Dockerfile
