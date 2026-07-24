@@ -20,8 +20,9 @@ test('protocolos: crear y archivar una plantilla', async ({ page }) => {
   await page.getByPlaceholder('Acción').first().fill('Implante');
   await page.getByRole('button', { name: 'Crear protocolo' }).click();
 
-  // Aparece en la lista con su paso.
-  await expect(page.getByText('IATF Test')).toBeVisible();
+  // Aparece en la lista con su paso. (La página ahora también monta el panel de asignaciones,
+  // cuyo <select> incluye el mismo nombre → se acota a la primera coincidencia.)
+  await expect(page.getByText('IATF Test').first()).toBeVisible();
   await expect(page.getByText('Día 0: Implante')).toBeVisible();
 
   // Archivar → desaparece.

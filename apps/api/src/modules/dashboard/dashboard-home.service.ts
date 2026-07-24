@@ -108,8 +108,16 @@ export class DashboardHomeService {
     // ── Agenda combinada: health/repro (alerts.agenda, ya ordenada) + tareas vencidas/hoy ──
     // Ítems de tarea en el contrato de la agenda web (AgendaAttention): related_type='task' +
     // action='complete_task' → renderiza el botón «✓» y usa related_id como taskId.
+    //
+    // DEDUP: el motor de alertas ya expone las tareas SANITARIAS por su cuenta (regla
+    // `health_task_due`, con related_type='task' y el mismo id). Sin este filtro, una tarea de
+    // sanidad vencida aparecía DOS VECES en «Atención hoy». Se conserva la del motor (trae el
+    // mensaje sanitario) y solo se agregan las tareas que no estén ya representadas.
+    const alreadyInAgenda = new Set(
+      (agenda as any[]).filter((a) => a.related_type === 'task' && a.related_id).map((a) => a.related_id),
+    );
     const taskAgenda = (openTasks as any[])
-      .filter((t) => t.bucket === 'overdue' || t.bucket === 'today')
+      .filter((t) => (t.bucket === 'overdue' || t.bucket === 'today') && !alreadyInAgenda.has(t.id))
       .map((t) => ({
         code: 'task',
         category: 'task',

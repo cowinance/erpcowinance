@@ -107,6 +107,22 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     60_000,
   );
 
+  it('no duplica una tarea que el motor de alertas ya expone (regresión: agenda doble)', async () => {
+    // El motor ya publica las tareas SANITARIAS pendientes (regla health_task_due, related_type
+    // 'task' con el id de la tarea). Al combinar la agenda hay que evitar sumarlas otra vez: una
+    // tarea de sanidad vencida aparecía DOS VECES en «Atención hoy» (lo detectó el e2e 10-agenda).
+    await db.query(
+      `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, created_by)
+       VALUES ($1,$2,'Revisión sanitaria — regresión','health', CURRENT_DATE - 1, 'normal','pending',$3)`,
+      [db.tenant, farmId, userId],
+    );
+    const h: any = await home.home();
+    const taskIds = h.agenda.filter((a: any) => a.related_type === 'task' && a.related_id).map((a: any) => a.related_id);
+    expect(taskIds.length).toBe(new Set(taskIds).size); // sin ids repetidos
+    // Y la tarea sanitaria sigue estando (no se perdió al deduplicar).
+    expect(h.agenda.some((a: any) => String(a.title).includes('Revisión sanitaria — regresión'))).toBe(true);
+  }, 60_000);
+
   it('la agenda combinada ordena por fecha (vencidas primero)', async () => {
     const h: any = await home.home();
     const dues = h.agenda.map((a: any) => a.due_at ?? '9999-12-31');

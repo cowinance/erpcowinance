@@ -45,22 +45,36 @@ jobs:
       - name: Build
         run: npm run build
 
-# PENDIENTE — job `e2e-web` (Playwright, 37 specs):
-# Al preparar este CI se corrió el e2e por primera vez en mucho tiempo y hay 6 specs en rojo,
-# porque las UIs que asertan fueron reescritas (lista de animales, tablero de tareas, agenda del
-# Inicio, reproducción) sin que nada las ejecutara: el e2e no entra al gate de Vitest y no había CI.
-# No se agrega el job hasta arreglarlos, para no normalizar un pipeline rojo. Una vez verdes:
-#
-#   e2e-web:
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 30
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-node@v4
-#         with: { node-version: 22, cache: npm }
-#       - run: npm ci
-#       - run: npx playwright install --with-deps chromium   # único project del config
-#       - run: npm run e2e:web                                # global-setup levanta su propia API
-#       - uses: actions/upload-artifact@v4
-#         if: failure()
-#         with: { name: playwright-report, path: apps/web/playwright-report/, retention-days: 7 }
+  # Recorrido real por el navegador (40 specs). Va en un job aparte del de gates para que el
+  # feedback rápido no dependa de arrancar Chromium y una API.
+  e2e-web:
+    name: E2E web (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Solo chromium: es el único project declarado en playwright.config.ts.
+      - name: Instalar navegador
+        run: npx playwright install --with-deps chromium
+
+      # `e2e:web` compila la API y corre Playwright; el global-setup levanta su propia API con
+      # SEED_DEMO=off y una base temporal fuera del repo (ver apps/web/e2e/README.md).
+      - name: E2E
+        run: npm run e2e:web
+
+      - name: Subir reporte si falla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

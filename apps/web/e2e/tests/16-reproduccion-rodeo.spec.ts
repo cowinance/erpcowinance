@@ -25,13 +25,19 @@ test('reproducción/rodeo: estado por vientre y conteos', async ({ page }) => {
   await page.goto('/reproduccion');
   await expect(page.getByRole('heading', { name: 'Estado del rodeo' })).toBeVisible();
 
-  // Franja de conteos (4 vientres, uno por estado).
+  // Total de vientres del rodeo.
   await expect(page.getByText('4 vientres', { exact: true })).toBeVisible();
-  await expect(page.getByText('Preñada:')).toBeVisible();
-  await expect(page.getByText('Servida:')).toBeVisible();
-  await expect(page.getByText('Vacía:')).toBeVisible();
-  await expect(page.getByText('Sin actividad:')).toBeVisible();
 
-  // Tabla del roster: RS4 (sin actividad) solo aparece acá, no en «Próximos partos».
-  await expect(page.getByRole('link', { name: 'RS4' })).toBeVisible();
+  // El estado ahora es DERIVADO y rico (13 estados con badge, mejora de Reproducción): la franja
+  // resume solo los ACCIONABLES —pregnant/due_soon/diagnosis_pending/ready_for_service/open/
+  // repeat_breeder—, así que se afirma el que es determinista con estos datos: la diagnosticada
+  // preñada. (Antes se afirmaban etiquetas «Preñada:»/«Servida:» de la franja vieja.)
+  // Aparece dos veces (badge de la franja + fila de RS1 en el roster); alcanza con la primera.
+  await expect(page.getByText('Preñada', { exact: true }).first()).toBeVisible();
+
+  // Tabla del roster: los 4 vientres aparecen, incluido RS4 (sin actividad), que no está en
+  // «Próximos partos».
+  for (const tag of ['RS1', 'RS2', 'RS3', 'RS4']) {
+    await expect(page.getByRole('link', { name: tag })).toBeVisible();
+  }
 });

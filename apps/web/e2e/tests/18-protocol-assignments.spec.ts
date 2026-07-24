@@ -29,8 +29,9 @@ test('protocolos: asignar, calendario previsto y cancelar', async ({ page }) => 
   await page.getByLabel('Fecha de inicio').fill('2030-05-01');
   await page.getByRole('button', { name: 'Asignar protocolo' }).click();
 
-  // Feedback con número de tareas.
-  await expect(page.getByText(/2 tareas generadas/)).toBeVisible();
+  // Feedback con número de tareas. El texto cambió con la mejora de protocolos (ahora informa
+  // también los vientres alcanzados y los ya incluidos): «Asignación creada — N vientres, M tareas».
+  await expect(page.getByText(/2 tareas/)).toBeVisible();
   // Asignación activa (botón de cancelar con nombre accesible).
   await expect(page.getByRole('button', { name: /Cancelar asignación de IATF E2E al lote Lote E2E/ })).toBeVisible();
   // Calendario previsto: pasos en fechas correctas y orden (Implante 1/5, Retiro 9/5).

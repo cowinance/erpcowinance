@@ -24,6 +24,11 @@ test('lista: selección múltiple → diálogo Mover → POST /movements', async
 
   await page.goto('/animales');
 
+  // El listado ahora carga los animales desde el navegador (filtros/orden/paginación en cliente),
+  // así que hay que esperar a que lleguen las filas: si no, «Seleccionar todos» marca una lista vacía.
+  await expect(page.getByRole('link', { name: /MV-1/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /MV-2/ })).toBeVisible();
+
   // Seleccionar todos (2 animales del tenant fresco) → barra de acción.
   await page.getByRole('checkbox', { name: 'Seleccionar todos' }).check();
   await expect(page.getByText('2 seleccionados')).toBeVisible();

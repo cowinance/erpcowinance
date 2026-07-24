@@ -61,6 +61,19 @@ const CLOSED_TABS = [
   { key: 'canceled', label: 'Canceladas' },
 ] as const;
 
+/** Bucket al que cae una fecha (espeja la derivación del backend; acá solo sirve para navegar). */
+function bucketForDue(due: string | null): string {
+  if (!due) return 'nodate';
+  const today = new Date().toISOString().slice(0, 10);
+  const d = due.slice(0, 10);
+  if (d < today) return 'overdue';
+  if (d === today) return 'today';
+  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  if (d <= in7) return 'next7';
+  const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10);
+  return d <= endOfMonth ? 'month' : 'later';
+}
+
 export function TasksBoard() {
   const [tab, setTab] = useState<string>('today');
   const [q, setQ] = useState('');
@@ -180,7 +193,7 @@ export function TasksBoard() {
       {/* Filtros */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar tarea…" className="h-8 w-56" />
+          <Input aria-label="Buscar tarea" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar tarea…" className="h-8 w-56" />
         </div>
         <Select value={priority} onChange={(e) => setPriority(e.target.value)} controlSize="sm">
           <option value="">Toda prioridad</option>
@@ -219,7 +232,16 @@ export function TasksBoard() {
         </div>
       </div>
 
-      {creating && <CreateTask assignees={assignees} onCreated={() => { setCreating(false); load(); }} />}
+      {creating && (
+        <CreateTask
+          assignees={assignees}
+          onCreated={(due: string | null) => {
+            setCreating(false);
+            setTab(bucketForDue(due)); // si no, una tarea sin fecha «desaparece» estando en Hoy
+            load();
+          }}
+        />
+      )}
 
       {/* Tabs / buckets */}
       <div className="flex flex-wrap gap-1.5 border-b border-subtle pb-2">
@@ -459,7 +481,7 @@ function TaskCard({ task, busy, assignees, onAction, selected, onToggle, onOpen 
   );
 }
 
-function CreateTask({ assignees, onCreated }: { assignees: Assignee[]; onCreated: () => void }) {
+function CreateTask({ assignees, onCreated }: { assignees: Assignee[]; onCreated: (due: string | null) => void }) {
   const [title, setTitle] = useState('');
   const [due, setDue] = useState('');
   const [priority, setPriority] = useState('normal');
@@ -481,7 +503,7 @@ function CreateTask({ assignees, onCreated }: { assignees: Assignee[]; onCreated
       if (assignedTo && id) {
         await fetch(`${API_URL}/tasks/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ assigned_to: assignedTo }) });
       }
-      onCreated();
+      onCreated(due || null);
     } finally {
       setSaving(false);
     }
@@ -492,16 +514,16 @@ function CreateTask({ assignees, onCreated }: { assignees: Assignee[]; onCreated
       <CardTitle>Nueva tarea</CardTitle>
       <div className="grid grid-cols-6 gap-3 max-md:grid-cols-2">
         <div className="col-span-2 max-md:col-span-2">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título…" fullWidth />
+          <Input aria-label="Título" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título…" fullWidth />
         </div>
-        <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-        <Select value={type} onChange={(e) => setType(e.target.value)}>
+        <Input aria-label="Vence" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+        <Select aria-label="Módulo" value={type} onChange={(e) => setType(e.target.value)}>
           {Object.entries(MODULE).filter(([k]) => k !== 'health').map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </Select>
-        <Select value={priority} onChange={(e) => setPriority(e.target.value)}>
+        <Select aria-label="Prioridad" value={priority} onChange={(e) => setPriority(e.target.value)}>
           {Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </Select>
-        <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+        <Select aria-label="Responsable" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
           <option value="">Sin asignar</option>
           {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
         </Select>
