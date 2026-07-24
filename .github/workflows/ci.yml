@@ -1,0 +1,66 @@
+name: CI
+
+# Verificación en cada push a main y en cada PR. Refleja los gates que el repo YA define
+# (`npm run audit:arch` fue escrito explícitamente para esto) en vez de inventar unos nuevos.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Un PR que recibe varios pushes seguidos cancela las corridas viejas: no tiene sentido pagar
+# CI por un commit ya superado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Gates (tokens · typecheck · tests · ciclos · build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # engines: >=22 (Expo SDK 57 pide 22.13+)
+          cache: npm
+
+      # `npm ci` dispara el `prepare` de domain/sync-core/design-tokens, que compila su `dist/`
+      # (está gitignoreado). Sin ese paso los consumidores no resolverían @cowinance/*.
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Gate único del repo: tokens sin deriva + typecheck (domain, sync-core, design-tokens, api,
+      # móvil) + la suite completa de Vitest + cero ciclos de dependencia. Bloquea con exit ≠ 0.
+      - name: Gates de arquitectura
+        run: npm run audit:arch
+
+      # `audit:arch` no cubre la web (tiene su propio toolchain); se verifica acá.
+      - name: Typecheck web
+        run: npx tsc -p apps/web/tsconfig.json --noEmit
+
+      # Compila todos los workspaces, incluido el build de producción de Next.
+      - name: Build
+        run: npm run build
+
+# PENDIENTE — job `e2e-web` (Playwright, 37 specs):
+# Al preparar este CI se corrió el e2e por primera vez en mucho tiempo y hay 6 specs en rojo,
+# porque las UIs que asertan fueron reescritas (lista de animales, tablero de tareas, agenda del
+# Inicio, reproducción) sin que nada las ejecutara: el e2e no entra al gate de Vitest y no había CI.
+# No se agrega el job hasta arreglarlos, para no normalizar un pipeline rojo. Una vez verdes:
+#
+#   e2e-web:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 30
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with: { node-version: 22, cache: npm }
+#       - run: npm ci
+#       - run: npx playwright install --with-deps chromium   # único project del config
+#       - run: npm run e2e:web                                # global-setup levanta su propia API
+#       - uses: actions/upload-artifact@v4
+#         if: failure()
+#         with: { name: playwright-report, path: apps/web/playwright-report/, retention-days: 7 }
