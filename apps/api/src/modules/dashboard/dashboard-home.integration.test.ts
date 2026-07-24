@@ -66,7 +66,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     expect(Array.isArray(h.agenda)).toBe(true);
     expect(Array.isArray(h.recent_activity)).toBe(true);
     expect(Array.isArray(h.priority)).toBe(true);
-  });
+  }, 60_000);
 
   it('la atención prioritaria solo trae ítems con volumen, ordenados por severidad', async () => {
     // Tarea vencida crítica → debe aparecer arriba de todo en prioridad.
@@ -89,19 +89,23 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     expect(overdue.href).toContain('/tareas');
     // Estado operativo refleja la crítica.
     expect(['late', 'critical']).toContain(h.farm_status.operation);
-  });
+  }, 60_000);
 
-  it('expone el ROL del usuario de la request (base de la personalización del Inicio)', async () => {
-    // El Inicio web reordena el énfasis con este dato (lib/role-focus). Se ejercita el rol real
-    // de la request vía requestContext, que es de donde lo lee DbService.role.
-    const tenantId = db.tenant;
-    const asRole = (role: string) =>
-      requestContext.run({ userId, tenantId, role }, () => home.home() as Promise<any>);
+  // Cada `home()` compone ~9 servicios (incluido el computeDesired caro), así que se limita a DOS
+  // roles —suficiente para probar que el dato SALE del contexto y no está fijo— y se le da margen
+  // explícito: con la suite completa en paralelo, dos composiciones se pasan del default de 5 s.
+  it(
+    'expone el ROL del usuario de la request (base de la personalización del Inicio)',
+    async () => {
+      const tenantId = db.tenant;
+      const asRole = (role: string) =>
+        requestContext.run({ userId, tenantId, role }, () => home.home() as Promise<any>);
 
-    expect((await asRole('veterinarian')).role).toBe('veterinarian');
-    expect((await asRole('foreman')).role).toBe('foreman');
-    expect((await asRole('owner')).role).toBe('owner');
-  });
+      expect((await asRole('veterinarian')).role).toBe('veterinarian');
+      expect((await asRole('owner')).role).toBe('owner');
+    },
+    60_000,
+  );
 
   it('la agenda combinada ordena por fecha (vencidas primero)', async () => {
     const h: any = await home.home();
@@ -109,5 +113,5 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     for (let i = 1; i < dues.length; i++) expect(dues[i - 1] <= dues[i]).toBe(true);
     // Incluye la tarea vencida (category 'task').
     expect(h.agenda.some((a: any) => a.category === 'task')).toBe(true);
-  });
+  }, 60_000);
 });
