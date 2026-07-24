@@ -433,7 +433,10 @@
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"partners\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"milk_tanks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"budget_lines\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
-      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"budgets\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)"
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"budgets\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"tasks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(curl -s -o /dev/null -w \"login page HTTP %{http_code}\\\\n\" http://localhost:55342/login)",
+      "Bash(curl -s -o /dev/null -w \"costos HTTP %{http_code}\\\\n\" http://localhost:55342/costos)"
     ]
   }
 }

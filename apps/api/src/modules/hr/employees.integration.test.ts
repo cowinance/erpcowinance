@@ -69,4 +69,23 @@ describe('hr — empleados', () => {
     await expect(svc.get(e.id)).rejects.toMatchObject({ status: 404 });
     await expect(svc.update(e.id, { role: 'z' })).rejects.toMatchObject({ status: 404 });
   });
+
+  it('guarda la tarifa horaria y acepta que falte (sin tarifa ≠ trabajo gratis)', async () => {
+    const con: any = await svc.create({ full_name: 'Con Tarifa', hourly_rate: 1250.5 });
+    expect(con.hourly_rate).toBe(1250.5);
+
+    // Sin cargar: null explícito, no 0. El costeo informa esas horas como «sin valorizar» (G2 · E6).
+    const sin: any = await svc.create({ full_name: 'Sin Tarifa' });
+    expect(sin.hourly_rate).toBeNull();
+
+    // Se puede cargar después, y también borrar.
+    expect((await svc.update(sin.id, { hourly_rate: 900 }) as any).hourly_rate).toBe(900);
+    expect((await svc.update(sin.id, { hourly_rate: null }) as any).hourly_rate).toBeNull();
+  });
+
+  it('rechaza una tarifa horaria negativa (no existe la hora que da plata)', async () => {
+    await expect(svc.create({ full_name: 'Negativa', hourly_rate: -5 })).rejects.toMatchObject({ status: 400 });
+    const e: any = await svc.create({ full_name: 'Para Editar' });
+    await expect(svc.update(e.id, { hourly_rate: 'no-es-un-numero' })).rejects.toMatchObject({ status: 400 });
+  });
 });

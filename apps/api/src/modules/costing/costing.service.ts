@@ -36,6 +36,7 @@ export const COST_CATEGORIES = {
   feed: 'Nutrición — entregas de ración a lote',
   crop: 'Agricultura — labores (insumos consumidos)',
   machinery: 'Maquinaria — combustible y mantenimiento',
+  labor: 'Mano de obra — partes de trabajo valorizados a la tarifa del empleado',
 } as const;
 export type CostCategory = keyof typeof COST_CATEGORIES;
 
@@ -91,7 +92,10 @@ export class CostingService {
 
     const { from, to } = this.range(params);
     const t = this.db.tenant;
-    const rows = await this.db.query<any>(this.sqlFor(level), [t, from, to]);
+    const [rows, labor] = await Promise.all([
+      this.db.query<any>(this.sqlFor(level), [t, from, to]),
+      this.db.query<any>(CostingService.LABOR_TOTALS_SQL, [t, from, to]),
+    ]);
 
     const out = rows.map((r) => {
       const categories = Object.fromEntries(
@@ -112,14 +116,35 @@ export class CostingService {
       (Object.keys(COST_CATEGORIES) as CostCategory[]).map((c) => [c, +out.reduce((a, r) => a + r.categories[c], 0).toFixed(2)]),
     ) as Record<CostCategory, number>;
 
+    // Mano de obra que NO llegó a ninguna fila: la valorizada pero sin centro atribuible, y las
+    // horas sin tarifa. Se informan en vez de callarse — las dos abaratarían el costo en silencio.
+    const laborTotal = +(labor[0]?.priced ?? 0);
+    const attributedLabor = out.reduce((a, r) => a + r.categories.labor, 0);
+
     return {
       level,
       from,
       to,
       rows: out.sort((a, b) => b.total - a.total),
-      totals: { by_category: byCategory, total: +Object.values(byCategory).reduce((a, b) => a + b, 0).toFixed(2) },
+      totals: {
+        by_category: byCategory,
+        total: +Object.values(byCategory).reduce((a, b) => a + b, 0).toFixed(2),
+        /** Jornadas valorizadas que no se pudieron imputar a un centro de este nivel. */
+        unattributed_labor: +Math.max(0, laborTotal - attributedLabor).toFixed(2),
+        /** Horas trabajadas por empleados sin tarifa horaria: costo real que el sistema no puede valorizar. */
+        unpriced_hours: +(labor[0]?.unpriced_hours ?? 0),
+      },
     };
   }
+
+  /** Mano de obra del período a nivel finca: lo valorizable y lo que quedó sin tarifa. */
+  private static readonly LABOR_TOTALS_SQL = `
+    SELECT COALESCE(sum(wl.hours * e.hourly_rate) FILTER (WHERE e.hourly_rate IS NOT NULL), 0)::float AS priced,
+           COALESCE(sum(wl.hours) FILTER (WHERE e.hourly_rate IS NULL), 0)::float AS unpriced_hours
+    FROM work_logs wl
+    JOIN employees e ON e.id = wl.employee_id AND e.tenant_id = $1 AND e.deleted_at IS NULL
+    WHERE wl.tenant_id = $1 AND wl.deleted_at IS NULL AND wl.hours IS NOT NULL
+      AND wl.work_date BETWEEN $2::date AND $3::date`;
 
   /**
    * Costo UNITARIO por actividad (E2) — el número que vuelve accionable al costo: no importa haber
@@ -451,7 +476,14 @@ export class CostingService {
            (COALESCE((SELECT sum(tr.cost) FROM treatments tr WHERE tr.tenant_id = $1 AND tr.deleted_at IS NULL AND tr.cost IS NOT NULL
                         AND tr.applied_at::date BETWEEN $2::date AND $3::date AND tr.animal_id IN (SELECT id FROM an)), 0)
           + COALESCE((SELECT sum(fd.total_cost) FROM feed_deliveries fd WHERE fd.tenant_id = $1 AND fd.deleted_at IS NULL AND fd.total_cost IS NOT NULL
-                        AND fd.delivered_at::date BETWEEN $2::date AND $3::date AND fd.lot_id IN (SELECT id FROM scope)), 0))::float AS cost`;
+                        AND fd.delivered_at::date BETWEEN $2::date AND $3::date AND fd.lot_id IN (SELECT id FROM scope)), 0)
+          + COALESCE((SELECT sum(wl.hours * e.hourly_rate) FROM work_logs wl
+                        JOIN employees e ON e.id = wl.employee_id AND e.tenant_id = $1 AND e.deleted_at IS NULL
+                        LEFT JOIN cost_centers wcc ON wcc.id = wl.cost_center_id AND wcc.level = 'lot' AND wcc.deleted_at IS NULL
+                        LEFT JOIN tasks tk ON tk.id = wl.task_id AND tk.related_type = 'lot' AND tk.deleted_at IS NULL
+                        WHERE wl.tenant_id = $1 AND wl.deleted_at IS NULL AND wl.hours IS NOT NULL AND e.hourly_rate IS NOT NULL
+                          AND wl.work_date BETWEEN $2::date AND $3::date
+                          AND COALESCE(wcc.reference_id, tk.related_id) IN (SELECT id FROM scope)), 0))::float AS cost`;
 
   /** LECHE. Producción = litros del período. Costo = sanidad + ración de los lotes 'dairy'. */
   private static readonly MILK_SQL = `
@@ -468,7 +500,14 @@ export class CostingService {
            (COALESCE((SELECT sum(tr.cost) FROM treatments tr WHERE tr.tenant_id = $1 AND tr.deleted_at IS NULL AND tr.cost IS NOT NULL
                         AND tr.applied_at::date BETWEEN $2::date AND $3::date AND tr.animal_id IN (SELECT id FROM an)), 0)
           + COALESCE((SELECT sum(fd.total_cost) FROM feed_deliveries fd WHERE fd.tenant_id = $1 AND fd.deleted_at IS NULL AND fd.total_cost IS NOT NULL
-                        AND fd.delivered_at::date BETWEEN $2::date AND $3::date AND fd.lot_id IN (SELECT id FROM scope)), 0))::float AS cost`;
+                        AND fd.delivered_at::date BETWEEN $2::date AND $3::date AND fd.lot_id IN (SELECT id FROM scope)), 0)
+          + COALESCE((SELECT sum(wl.hours * e.hourly_rate) FROM work_logs wl
+                        JOIN employees e ON e.id = wl.employee_id AND e.tenant_id = $1 AND e.deleted_at IS NULL
+                        LEFT JOIN cost_centers wcc ON wcc.id = wl.cost_center_id AND wcc.level = 'lot' AND wcc.deleted_at IS NULL
+                        LEFT JOIN tasks tk ON tk.id = wl.task_id AND tk.related_type = 'lot' AND tk.deleted_at IS NULL
+                        WHERE wl.tenant_id = $1 AND wl.deleted_at IS NULL AND wl.hours IS NOT NULL AND e.hourly_rate IS NOT NULL
+                          AND wl.work_date BETWEEN $2::date AND $3::date
+                          AND COALESCE(wcc.reference_id, tk.related_id) IN (SELECT id FROM scope)), 0))::float AS cost`;
 
   /**
    * AGRICULTURA. Producción = lo cosechado en el período; superficie = la de los cultivos cosechados
@@ -486,9 +525,44 @@ export class CostingService {
            (SELECT COALESCE(yield_unit, 'kg') FROM h WHERE yield_unit IS NOT NULL
             GROUP BY yield_unit ORDER BY sum(yield_quantity) DESC LIMIT 1) AS output_unit,
            (SELECT sum(c.area_ha)::float FROM crops c WHERE c.id IN (SELECT crop_id FROM h)) AS area_ha,
-           COALESCE((SELECT sum(co.cost) FROM crop_operations co
-                     WHERE co.tenant_id = $1 AND co.deleted_at IS NULL AND co.cost IS NOT NULL
-                       AND co.performed_at::date BETWEEN $2::date AND $3::date), 0)::float AS cost`;
+           (COALESCE((SELECT sum(co.cost) FROM crop_operations co
+                      WHERE co.tenant_id = $1 AND co.deleted_at IS NULL AND co.cost IS NOT NULL
+                        AND co.performed_at::date BETWEEN $2::date AND $3::date), 0)
+          + COALESCE((SELECT sum(wl.hours * e.hourly_rate) FROM work_logs wl
+                      JOIN employees e ON e.id = wl.employee_id AND e.tenant_id = $1 AND e.deleted_at IS NULL
+                      LEFT JOIN cost_centers wcc ON wcc.id = wl.cost_center_id AND wcc.level = 'crop' AND wcc.deleted_at IS NULL
+                      LEFT JOIN tasks tk ON tk.id = wl.task_id AND tk.related_type = 'crop' AND tk.deleted_at IS NULL
+                      WHERE wl.tenant_id = $1 AND wl.deleted_at IS NULL AND wl.hours IS NOT NULL AND e.hourly_rate IS NOT NULL
+                        AND wl.work_date BETWEEN $2::date AND $3::date
+                        AND COALESCE(wcc.reference_id, tk.related_id) IS NOT NULL), 0))::float AS cost`;
+
+  /**
+   * MANO DE OBRA (E6) — valoriza los partes de trabajo (`work_logs`, WL-1), que hasta acá registraban
+   * horas sin precio y quedaban fuera del costeo.
+   *
+   * Valorización: `hours × employees.hourly_rate`. Un empleado SIN tarifa no aporta costo cero —eso
+   * sería trabajo gratis—: sus horas se excluyen y se informan aparte en `totals.unpriced_hours`,
+   * para que la falta de dato se vea en vez de abaratar el costo.
+   *
+   * ATRIBUCIÓN, regla única en dos pasos (el primero que exista gana):
+   *   1. `work_logs.cost_center_id` — imputación EXPLÍCITA de la jornada.
+   *   2. la tarea vinculada (`work_logs.task_id` → `tasks.related_type/related_id`) — DERIVADA: si la
+   *      tarea era de un lote, la jornada se imputa a ese lote. Aprovecha lo que el módulo de Tareas
+   *      ya registra, sin pedirle al productor que cargue el dato dos veces.
+   * Sin ninguno de los dos, la jornada no se atribuye a un centro (aparece en `unattributed_labor`).
+   *
+   * `level` viene del enum validado en `costsByCenter`, nunca del request crudo.
+   */
+  private laborSql(level: CostLevel, entityCol: string): string {
+    return `COALESCE((SELECT sum(wl.hours * e.hourly_rate) FROM work_logs wl
+              JOIN employees e ON e.id = wl.employee_id AND e.tenant_id = $1 AND e.deleted_at IS NULL
+              LEFT JOIN cost_centers wcc ON wcc.id = wl.cost_center_id AND wcc.level = '${level}' AND wcc.deleted_at IS NULL
+              LEFT JOIN tasks tk ON tk.id = wl.task_id AND tk.related_type = '${level}' AND tk.deleted_at IS NULL
+              WHERE wl.tenant_id = $1 AND wl.deleted_at IS NULL
+                AND wl.hours IS NOT NULL AND e.hourly_rate IS NOT NULL
+                AND wl.work_date BETWEEN $2::date AND $3::date
+                AND COALESCE(wcc.reference_id, tk.related_id) = ${entityCol}), 0)::float`;
+  }
 
   /**
    * SQL por nivel. Cada nivel trae solo las categorías que le aplican (una máquina no come ración);
@@ -511,26 +585,30 @@ export class CostingService {
                COALESCE((SELECT sum(fd.total_cost) FROM feed_deliveries fd
                          WHERE fd.lot_id = l.id AND fd.tenant_id = $1 AND fd.deleted_at IS NULL AND fd.total_cost IS NOT NULL
                            AND fd.delivered_at::date BETWEEN $2::date AND $3::date), 0)::float AS feed,
-               0::float AS crop, 0::float AS machinery
+               0::float AS crop, 0::float AS machinery,
+               ${this.laborSql('lot', 'l.id')} AS labor
         FROM lots l
         LEFT JOIN cost_centers cc ON cc.tenant_id = $1 AND cc.level = 'lot' AND cc.reference_id = l.id AND cc.deleted_at IS NULL
         WHERE l.tenant_id = $1 AND l.deleted_at IS NULL`;
     }
     if (level === 'animal') {
+      // Se envuelve en una subconsulta para poder filtrar por el TOTAL (sanidad + mano de obra):
+      // un animal cuyo único costo es la jornada imputada tiene que aparecer igual.
       return `
-        SELECT a.id AS reference_id, COALESCE(ai.value, a.id::text) AS name,
-               cc.id AS cost_center_id,
-               COALESCE(sum(tr.cost), 0)::float AS health,
-               0::float AS feed, 0::float AS crop, 0::float AS machinery
-        FROM animals a
-        LEFT JOIN treatments tr ON tr.animal_id = a.id AND tr.tenant_id = $1 AND tr.deleted_at IS NULL
-             AND tr.cost IS NOT NULL AND tr.applied_at::date BETWEEN $2::date AND $3::date
-        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual'
-                           AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
-        LEFT JOIN cost_centers cc ON cc.tenant_id = $1 AND cc.level = 'animal' AND cc.reference_id = a.id AND cc.deleted_at IS NULL
-        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL
-        GROUP BY a.id, ai.value, cc.id
-        HAVING COALESCE(sum(tr.cost), 0) > 0`;
+        SELECT * FROM (
+          SELECT a.id AS reference_id, COALESCE(ai.value, a.id::text) AS name,
+                 cc.id AS cost_center_id,
+                 COALESCE((SELECT sum(tr.cost) FROM treatments tr
+                           WHERE tr.animal_id = a.id AND tr.tenant_id = $1 AND tr.deleted_at IS NULL
+                             AND tr.cost IS NOT NULL AND tr.applied_at::date BETWEEN $2::date AND $3::date), 0)::float AS health,
+                 0::float AS feed, 0::float AS crop, 0::float AS machinery,
+                 ${this.laborSql('animal', 'a.id')} AS labor
+          FROM animals a
+          LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual'
+                             AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+          LEFT JOIN cost_centers cc ON cc.tenant_id = $1 AND cc.level = 'animal' AND cc.reference_id = a.id AND cc.deleted_at IS NULL
+          WHERE a.tenant_id = $1 AND a.deleted_at IS NULL
+        ) t WHERE t.health > 0 OR t.labor > 0`;
     }
     if (level === 'crop') {
       return `
@@ -540,7 +618,8 @@ export class CostingService {
                cc.id AS cost_center_id,
                0::float AS health, 0::float AS feed,
                COALESCE(sum(co.cost), 0)::float AS crop,
-               0::float AS machinery
+               0::float AS machinery,
+               ${this.laborSql('crop', 'c.id')} AS labor
         FROM crops c
         LEFT JOIN paddocks p ON p.id = c.paddock_id
         LEFT JOIN crop_operations co ON co.crop_id = c.id AND co.tenant_id = $1 AND co.deleted_at IS NULL
@@ -559,7 +638,8 @@ export class CostingService {
                           AND f.fueled_at::date BETWEEN $2::date AND $3::date), 0)
             + COALESCE((SELECT sum(mr.cost) FROM maintenance_records mr
                         WHERE mr.machinery_id = m.id AND mr.tenant_id = $1 AND mr.deleted_at IS NULL AND mr.cost IS NOT NULL
-                          AND mr.performed_at::date BETWEEN $2::date AND $3::date), 0))::float AS machinery
+                          AND mr.performed_at::date BETWEEN $2::date AND $3::date), 0))::float AS machinery,
+             ${this.laborSql('machinery', 'm.id')} AS labor
       FROM machinery m
       LEFT JOIN cost_centers cc ON cc.tenant_id = $1 AND cc.level = 'machinery' AND cc.reference_id = m.id AND cc.deleted_at IS NULL
       WHERE m.tenant_id = $1 AND m.deleted_at IS NULL`;

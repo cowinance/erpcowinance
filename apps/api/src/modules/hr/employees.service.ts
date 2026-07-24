@@ -31,7 +31,7 @@ export class EmployeesService {
       filter = ` AND is_active = $${params.length}`;
     }
     return this.db.query(
-      `SELECT id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id
+      `SELECT id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id, hourly_rate::float AS hourly_rate
        FROM employees WHERE tenant_id=$1 AND deleted_at IS NULL${filter} ORDER BY is_active DESC, full_name`,
       params,
     );
@@ -39,7 +39,7 @@ export class EmployeesService {
 
   async get(id: string) {
     const e = await this.db.one(
-      `SELECT id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id
+      `SELECT id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id, hourly_rate::float AS hourly_rate
        FROM employees WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
       [id, this.db.tenant],
     );
@@ -55,10 +55,10 @@ export class EmployeesService {
     }
     await this.requireUser(body?.user_id);
     return this.db.one(
-      `INSERT INTO employees (tenant_id, company_id, user_id, full_name, role, employment_type, hire_date, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id`,
-      [this.db.tenant, await this.companyId(), body?.user_id ?? null, fullName, body?.role ?? null, body?.employment_type ?? null, body?.hire_date ?? null, this.db.user],
+      `INSERT INTO employees (tenant_id, company_id, user_id, full_name, role, employment_type, hire_date, hourly_rate, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id, hourly_rate::float AS hourly_rate`,
+      [this.db.tenant, await this.companyId(), body?.user_id ?? null, fullName, body?.role ?? null, body?.employment_type ?? null, body?.hire_date ?? null, this.parseRate(body?.hourly_rate), this.db.user],
     );
   }
 
@@ -82,6 +82,7 @@ export class EmployeesService {
       await this.requireUser(body.user_id);
       set('user_id', body.user_id ?? null);
     }
+    if (body?.hourly_rate !== undefined) set('hourly_rate', this.parseRate(body.hourly_rate));
     for (const f of ['role', 'hire_date'] as const) {
       if (body?.[f] !== undefined) set(f, body[f] ?? null);
     }
@@ -107,6 +108,18 @@ export class EmployeesService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+  /**
+   * Tarifa horaria (G2 · E6): lo que vale la hora de este empleado, para valorizar sus partes de
+   * trabajo. `null` es un estado LEGÍTIMO —todavía no se cargó—; el costeo trata esas horas como
+   * «sin valorizar» en vez de contarlas como gratis. Negativa no: no existe la hora que da plata.
+   */
+  private parseRate(v: unknown): number | null {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) throw new BadRequestException({ code: 'hr.invalid_hourly_rate', title: 'hourly_rate debe ser un número ≥ 0' });
+    return n;
+  }
+
   private async requireUser(userId: string | null | undefined) {
     if (!userId) return;
     const u = await this.db.one<{ id: string }>(`SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL`, [userId]);
@@ -117,7 +130,7 @@ export class EmployeesService {
     params.push(id, this.db.tenant);
     const row = await this.db.one(
       `UPDATE employees SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} AND deleted_at IS NULL
-       RETURNING id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id`,
+       RETURNING id, full_name, role, employment_type, hire_date, termination_date, is_active, user_id, hourly_rate::float AS hourly_rate`,
       params,
     );
     if (!row) throw new NotFoundException({ code: 'hr.employee_not_found', title: 'Empleado no encontrado' });

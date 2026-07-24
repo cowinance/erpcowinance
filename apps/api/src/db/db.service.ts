@@ -323,6 +323,22 @@ export class DbService implements OnModuleInit {
 
   /** Tareas — mejora a centro operativo: historial/trazabilidad + recurrencia. Tablas nuevas;
    *  RLS estándar vía RLS_TABLES. `task_events` es server-authored (no sincroniza a devices). */
+  /**
+   * COSTO DE MANO DE OBRA (G2 · E6). Los partes de trabajo (`work_logs`, WL-1) ya registran horas por
+   * empleado y día, pero sin precio: quedaban fuera del costeo. Dos columnas cierran esa brecha —
+   * ninguna tabla nueva:
+   *
+   *  - `employees.hourly_rate`: el precio de la hora. NULLABLE a propósito: un empleado sin tarifa
+   *    NO cuesta 0 (eso sería trabajo gratis), sus horas se informan aparte como «sin valorizar».
+   *  - `work_logs.cost_center_id`: a qué centro se imputa la jornada. También opcional; si falta, se
+   *    deriva de la tarea vinculada (`tasks.related_type/related_id`). Ver `CostingService`.
+   */
+  private static readonly COSTING_LABOR_MIGRATION = `
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS hourly_rate numeric(18,4);
+    ALTER TABLE work_logs ADD COLUMN IF NOT EXISTS cost_center_id uuid REFERENCES cost_centers(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS ix_work_logs_tenant_date ON work_logs (tenant_id, work_date);
+  `;
+
   private static readonly TASKS_OPS_MIGRATION = `
     CREATE TABLE IF NOT EXISTS task_events (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -398,6 +414,7 @@ export class DbService implements OnModuleInit {
     await this.db.exec(DbService.WEIGHING_PROJECTION_MIGRATION);
     await this.db.exec(DbService.REPRO_ASSIGNMENTS_MIGRATION);
     await this.db.exec(DbService.TASKS_OPS_MIGRATION);
+    await this.db.exec(DbService.COSTING_LABOR_MIGRATION);
     // PLANO DE IDENTIDAD — bug que solo se ve con un rol NO privilegiado (en dev PGlite conecta
     // como superusuario y saltea toda RLS, así que pasaba inadvertido): el DDL canónico habilita
     // RLS en `user_role_assignments` con una policy sobre `app.current_tenant`, variable que la

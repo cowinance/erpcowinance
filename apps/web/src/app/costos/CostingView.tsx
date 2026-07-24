@@ -55,7 +55,7 @@ const CENTER_LEVELS = [
   { key: 'crop', label: 'Cultivo' },
   { key: 'machinery', label: 'Máquina' },
 ];
-const CATEGORY_LABEL: Record<string, string> = { health: 'Sanidad', feed: 'Nutrición', crop: 'Agricultura', machinery: 'Maquinaria' };
+const CATEGORY_LABEL: Record<string, string> = { health: 'Sanidad', feed: 'Nutrición', crop: 'Agricultura', machinery: 'Maquinaria', labor: 'Mano de obra' };
 
 export function CostingView({
   initialProfit,
@@ -402,6 +402,23 @@ function CentersTab({ data, level, onLevel }: { data: any; level: string; onLeve
               </tr>
             </tfoot>
           </table>
+        </div>
+      )}
+      {/* Mano de obra que no llegó a ninguna fila (G2 · E6). Callarlo abarataría el costo en silencio. */}
+      {(data?.totals?.unattributed_labor > 0 || data?.totals?.unpriced_hours > 0) && (
+        <div className="mt-3 space-y-1">
+          {data.totals.unattributed_labor > 0 && (
+            <p className="rounded-md bg-sunken px-3 py-2 text-label text-ink-2">
+              Hay {money(data.totals.unattributed_labor)} de jornales sin imputar a un centro. Asignales un centro de costo o
+              vinculá el parte de trabajo a una tarea para que sumen acá.
+            </p>
+          )}
+          {data.totals.unpriced_hours > 0 && (
+            <p className="rounded-md bg-warning/10 px-3 py-2 text-label text-ink-2">
+              {num(data.totals.unpriced_hours, 1)} horas trabajadas por empleados sin tarifa horaria: ese costo real todavía no
+              está contado. Cargá la tarifa en Personal.
+            </p>
+          )}
         </div>
       )}
     </Card>

@@ -27,6 +27,9 @@ describe('costing — costos por centro', () => {
   let dairyLotId: string;
   let looseAnimalId: string;
   let budgetId: string;
+  let laborLotId: string;
+  let taskLotId: string;
+  let pricedEmployeeId: string;
 
   // Todos los hechos "dentro de rango" caen en febrero de 2030; los de control, en 2029.
   const IN = '2030-02-10';
@@ -161,6 +164,36 @@ describe('costing — costos por centro', () => {
     await mkBudgetLine(ccLot, 2, 300);
     // Lote sin gasto: presupuesto 500 (marzo) → real 0 ⇒ bajo presupuesto (todavía no arrancó).
     await mkBudgetLine(ccIdle, 3, 500);
+
+    // ── E6 · mano de obra ──────────────────────────────────────────────────────────────────────
+    // Lotes propios: así las aserciones de E1/E4 sobre los lotes anteriores siguen valiendo.
+    laborLotId = await one(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote Jornales') RETURNING id`, [tenantId, farmId]);
+    taskLotId = await one(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote Por Tarea') RETURNING id`, [tenantId, farmId]);
+    const ccLabor = await one(
+      `INSERT INTO cost_centers (tenant_id, company_id, name, level, reference_id) VALUES ($1,$2,'CC Jornales','lot',$3) RETURNING id`,
+      [tenantId, companyId, laborLotId],
+    );
+    // Un empleado CON tarifa ($100/h) y otro SIN: el segundo prueba que no se cuenta como gratis.
+    pricedEmployeeId = await one(
+      `INSERT INTO employees (tenant_id, company_id, full_name, hourly_rate) VALUES ($1,$2,'Juan Peón',100) RETURNING id`,
+      [tenantId, companyId],
+    );
+    const unpricedEmp = await one(
+      `INSERT INTO employees (tenant_id, company_id, full_name) VALUES ($1,$2,'Sin Tarifa') RETURNING id`,
+      [tenantId, companyId],
+    );
+    // Tarea vinculada a un lote: habilita la imputación DERIVADA (sin cost_center_id).
+    const lotTaskId = await one(
+      `INSERT INTO tasks (tenant_id, farm_id, title, related_type, related_id) VALUES ($1,$2,'Arreglo de alambrado','lot',$3) RETURNING id`,
+      [tenantId, farmId, taskLotId],
+    );
+    const mkLog = (emp: string, hours: number, extra: { cc?: string; task?: string } = {}) =>
+      db.query(`INSERT INTO work_logs (tenant_id, employee_id, work_date, hours, cost_center_id, task_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [tenantId, emp, IN, hours, extra.cc ?? null, extra.task ?? null]);
+    await mkLog(pricedEmployeeId, 8, { cc: ccLabor }); // explícito → 800 al lote de jornales
+    await mkLog(pricedEmployeeId, 5, { task: lotTaskId }); // derivado de la tarea → 500
+    await mkLog(pricedEmployeeId, 3); // sin imputar → 300 sin atribuir
+    await mkLog(unpricedEmp, 10); // 10 horas que el sistema NO puede valorizar
   }, 120_000);
 
   afterAll(() => {
@@ -262,9 +295,11 @@ describe('costing — costos por centro', () => {
 
     it('carne: divide el costo del rodeo por los kilos efectivamente producidos', async () => {
       const beef = await activityOf('beef');
-      expect(beef.cost).toBe(350); // 150 sanidad + 200 ración (el lote 'dairy' no entra)
+      // 150 sanidad + 200 ración + 1300 de mano de obra imputada a lotes de carne (E6).
+      // El lote 'dairy' no entra: su costo es de leche.
+      expect(beef.cost).toBe(1650);
       expect(beef.output).toBe(60); // 460 − 400 dentro del rango
-      expect(beef.unit_cost).toBe(5.83); // 350 / 60
+      expect(beef.unit_cost).toBe(27.5); // 1650 / 60
       expect(beef.output_unit).toBe('kg ganados');
       expect(beef.note).toBeNull();
     });
@@ -290,7 +325,8 @@ describe('costing — costos por centro', () => {
     it('las actividades no se pisan: el costo del tambo no se cuenta también como carne', async () => {
       const { activities } = await svc.unitCosts(RANGE);
       const total = activities.reduce((a, x) => a + x.cost, 0);
-      expect(total).toBe(975); // 350 carne + 300 leche + 325 agricultura, sin solapamiento
+      // 1650 carne (incl. jornales) + 300 leche + 325 agricultura, sin solapamiento.
+      expect(total).toBe(2275)
     });
 
     it('un período sin producción no devuelve costo unitario cero, sino null con explicación', async () => {
@@ -364,10 +400,10 @@ describe('costing — costos por centro', () => {
       const res = await svc.profitability({ level: 'activity', ...RANGE });
       const beef = res.rows.find((r) => r.reference_id === 'beef')! as any;
       expect(beef.revenue).toBe(1020); // 900 + 120
-      expect(beef.cost).toBe(350);
-      expect(beef.margin).toBe(670);
+      expect(beef.cost).toBe(1650); // incluye la mano de obra imputada (E6)
+      expect(beef.margin).toBe(-630); // con los jornales contados, la carne da pérdida
       expect(beef.output).toBe(60);
-      expect(beef.margin_per_unit).toBe(11.17); // 670 / 60 kg producidos
+      expect(beef.margin_per_unit).toBe(-10.5); // −630 / 60 kg producidos
     });
 
     it('leche: suma la remisión sin facturar y NO cuenta dos veces la que ya tiene venta', async () => {
@@ -441,6 +477,67 @@ describe('costing — costos por centro', () => {
     it('rechaza un presupuesto inexistente y un nivel inválido', async () => {
       await expect(svc.budgetVsActual({ budgetId: '00000000-0000-0000-0000-000000000000', level: 'lot' })).rejects.toThrow();
       await expect(svc.budgetVsActual({ budgetId, level: 'activity' as never })).rejects.toThrow();
+    });
+  });
+
+  // ── E6 · costo de mano de obra ───────────────────────────────────────────────────────────────
+
+  describe('mano de obra (E6)', () => {
+    it('valoriza las horas a la tarifa del empleado e imputa por el centro de costo explícito', async () => {
+      const res = await svc.costsByCenter({ level: 'lot', ...RANGE });
+      const row = res.rows.find((r) => r.reference_id === laborLotId)!;
+      expect(row.categories.labor).toBe(800); // 8 h × $100
+      expect(row.total).toBe(800);
+    });
+
+    it('sin centro explícito, deriva la imputación de la tarea vinculada', async () => {
+      const res = await svc.costsByCenter({ level: 'lot', ...RANGE });
+      const row = res.rows.find((r) => r.reference_id === taskLotId)!;
+      expect(row.categories.labor).toBe(500); // 5 h × $100, atribuidas por tasks.related_id
+    });
+
+    it('las horas de un empleado SIN tarifa no se cuentan como gratis: se informan aparte', async () => {
+      const res = await svc.costsByCenter({ level: 'lot', ...RANGE });
+      expect(res.totals.unpriced_hours).toBe(10);
+      // Y no inflan ninguna categoría: 800 + 500 imputadas, nada más.
+      expect(res.totals.by_category.labor).toBe(1300);
+    });
+
+    it('la jornada sin centro ni tarea no se pierde: suma en unattributed_labor', async () => {
+      const res = await svc.costsByCenter({ level: 'lot', ...RANGE });
+      expect(res.totals.unattributed_labor).toBe(300); // 3 h × $100
+    });
+
+    it('la mano de obra imputada entra en el costo unitario de la actividad', async () => {
+      // Los 1300 imputados a lotes de carne se suman al costo del kilo producido.
+      const res = await svc.unitCosts(RANGE);
+      const beef = res.activities.find((a) => a.activity === 'beef')!;
+      expect(beef.cost).toBe(1650); // 350 (sanidad+ración) + 1300 de jornales
+    });
+
+    it('no cuenta la misma jornada dos veces cuando tiene centro Y tarea', async () => {
+      // El centro explícito gana; la tarea no agrega una segunda imputación.
+      const ccExtra = (
+        await db.query<{ id: string }>(
+          `SELECT id FROM cost_centers WHERE tenant_id=$1 AND reference_id=$2 LIMIT 1`,
+          [tenantId, laborLotId],
+        )
+      )[0].id;
+      const taskId = (
+        await db.query<{ id: string }>(
+          `INSERT INTO tasks (tenant_id, farm_id, title, related_type, related_id) VALUES ($1,$2,'Doble','lot',$3) RETURNING id`,
+          [tenantId, farmId, taskLotId],
+        )
+      )[0].id;
+      await db.query(`INSERT INTO work_logs (tenant_id, employee_id, work_date, hours, cost_center_id, task_id) VALUES ($1,$2,$3,2,$4,$5)`,
+        [tenantId, pricedEmployeeId, IN, ccExtra, taskId]);
+
+      const res = await svc.costsByCenter({ level: 'lot', ...RANGE });
+      const labor = res.rows.find((r) => r.reference_id === laborLotId)!.categories.labor;
+      const byTask = res.rows.find((r) => r.reference_id === taskLotId)!.categories.labor;
+      expect(labor).toBe(1000); // 800 + los 200 nuevos, al centro EXPLÍCITO
+      expect(byTask).toBe(500); // la tarea no los duplica acá
+      expect(res.totals.unattributed_labor).toBe(300); // y siguen sin atribuir solo los 3 h sueltos
     });
   });
 });
