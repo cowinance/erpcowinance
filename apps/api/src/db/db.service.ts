@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PGlite } from '@electric-sql/pglite';
+import { PGliteDriver, PostgresDriver, type SqlDriver, type TxHandle } from './driver';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { bootstrapCatalogs, seedDemo } from './seed';
@@ -19,7 +20,7 @@ export type { Q } from './query';
 @Injectable()
 export class DbService implements OnModuleInit {
   private readonly logger = new Logger(DbService.name);
-  private db!: PGlite;
+  private db!: SqlDriver;
   private tenantId!: string;
   private farmId!: string;
   private userId!: string;
@@ -368,10 +369,18 @@ export class DbService implements OnModuleInit {
   /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
 
   async onModuleInit() {
-    const dataDir = join(process.cwd(), '.data', 'pglite');
-    mkdirSync(dataDir, { recursive: true });
-    this.db = new PGlite(dataDir);
-    await this.db.waitReady;
+    // Driver: PostgreSQL real si hay DATABASE_URL (prod y verificación de RLS), PGlite si no
+    // (dev sin instalar nada). El resto del arranque es idéntico para ambos.
+    const url = process.env.DATABASE_URL;
+    if (url) {
+      this.db = new PostgresDriver(url, process.env.DATABASE_ADMIN_URL);
+      this.logger.log('Base: PostgreSQL real (DATABASE_URL)');
+    } else {
+      const dataDir = join(process.cwd(), '.data', 'pglite');
+      mkdirSync(dataDir, { recursive: true });
+      this.db = new PGliteDriver(new PGlite(dataDir));
+    }
+    await this.db.ready();
     const has = await this.db.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public' AND table_name='organizations'`,
     );
@@ -392,6 +401,18 @@ export class DbService implements OnModuleInit {
     // R-2.a: el esquema canónico traía una policy dispersa sobre `app.current_tenant` (que la app
     // NUNCA setea → denegaba en prod). Se elimina; `repro_protocols` ya está en RLS_TABLES y recibe
     // la policy estándar `tenant_isolation` sobre `app.tenant_id` en rlsMigration.
+    // PLANO DE IDENTIDAD — corrige un bug que solo se ve con un rol NO privilegiado (en dev
+    // PGlite conecta como superusuario y saltea toda RLS, así que esto pasaba inadvertido):
+    // el DDL canónico habilita RLS en `user_role_assignments` con una policy sobre
+    // `app.current_tenant`, variable que la app NUNCA fija (usa `app.tenant_id`). Resultado con
+    // rol restringido: deny-all. Y el LOGIN lee justo esa tabla para resolver el tenant del
+    // usuario ANTES de que exista contexto de tenant → en producción el login quedaba roto.
+    // Va SIN RLS a propósito (misma decisión que users/auth_refresh_tokens): no se puede filtrar
+    // por un tenant que todavía no se conoce. Se apaga la RLS, no solo la policy: dejarla
+    // habilitada sin política también deniega todo.
+    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_user_role_assignments ON "user_role_assignments";');
+    await this.db.exec('ALTER TABLE "user_role_assignments" DISABLE ROW LEVEL SECURITY;');
+
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_repro_protocols ON "repro_protocols";');
     // B-1: misma policy dispersa (app.current_tenant) en subscriptions → se elimina; ya está en
     // RLS_TABLES y recibe la estándar sobre app.tenant_id.
@@ -480,14 +501,14 @@ export class DbService implements OnModuleInit {
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
     // se registra self-service (P1.1) depende de que el rol `owner` exista.
-    await this.runInTx(() => bootstrapCatalogs(this.db), 'Cargando catálogos base…');
+    await this.runInTx((h) => bootstrapCatalogs(h), 'Cargando catálogos base…');
 
     // Datos demo: solo bajo SEED_DEMO (ON en dev, OFF en prod) y si la base no
     // tiene organizaciones todavía. Sin demo, el sistema arranca vacío y espera
     // el primer registro real.
     const orgs = await this.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM organizations`);
     if (orgs.rows[0].n === 0 && DbService.seedDemoEnabled()) {
-      await this.runInTx(() => seedDemo(this.db), 'Sembrando datos demo…');
+      await this.runInTx((h) => seedDemo(h), 'Sembrando datos demo…');
       this.logger.log('Seed demo completado.');
     }
 
@@ -504,9 +525,18 @@ export class DbService implements OnModuleInit {
       return;
     }
     this.tenantId = org.rows[0].id;
-    // GUC de sesión: contexto por defecto para código fuera de request
-    // (boot, seed). Las requests lo pisan con SET LOCAL en su transacción.
-    await this.db.query(`SELECT set_config('app.tenant_id', $1, false)`, [this.tenantId]);
+    // GUC de SESIÓN: contexto por defecto para código fuera de request (boot, seed). Las requests
+    // lo pisan con SET LOCAL dentro de su transacción.
+    //
+    // Solo en PGlite, donde la conexión es única y ese "default" es justamente la intención. Con
+    // PostgreSQL real hay un POOL: el ajuste quedaría pegado a UNA conexión y cualquier request que
+    // luego cayera en ella heredaría este tenant como contexto por defecto. Inofensivo mientras el
+    // interceptor haga su SET LOCAL, pero es exactamente el tipo de estado residual que convierte
+    // un bug del interceptor en una fuga cross-tenant. En Postgres se omite: cada request trae su
+    // propio contexto y sin él la RLS deniega (fail-closed).
+    if (this.db.kind === 'pglite') {
+      await this.db.query(`SELECT set_config('app.tenant_id', $1, false)`, [this.tenantId]);
+    }
     const farm = await this.db.query<{ id: string }>(
       `SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
       [this.tenantId],
@@ -525,15 +555,25 @@ export class DbService implements OnModuleInit {
   }
 
   /** Ejecuta `fn` dentro de una transacción PGlite (BEGIN/COMMIT, ROLLBACK si lanza). */
-  private async runInTx(fn: () => Promise<void>, log?: string): Promise<void> {
+  /**
+   * Paso de arranque dentro de una transacción, sobre una conexión ÚNICA (`bootHandle`). Con un
+   * pool no alcanza con `exec('BEGIN')`: cada sentencia podría tomar otra conexión y el BEGIN
+   * quedaría huérfano. El handle se le pasa al callback para que el seed use ESA conexión.
+   */
+  private async runInTx(fn: (h: TxHandle) => Promise<void>, log?: string): Promise<void> {
     if (log) this.logger.log(log);
-    await this.db.exec('BEGIN');
+    const h = await this.db.bootHandle();
     try {
-      await fn();
-      await this.db.exec('COMMIT');
-    } catch (err) {
-      await this.db.exec('ROLLBACK');
-      throw err;
+      await h.query('BEGIN');
+      try {
+        await fn(h);
+        await h.query('COMMIT');
+      } catch (err) {
+        await h.query('ROLLBACK');
+        throw err;
+      }
+    } finally {
+      h.release();
     }
   }
 

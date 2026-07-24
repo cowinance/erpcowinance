@@ -115,6 +115,32 @@ lo que realmente corre, no una copia.
 > que toda tabla con `tenant_id` tenga política o esté exenta a propósito: ese cubre la
 > **cobertura**; este, que el aislamiento **efectivamente aísla**.
 
+### Correr la app entera contra PostgreSQL
+
+`verify:rls` prueba el **motor** (las políticas aíslan si `app.tenant_id` está bien puesto). Falta
+la otra mitad: que la app **fije** esa variable en cada request —trabajo del interceptor de auth—.
+Si eso se rompiera, `verify:rls` seguiría verde y la fuga existiría igual. Para cubrirlo:
+
+```bash
+docker compose up -d db
+npm run verify:pg    # levanta la API real y ejerce la frontera por HTTP con dos tenants
+```
+
+Arranca el binario de producción con un rol **restringido** (`NOSUPERUSER NOBYPASSRLS`) y comprueba
+que cada tenant ve solo lo suyo y que uno **no puede leer ni modificar** un recurso del otro aunque
+conozca su id (404), incluido un endpoint que compone varios módulos.
+
+La app elige driver por entorno, sin cambiar código de negocio:
+
+| Variable | Efecto |
+|---|---|
+| *(ninguna)* | **PGlite** embebido — dev, sin instalar nada |
+| `DATABASE_URL` | **PostgreSQL real**; usar el rol de servicio (mínimos privilegios) |
+| `DATABASE_ADMIN_URL` | opcional: conexión con privilegios solo para el DDL de arranque |
+
+Separar ambas conexiones replica producción: **migrar con credenciales elevadas, servir con las
+mínimas**. Es lo que hace que la RLS se ejerza de verdad — con un superusuario se saltearía.
+
 ## Configuración por variables de entorno
 
 | Variable | Ámbito | Propósito | Default / ausencia |

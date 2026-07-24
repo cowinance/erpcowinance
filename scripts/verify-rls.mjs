@@ -27,7 +27,8 @@ import { fileURLToPath } from 'url';
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const CONTAINER = 'cowinance-pg';
 const DB = 'cowinance';
-const APP_ROLE = 'app_user';
+// Rol propio (no `app_user`): así este script y `verify:pg` no se pisan entre sí.
+const APP_ROLE = 'rls_probe';
 
 const TA = '11111111-1111-1111-1111-111111111111';
 const TB = '22222222-2222-2222-2222-222222222222';
@@ -123,8 +124,11 @@ const asAppTErr = (text) => {
 
 // ── 3. Rol de la app: NO superusuario (si no, saltearía RLS) ───────────────────
 sqlT(`
-  DROP ROLE IF EXISTS ${APP_ROLE};
-  CREATE ROLE ${APP_ROLE} LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS;
+  DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${APP_ROLE}') THEN
+      CREATE ROLE ${APP_ROLE} LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS;
+    END IF;
+  END $$;
   GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE};

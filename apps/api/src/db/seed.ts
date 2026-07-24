@@ -1,5 +1,9 @@
-import type { PGlite } from '@electric-sql/pglite';
+import type { TxHandle } from './driver';
 import { hashPassword } from '../common/passwords';
+
+/** Lo único que el seed necesita de la base: correr consultas. Así sirve tanto sobre PGlite (dev)
+ *  como sobre PostgreSQL real, sin acoplarse a un driver concreto. */
+type Queryable = TxHandle;
 
 /**
  * Seed de desarrollo, dividido en dos responsabilidades independientes (P1.1):
@@ -37,7 +41,7 @@ const daysAgo = (d: number) => new Date(Date.now() - d * 86400000);
  * (hay países), no hace nada. Se ejecuta SIEMPRE en el arranque — el registro
  * self-service de una finca nueva depende de que el rol `owner` exista.
  */
-export async function bootstrapCatalogs(db: PGlite) {
+export async function bootstrapCatalogs(db: Queryable) {
   const q = async (sql: string, params?: unknown[]) => (await db.query(sql, params)).rows as any[];
 
   const [{ n }] = await q(`SELECT count(*)::int AS n FROM countries`);
@@ -149,7 +153,7 @@ export async function bootstrapCatalogs(db: PGlite) {
  * que necesita (especie bovina, razas, categorías, rol owner) en vez de
  * recibirlas — así queda desacoplado del bootstrap. Solo corre bajo `SEED_DEMO`.
  */
-export async function seedDemo(db: PGlite) {
+export async function seedDemo(db: Queryable) {
   const q = async (sql: string, params?: unknown[]) => (await db.query(sql, params)).rows as any[];
 
   // Entidades base creadas por bootstrapCatalogs
