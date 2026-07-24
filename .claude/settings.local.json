@@ -436,7 +436,11 @@
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"budgets\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"tasks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
       "Bash(curl -s -o /dev/null -w \"login page HTTP %{http_code}\\\\n\" http://localhost:55342/login)",
-      "Bash(curl -s -o /dev/null -w \"costos HTTP %{http_code}\\\\n\" http://localhost:55342/costos)"
+      "Bash(curl -s -o /dev/null -w \"costos HTTP %{http_code}\\\\n\" http://localhost:55342/costos)",
+      "Bash(gh run *)",
+      "Bash(awk '{print \"   OK:\",$NF}')",
+      "Bash(node -e \"const l=require\\('./apps/mobile/package-lock.json'\\); console.log\\('   lockfileVersion:',l.lockfileVersion,'· paquetes:',Object.keys\\(l.packages||{}\\).length\\); console.log\\('   react-native en lock:', !!\\(l.packages||{}\\)['node_modules/react-native']\\)\")",
+      "Bash(npm test *)"
     ]
   }
 }
