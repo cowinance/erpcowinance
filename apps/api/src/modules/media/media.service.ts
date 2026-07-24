@@ -1,21 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { signFileToken, verifyFileToken } from '../../common/file-token';
+import { FILE_STORAGE, fileKey, type FileStorage } from '../../application/ports/file-storage.port';
 
-const UPLOAD_ROOT = join(process.cwd(), '.data', 'uploads');
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB por imagen
 const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,(.+)$/i;
 
 @Injectable()
 export class MediaService {
-  constructor(private readonly db: DbService) {}
-
-  private filePath(tenantId: string, fileId: string) {
-    return join(UPLOAD_ROOT, tenantId, fileId);
-  }
+  constructor(
+    private readonly db: DbService,
+    @Inject(FILE_STORAGE) private readonly storage: FileStorage,
+  ) {}
 
   /** Metadatos + URL firmada para renderizar el archivo desde el navegador. */
   private toRef(fileId: string, mime: string) {
@@ -53,8 +50,7 @@ export class MediaService {
          VALUES ($1,$2,$3,$4,'image',$5,$6,$7,'synced',$8,$8) RETURNING id, mime_type`,
         [t, `uploads/${t}`, `foto-${Date.now()}.${ext}`, mime, buffer.length, checksum, body.taken_at ?? null, this.db.user],
       );
-      mkdirSync(join(UPLOAD_ROOT, t), { recursive: true });
-      writeFileSync(this.filePath(t, file.id), buffer);
+      await this.storage.put(fileKey(t, file.id), buffer, mime);
     }
 
     // Vínculo polimórfico con el animal
@@ -125,13 +121,17 @@ export class MediaService {
     return { ok: true };
   }
 
-  /** Servido del archivo (endpoint público, validado por token firmado). */
-  serve(fileId: string, token: string): { buffer: Buffer; mime: string } {
+  /**
+   * Servido del archivo (endpoint público, validado por token firmado). El tenant sale del TOKEN,
+   * no del contexto de la request: por eso este endpoint puede ser público sin filtrar nada — la
+   * clave del objeto solo se puede armar con un token que la API firmó.
+   */
+  async serve(fileId: string, token: string): Promise<{ buffer: Buffer; mime: string }> {
     const claims = verifyFileToken(token);
     if (!claims || claims.fid !== fileId)
       throw new BadRequestException({ code: 'media.invalid_token', title: 'Token de archivo inválido o vencido' });
-    const path = this.filePath(claims.ten, fileId);
-    if (!existsSync(path)) throw new NotFoundException({ code: 'media.file_missing', title: 'Archivo no encontrado' });
-    return { buffer: readFileSync(path), mime: claims.mime };
+    const buffer = await this.storage.get(fileKey(claims.ten, fileId));
+    if (!buffer) throw new NotFoundException({ code: 'media.file_missing', title: 'Archivo no encontrado' });
+    return { buffer, mime: claims.mime };
   }
 }

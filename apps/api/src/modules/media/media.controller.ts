@@ -30,8 +30,8 @@ export class MediaController {
   /** Servido con URL firmada — público (el token porta tenant + mime). */
   @Public()
   @Get('files/:id/content')
-  content(@Param('id') id: string, @Query('t') token: string, @Res() res: Response) {
-    const { buffer, mime } = this.media.serve(id, token);
+  async content(@Param('id') id: string, @Query('t') token: string, @Res() res: Response) {
+    const { buffer, mime } = await this.media.serve(id, token);
     res.set({ 'Content-Type': mime, 'Cache-Control': 'private, max-age=3600' });
     res.send(buffer);
   }

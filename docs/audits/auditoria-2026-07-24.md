@@ -181,18 +181,55 @@ desde `RLS_TABLES` y tienen que re-aplicarse cuando esa lista cambia, que es jus
 útil al guardarraíl (agregar una tabla crea su política sola). Versionarlas rompería esa
 propiedad, así que `rlsMigration()` sigue corriendo en cada arranque.
 
-#### H-11 · ALTO — Los archivos se guardan en el disco local · **PENDIENTE** → paso 1.3
+#### H-11 · ALTO — Los archivos se guardan en el disco local · **CORREGIDO** (paso 1.3)
 
-`media.service.ts` hace `writeFileSync`/`readFileSync` contra el filesystem del proceso. Con más
-de una instancia, la foto que subió una no la sirve la otra; con un contenedor efímero, se pierden
-en el próximo deploy. La abstracción ya está bien puesta (`toRef`/`serve` con token firmado): falta
-el adaptador de almacenamiento de objetos.
+`media.service.ts` y `documents.service.ts` escribían con `writeFileSync` contra el filesystem del
+proceso —**duplicando además el mismo camino de escritura**—. Con más de una instancia, la foto que
+subía una no la servía la otra; con un contenedor efímero, se perdían en el próximo deploy.
 
-#### H-12 · ALTO — El email no se envía de verdad · **PENDIENTE** → paso 1.4
+*Corrección:* puerto `FILE_STORAGE` (`application/ports/file-storage.port.ts`) con dos adaptadores
+en `infra/storage/`: `LocalFileStorage` (desarrollo; **mismo layout `.data/uploads/<tenant>/<file>`
+de antes**, así que una instalación existente encuentra sus archivos sin migrar nada) y
+`S3FileStorage` para cualquier almacén compatible — AWS S3, Cloudflare R2, MinIO, Backblaze B2.
+Los dos servicios pasaron a depender del puerto; la clave de objeto se arma en un solo lugar
+(`fileKey`).
 
-`LogEmailSender` imprime el correo al log. Es el **único** adaptador del puerto `EmailSender`, así
-que en producción la verificación de email y el reset de contraseña quedan rotos: el usuario nunca
-recibe el link. El puerto está bien definido (ADR-0011) — falta un adaptador SMTP/SES/Resend.
+**La firma SigV4 está escrita a mano** (`s3-signer.ts`, 15 tests): el SDK de AWS arrastra decenas
+de paquetes transitivos para lo que acá son dos operaciones sobre HTTP, y el repositorio ya
+resuelve así lo que puede (hash de contraseñas, rate limit, cabeceras). Equivocarse es ruidoso, no
+silencioso: el servidor rechaza la firma.
+
+**Verificado contra MinIO real** (5 tests de integración, salteados si no hay almacén): ida y
+vuelta de bytes UTF-8 y binarios, `null` —no excepción— cuando la clave no existe, sobrescritura, y
+que un secreto incorrecto falle con el detalle del servidor. Y de punta a punta sobre el stack de
+producción: se subió una foto por la API en contenedor, **el objeto apareció en MinIO bajo
+`<tenant>/<file>` y el contenedor de la API quedó sin `/app/.data`**, con la imagen sirviéndose de
+vuelta por su URL firmada (200, PNG íntegro).
+
+*Nota:* con `STORAGE_DRIVER=local` en producción el arranque avisa explícitamente que los archivos
+se pierden en el próximo deploy.
+
+#### H-12 · ALTO — El email no se envía de verdad · **CORREGIDO** (paso 1.4)
+
+`LogEmailSender` imprimía el correo al log y era el **único** adaptador del puerto `EmailSender`:
+en producción, la verificación de email y el reset de contraseña quedaban rotos — el usuario nunca
+recibía el link.
+
+*Corrección:* `SmtpEmailSender` (`EMAIL_PROVIDER=smtp`). SMTP y no un adaptador por proveedor,
+así sirve con SES, Postmark, Mailgun, Resend, Gmail o un relay propio sin código nuevo. 8 tests de
+configuración (falla al arrancar si falta `SMTP_HOST`/`SMTP_FROM`, si hay usuario sin contraseña o
+si el puerto es inválido; TLS implícito en 465 y STARTTLS en 587, con override).
+
+**Verificado contra un servidor SMTP real** (Mailpit; 3 tests de integración salteables): conexión
+validada sin enviar, entrega con destinatario/asunto/cuerpo intactos, y fallo con error —no en
+silencio— contra un host caído. Y de punta a punta: `POST /v1/forgot-password` contra la API en
+contenedor **entregó el correo con el link de reset funcional**.
+
+*Dependencia nueva:* `nodemailer`, la única que se sumó, y **sin dependencias propias**.
+Implementar SMTP a mano (EHLO, STARTTLS, AUTH, DATA, más las rarezas de TLS de cada proveedor) es
+el tipo de código que falla en producción contra un proveedor concreto y no en los tests.
+
+*Nota:* con `EMAIL_PROVIDER=log` en producción el arranque avisa exactamente qué queda sin efecto.
 
 #### H-13 · MEDIO — Push desactivado · **PENDIENTE** → paso 3.2
 
@@ -254,10 +291,8 @@ software esté completo.
 
 1. ~~**`Dockerfile` para API y web** + `docker-compose.prod.yml`.~~ **HECHO** — ver H-8.
 2. ~~**Migraciones versionadas.**~~ **HECHO** — ver H-10.
-3. **Almacenamiento de objetos** (S3/R2) detrás del puerto que `media.service` ya insinúa; el
-   filesystem queda como adaptador de desarrollo. Cierra **H-11**.
-4. **Adaptador de email real** (SMTP/SES/Resend) implementando `EmailSender`. Sin esto el registro
-   self-service no cierra el círculo. Cierra **H-12**.
+3. ~~**Almacenamiento de objetos** (S3/R2).~~ **HECHO** — ver H-11.
+4. ~~**Adaptador de email real.**~~ **HECHO** — ver H-12.
 5. **Pipeline de deploy** en el CI que ya existe: build de imágenes → migraciones → deploy, con
    `readyz` como puerta.
 6. **Backups y restore probado.** Un backup que nunca se restauró no es un backup.
@@ -316,7 +351,11 @@ software esté completo.
 | `apps/api/Dockerfile`, `apps/web/Dockerfile`, `.dockerignore` | H-8 · imágenes multi-etapa, usuario no-root, healthcheck |
 | `docker-compose.prod.yml`, `deploy/postgres-init/` | H-8 · stack de referencia con rol de servicio restringido |
 | `apps/web/next.config.ts` | H-8 · `output: 'standalone'` para que la imagen de la web no arrastre el monorepo |
+| `application/ports/file-storage.port.ts`, `infra/storage/` (+3 tests) | H-11 · puerto + adaptadores local y S3, con SigV4 propio |
+| `modules/media/`, `modules/documents/` | H-11 · los dos escritores pasan por el puerto; se elimina el camino duplicado |
+| `infra/email/smtp-email-sender.ts` (+2 tests) | H-12 · envío real por SMTP |
+| `docker-compose.prod.yml`, `.env.example` | H-11/H-12 · las variables de S3 y SMTP, documentadas |
 
-**Verificación tras los cambios: 957 tests verdes, typecheck limpio (5 proyectos + web), build de
+**Verificación tras los cambios: 980 tests verdes, typecheck limpio (5 proyectos + web), build de
 producción OK, 0 ciclos, y el stack de contenedores levantado de punta a punta contra
 PostgreSQL 17 + PostGIS con la RLS enforceada.**

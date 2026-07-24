@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
+import { LocalFileStorage } from '../../infra/storage/local-file-storage';
 import { DocumentsService } from './documents.service';
 
 /**
@@ -26,7 +27,7 @@ describe('documents — DMS', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    svc = new DocumentsService(db);
+    svc = new DocumentsService(db, new LocalFileStorage());
   }, 120_000);
 
   afterAll(() => {

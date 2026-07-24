@@ -127,9 +127,16 @@ Tres decisiones que no son de forma:
   navegador durante el build: es un `--build-arg`, no una variable de runtime. Una imagen por
   entorno.
 
+Para un despliegue de verdad hay que configurar además dos adaptadores; con los defaults de
+desarrollo el arranque avisa exactamente qué queda roto:
+
+| Variable | Default | Qué pasa si se deja así en producción |
+|---|---|---|
+| `STORAGE_DRIVER` | `local` | Las fotos y documentos van al disco del contenedor: se pierden en el próximo deploy y no los ve otra instancia. Con `s3` (AWS, Cloudflare R2, MinIO, Backblaze B2) viven fuera del proceso. |
+| `EMAIL_PROVIDER` | `log` | El correo se **imprime**: la verificación de email y el reset de contraseña no le llegan al usuario. Con `smtp` se envía de verdad, contra cualquier proveedor. |
+
 Lo que este compose **no** resuelve (ver [la auditoría](docs/audits/auditoria-2026-07-24.md)):
-una sola instancia de API (el rate limit cuenta en memoria), archivos subidos en disco local, y
-el envío de email todavía va al log.
+una sola instancia de API — el rate limit cuenta en memoria.
 
 ### Migraciones de esquema
 
@@ -198,7 +205,8 @@ mínimas**. Es lo que hace que la RLS se ejerza de verdad — con un superusuari
 | Variable | Ámbito | Propósito | Default / ausencia |
 |---|---|---|---|
 | `SEED_DEMO` | API | Sembrar datos demo al arrancar | `on` en dev, `off` en producción (`NODE_ENV=production`); override `true`/`false` |
-| `EMAIL_PROVIDER` | API | Adaptador de email (puerto `EmailSender`, ADR-0011) | `log` (imprime el email al log) — **solo desarrollo/pruebas**; SMTP/SES/Resend son adaptadores futuros |
+| `EMAIL_PROVIDER` | API | Adaptador de email (puerto `EmailSender`, ADR-0011) | `log` (imprime el email al log) — **solo desarrollo**. `smtp` envía de verdad (SES, Postmark, Mailgun, Resend, Gmail o relay propio): pide `SMTP_HOST` y `SMTP_FROM` |
+| `STORAGE_DRIVER` | API | Adaptador de archivos (puerto `FileStorage`) | `local` (disco del proceso, `.data/uploads`) — **solo desarrollo**. `s3` para cualquier almacén compatible (AWS, R2, MinIO, B2): pide `S3_ENDPOINT`, `S3_BUCKET` y las credenciales |
 | `APP_BASE_URL` | API | Base del front para armar los **enlaces de email** (verificación/reset) | `http://localhost:3000` — apuntar a la web real en despliegue |
 | `NEXT_PUBLIC_API_URL` | Web | URL de la API que consume la web (se **inlinea en build** para componentes cliente) | `http://localhost:3001/v1` |
 | `EXPO_PUBLIC_WEB_URL` | Móvil | Base pública de la web para el botón "Abrir Cowinance web" del estado vacío del hato (ADR-0012) | **sin default**: si falta, la UI muestra instrucciones en texto **sin** hardcodear dominios y **sin** botón |

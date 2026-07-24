@@ -1,12 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
 import { InvalidDocumentError, validateDocumentInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
+import { FILE_STORAGE, fileKey, type FileStorage } from '../../application/ports/file-storage.port';
 
-const UPLOAD_ROOT = join(process.cwd(), '.data', 'uploads');
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB por documento
 const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,(.+)$/i;
 const ALLOWED = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
@@ -15,12 +13,15 @@ const ALLOWED = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/we
  * Documentos, archivos y media (A6) — el DMS del ERP. Gestiona documentos formales (tabla `documents`)
  * que envuelven un archivo (PDF/imagen) y agregan tipo, emisor, vigencia y vencimiento, con enlace
  * polimórfico opcional a cualquier entidad. Reusa el almacenamiento de archivos del módulo media
- * (disco + dedup por checksum + servido por token firmado en /files/:id/content). Deriva el estado de
+ * (puerto `FILE_STORAGE` + dedup por checksum + servido por token firmado en /files/:id/content). Deriva el estado de
  * caducidad (vencido / por vencer) con CURRENT_DATE — la fuente del indicador «documentos por vencer».
  */
 @Injectable()
 export class DocumentsService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    @Inject(FILE_STORAGE) private readonly storage: FileStorage,
+  ) {}
 
   private ref(fileId: string, mime: string) {
     return { file_id: fileId, mime, token: signFileToken(fileId, this.db.tenant, mime) };
@@ -50,8 +51,7 @@ export class DocumentsService {
        VALUES ($1,$2,$3,$4,$5,$6,$7,'synced',$8,$8) RETURNING id`,
       [t, `uploads/${t}`, `doc-${Date.now()}.${ext}`, mime, mediaType, buffer.length, checksum, this.db.user],
     );
-    mkdirSync(join(UPLOAD_ROOT, t), { recursive: true });
-    writeFileSync(join(UPLOAD_ROOT, t, file!.id), buffer);
+    await this.storage.put(fileKey(t, file!.id), buffer, mime);
     return { id: file!.id, mime };
   }
 

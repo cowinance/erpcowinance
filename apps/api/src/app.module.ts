@@ -7,6 +7,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { SyncRegistryModule } from './modules/sync/registry/sync-registry.module';
 import { EventBusModule } from './infra/event-bus/event-bus.module';
 import { EmailModule } from './infra/email/email.module';
+import { StorageModule } from './infra/storage/storage.module';
 import { AnimalHistoryModule } from './modules/animal-history/animal-history.module';
 import { HealthModule } from './modules/health/health.module';
 import { ReproModule } from './modules/repro/repro.module';
@@ -45,6 +46,6 @@ import { OpsModule } from './modules/ops/ops.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule],
+  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule],
 })
 export class AppModule {}
