@@ -14,7 +14,20 @@
  * encabezados compare contra la misma forma.
  */
 
-export type AnimalImportField = 'tag' | 'sex' | 'category_code' | 'name' | 'birth_date' | 'origin' | 'dam_tag' | 'sire_tag';
+export type AnimalImportField =
+  | 'tag'
+  | 'sex'
+  | 'category_code'
+  | 'name'
+  | 'birth_date'
+  | 'origin'
+  | 'dam_tag'
+  | 'sire_tag'
+  // Auditoría Fase 3c — el alta por planilla ya acepta lo mismo que el alta manual:
+  | 'breed'
+  | 'rfid'
+  | 'official_id'
+  | 'lot';
 
 export interface ImportFieldDescriptor {
   field: AnimalImportField;
@@ -39,6 +52,10 @@ export const ANIMAL_IMPORT_DESCRIPTOR: EntityImportDescriptor = {
     { field: 'origin', label: 'Origen', required: false, synonyms: ['origen', 'origin'] },
     { field: 'dam_tag', label: 'Caravana de la madre', required: false, synonyms: ['madre', 'dam', 'caravana madre', 'madre caravana', 'id madre'] },
     { field: 'sire_tag', label: 'Caravana del padre', required: false, synonyms: ['padre', 'sire', 'caravana padre', 'padre caravana', 'id padre'] },
+    { field: 'breed', label: 'Raza', required: false, synonyms: ['raza', 'breed', 'razas'] },
+    { field: 'rfid', label: 'RFID', required: false, synonyms: ['rfid', 'electronico', 'caravana electronica', 'chip', 'bolo', 'eid'] },
+    { field: 'official_id', label: 'ID oficial', required: false, synonyms: ['id oficial', 'oficial', 'senasa', 'dicose', 'siniiga', 'identificacion oficial'] },
+    { field: 'lot', label: 'Lote', required: false, synonyms: ['lote', 'lot', 'rodeo', 'grupo', 'potrero lote'] },
   ],
 };
 

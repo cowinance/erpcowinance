@@ -26,7 +26,7 @@ import { ANIMAL_SYNCABLE_FIELDS } from './animal-syncable-fields';
 
 export interface RowError {
   field: string;
-  code: 'required' | 'invalid' | 'not_found';
+  code: 'required' | 'invalid' | 'not_found' | 'duplicate';
   message: string;
 }
 
@@ -39,6 +39,11 @@ export interface NormalizedAnimalInput {
   birthDate: string | null;
   lotId: string | null;
   origin: 'born' | 'purchased' | 'transferred';
+  /** Importación (Fase 3c): valores por NOMBRE que `checkAgainstDb` resuelve a ids. */
+  breedName: string | null;
+  lotName: string | null;
+  rfid: string | null;
+  officialId: string | null;
 }
 
 /** Semántica del canal — la arma cada adaptador (REST/Import), no el cuerpo de persistencia. */
@@ -55,7 +60,7 @@ export type NormalizeResult =
   | { ok: false; errors: RowError[] };
 
 export type CheckResult =
-  | { ok: true; resolved: { categoryId: string; speciesId: string } }
+  | { ok: true; resolved: { categoryId: string; speciesId: string; breedId?: string | null; lotId?: string | null } }
   | { ok: false; errors: RowError[] }
   | { skip: 'duplicate_active_tag'; existingAnimalId: string };
 
@@ -82,6 +87,10 @@ export interface RawAnimalRow {
   birth_date?: unknown;
   lot_id?: unknown;
   origin?: unknown;
+  breed?: unknown;
+  lot?: unknown;
+  rfid?: unknown;
+  official_id?: unknown;
 }
 
 @Injectable()
@@ -102,6 +111,12 @@ export class AnimalWriteService {
    */
   normalizeAndValidate(raw: RawAnimalRow): NormalizeResult {
     const errors: RowError[] = [];
+    /** Texto opcional de planilla: recorta y trata el vacío como ausente. */
+    const str = (v: unknown): string | null => {
+      if (v === undefined || v === null) return null;
+      const t = String(v).trim();
+      return t === '' ? null : t;
+    };
 
     // Caravana (TagNumber): obligatoria + normalizada (sin espacios sobrantes).
     let tag = '';
@@ -147,6 +162,10 @@ export class AnimalWriteService {
         birthDate: (raw.birth_date as string) ?? null,
         lotId: (raw.lot_id as string) ?? null,
         origin,
+        breedName: str(raw.breed),
+        lotName: str(raw.lot),
+        rfid: str(raw.rfid),
+        officialId: str(raw.official_id),
       },
     };
   }
@@ -172,7 +191,43 @@ export class AnimalWriteService {
     );
     if (dup) return { skip: 'duplicate_active_tag', existingAnimalId: dup.animal_id };
 
-    return { ok: true, resolved: { categoryId: cat.id, speciesId: cat.species_id } };
+    // ── Importación (Fase 3c): resolución por NOMBRE + duplicados de identificadores ──
+    // Raza: global (tenant_id NULL) o del tenant. Nombre inexistente → error de fila, no se crea.
+    let breedId: string | null = null;
+    if (input.breedName) {
+      const b = await q.one<{ id: string }>(
+        `SELECT id FROM breeds WHERE lower(name) = lower($1) AND deleted_at IS NULL AND (tenant_id IS NULL OR tenant_id = $2) LIMIT 1`,
+        [input.breedName, this.db.tenant],
+      );
+      if (!b) return { ok: false, errors: [{ field: 'breed', code: 'not_found', message: `Raza inexistente: ${input.breedName}` }] };
+      breedId = b.id;
+    }
+    // Lote: por nombre dentro del tenant.
+    let lotId: string | null = null;
+    if (input.lotName) {
+      const l = await q.one<{ id: string }>(
+        `SELECT id FROM lots WHERE lower(name) = lower($1) AND tenant_id = $2 AND deleted_at IS NULL LIMIT 1`,
+        [input.lotName, this.db.tenant],
+      );
+      if (!l) return { ok: false, errors: [{ field: 'lot', code: 'not_found', message: `Lote inexistente: ${input.lotName}` }] };
+      lotId = l.id;
+    }
+    // RFID / ID oficial: no pueden chocar con otro animal ACTIVO (mismo tipo, no retirado).
+    for (const [value, type, field] of [
+      [input.rfid, 'rfid', 'rfid'],
+      [input.officialId, 'official', 'official_id'],
+    ] as const) {
+      if (!value) continue;
+      const clash = await q.one<{ id: string }>(
+        `SELECT ai.id FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
+         WHERE ai.tenant_id = $1 AND ai.type = $2 AND ai.value = $3
+           AND ai.deleted_at IS NULL AND ai.retired_at IS NULL AND a.status = 'active'`,
+        [this.db.tenant, type, value],
+      );
+      if (clash) return { ok: false, errors: [{ field, code: 'duplicate', message: `Ya hay un animal activo con ${field} ${value}` }] };
+    }
+
+    return { ok: true, resolved: { categoryId: cat.id, speciesId: cat.species_id, breedId, lotId } };
   }
 
   /**
@@ -184,7 +239,7 @@ export class AnimalWriteService {
     q: Q,
     input: NormalizedAnimalInput,
     ctx: PersistAnimalContext,
-    resolved: { categoryId: string; speciesId: string },
+    resolved: { categoryId: string; speciesId: string; breedId?: string | null; lotId?: string | null },
   ): Promise<{ animalId: string; syncOp?: PutOp }> {
     const t = this.db.tenant;
     const animal = await q.one<{ id: string }>(
@@ -199,7 +254,7 @@ export class AnimalWriteService {
         input.name,
         input.birthDate,
         input.origin,
-        input.lotId,
+        input.lotId ?? resolved.lotId ?? null,
       ],
     );
 
@@ -207,6 +262,21 @@ export class AnimalWriteService {
       `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`,
       [t, animal!.id, input.tag],
     );
+
+    // Importación (Fase 3c): identificadores extra y raza vienen de la planilla ya resueltos/
+    // validados por `checkAgainstDb`. El oficial se marca is_official (único por animal).
+    if (input.rfid) {
+      await q.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'rfid',$3)`, [t, animal!.id, input.rfid]);
+    }
+    if (input.officialId) {
+      await q.query(
+        `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value, is_official) VALUES ($1,$2,'official',$3,true)`,
+        [t, animal!.id, input.officialId],
+      );
+    }
+    if (resolved.breedId) {
+      await q.query(`INSERT INTO animal_breeds (tenant_id, animal_id, breed_id, fraction) VALUES ($1,$2,$3,1)`, [t, animal!.id, resolved.breedId]);
+    }
 
     await q.query(
       `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
@@ -236,7 +306,8 @@ export class AnimalWriteService {
     };
     if (input.name !== null) fields.name = input.name;
     if (input.birthDate !== null) fields.birth_date = input.birthDate;
-    if (input.lotId !== null) fields.current_lot_id = input.lotId;
+    const effectiveLot = input.lotId ?? resolved.lotId ?? null;
+    if (effectiveLot !== null) fields.current_lot_id = effectiveLot;
 
     const hlc = this.serverClock.tick();
     const versionsMap = Object.fromEntries(Object.keys(fields).map((f) => [f, hlc]));

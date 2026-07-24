@@ -436,7 +436,15 @@ export class HerdService {
           code: 'animal.duplicate_tag',
           title: `Ya existe un animal activo con caravana ${nv.input.tag}`,
         });
-      if (!check.ok) throw new BadRequestException({ code: 'animal.invalid_category', title: 'Categoría inexistente' });
+      if (!check.ok) {
+        // `checkAgainstDb` valida categoría Y (Fase 3c) raza/lote por nombre + duplicados de
+        // RFID/ID oficial — para AMBOS canales. Se traduce el error real, no uno hardcodeado.
+        const e = check.errors[0];
+        throw new BadRequestException({
+          code: e.code === 'duplicate' ? 'identifier.duplicate' : `animal.invalid_${e.field}`,
+          title: e.message,
+        });
+      }
 
       const { animalId, syncOp } = await this.writer.persistNewAnimal(
         q,
@@ -480,18 +488,8 @@ export class HerdService {
       const op = await this.writer.projectAnimalUpdate(q, newId, syncExtra);
       if (op) await this.writer.emitServerOrigin(q, [op], `rest:animal:create-extra:${newId}:${op.hlc}`);
 
-      // Identificadores adicionales (RFID / oficial) — namespace por tipo, sin duplicado activo.
-      for (const [type, value, official] of [['rfid', body.rfid, false], ['official', body.official_id, true]] as const) {
-        if (!value || !String(value).trim()) continue;
-        const val = String(value).trim();
-        const dup = await q.one(
-          `SELECT 1 FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
-           WHERE ai.tenant_id = $1 AND ai.type = $2 AND ai.value = $3 AND ai.deleted_at IS NULL AND ai.retired_at IS NULL AND a.status = 'active'`,
-          [t, type, val],
-        );
-        if (dup) throw new BadRequestException({ code: 'identifier.duplicate', title: `Ya hay un animal activo con ${type} ${val}` });
-        await q.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value, is_official, issued_at) VALUES ($1,$2,$3,$4,$5,CURRENT_DATE)`, [t, newId, type, val, official]);
-      }
+      // RFID / ID oficial los escribe `persistNewAnimal` (regla única compartida con importación);
+      // sus duplicados ya los rechazó `checkAgainstDb` arriba. Antes se insertaban acá también.
 
       if (body.breeds?.length) await this.setBreedsInTx(q, newId, body.breeds);
     });

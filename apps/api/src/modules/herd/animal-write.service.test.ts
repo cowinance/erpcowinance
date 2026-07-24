@@ -24,6 +24,11 @@ describe('normalizeAndValidate · happy path', () => {
         birthDate: null,
         lotId: null,
         origin: 'born',
+        // Campos de importación (Fase 3c): opcionales, ausentes → null.
+        breedName: null,
+        lotName: null,
+        rfid: null,
+        officialId: null,
       });
     }
   });
