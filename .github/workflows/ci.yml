@@ -45,6 +45,49 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Aislamiento multi-tenant contra PostgreSQL REAL. No lo cubre ningún otro job: la suite corre
+  # sobre PGlite, que conecta como superusuario y SALTEA la RLS — o sea, en dev las políticas se
+  # crean pero nunca se ejercen y una fuga cross-tenant recién aparecería en producción.
+  verify-tenant-isolation:
+    name: Aislamiento multi-tenant (PostgreSQL real)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # Mismo stack que producción (PG 17 + PostGIS 3.5): el DDL usa tipos geography.
+        image: imresamu/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5434:5432 # mismo puerto que el docker-compose local, así PG_URL no cambia
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # 1) El MOTOR: las políticas aíslan cuando app.tenant_id está bien puesto.
+      - name: RLS aísla (rol no privilegiado)
+        run: npm run verify:rls
+
+      # 2) El CONTRATO COMPLETO: además, la app FIJA ese tenant en cada request. Levanta la API
+      #    real con un rol restringido y ejerce la frontera por HTTP con dos tenants distintos.
+      - name: La app sostiene el aislamiento por HTTP
+        run: npm run verify:pg
+
   # Recorrido real por el navegador (40 specs). Va en un job aparte del de gates para que el
   # feedback rápido no dependa de arrancar Chromium y una API.
   e2e-web:

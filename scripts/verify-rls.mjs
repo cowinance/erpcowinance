@@ -18,20 +18,42 @@
  * Sale con código ≠ 0 si alguna aserción falla. Uso:
  *   docker compose up -d db && npm run verify:rls
  */
-import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const CONTAINER = 'cowinance-pg';
+// Cliente `pg` en vez de `docker exec psql`: así corre igual en local (docker-compose) y en CI
+// (service container), donde el contenedor no es accesible por nombre. PG_URL lo parametriza.
+const PG_URL = process.env.PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5434/postgres';
+const dbUrl = (name, user, pass) => {
+  const u = new URL(PG_URL);
+  u.pathname = `/${name}`;
+  if (user) u.username = user;
+  if (pass) u.password = pass;
+  return u.toString();
+};
 const DB = 'cowinance';
 // Rol propio (no `app_user`): así este script y `verify:pg` no se pisan entre sí.
 const APP_ROLE = 'rls_probe';
 
 const TA = '11111111-1111-1111-1111-111111111111';
 const TB = '22222222-2222-2222-2222-222222222222';
+
+/** Ejecuta SQL y devuelve el primer valor escalar del último statement (o '' si no hay filas). */
+async function run(url, text) {
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  try {
+    const r = await c.query(text);
+    const rows = Array.isArray(r) ? r[r.length - 1]?.rows : r.rows;
+    if (!rows?.length) return '';
+    return String(Object.values(rows[0])[0] ?? '');
+  } finally {
+    await c.end();
+  }
+}
 
 let failures = 0;
 const ok = (m) => console.log(`  \x1b[32m✓\x1b[0m ${m}`);
@@ -40,31 +62,15 @@ const bad = (m, d) => {
   console.log(`  \x1b[31m✗\x1b[0m ${m}${d ? `\n      ${d}` : ''}`);
 };
 
-/** SQL como superusuario contra una base dada (se usa para crear/borrar la base de prueba). */
-function sql(text, db) {
-  return execFileSync('docker', ['exec', '-i', CONTAINER, 'psql', '-U', 'postgres', '-d', db, '-v', 'ON_ERROR_STOP=1', '-tAq', '-f', '-'], {
-    input: text,
-    encoding: 'utf8',
-  }).trim();
-}
-
 console.log('\n\x1b[1m══ verify:rls — aislamiento por tenant sobre PostgreSQL real\x1b[0m\n');
 
 // ── 1. Esquema canónico ────────────────────────────────────────────────────────
 console.log('\x1b[2mPreparando base…\x1b[0m');
-sql(`DROP DATABASE IF EXISTS ${DB}_rls;`, 'postgres');
-sql(`CREATE DATABASE ${DB}_rls;`, 'postgres');
 const DBT = `${DB}_rls`;
-const schema = readFileSync(join(ROOT, 'packages/db/cowinance_schema.sql'), 'utf8');
-const tmp = mkdtempSync(join(tmpdir(), 'rls-'));
-writeFileSync(join(tmp, 'schema.sql'), schema);
-execFileSync('docker', ['cp', join(tmp, 'schema.sql'), `${CONTAINER}:/tmp/schema.sql`]);
-execFileSync('docker', ['exec', CONTAINER, 'psql', '-U', 'postgres', '-d', DBT, '-v', 'ON_ERROR_STOP=1', '-q', '-f', '/tmp/schema.sql'], { stdio: 'pipe' });
-const tables = execFileSync(
-  'docker',
-  ['exec', CONTAINER, 'psql', '-U', 'postgres', '-d', DBT, '-tAc', `select count(*) from information_schema.tables where table_schema='public'`],
-  { encoding: 'utf8' },
-).trim();
+await run(dbUrl('postgres'), `DROP DATABASE IF EXISTS ${DBT};`);
+await run(dbUrl('postgres'), `CREATE DATABASE ${DBT};`);
+await run(dbUrl(DBT), readFileSync(join(ROOT, 'packages/db/cowinance_schema.sql'), 'utf8'));
+const tables = await run(dbUrl(DBT), `select count(*) from information_schema.tables where table_schema='public'`);
 console.log(`  esquema canónico cargado (${tables} tablas, PostGIS activo)`);
 
 // ── 2. Políticas: MISMA fuente que la app ──────────────────────────────────────
@@ -74,56 +80,38 @@ const { rlsMigration, RLS_TABLES } = await import(join(ROOT, 'apps/api/dist/db/r
 // (task_events, repro_protocol_assignments, clinical_cases, sync_row_state…). Se verifica sobre
 // las que existen acá; la cobertura de TODAS está cubierta por el guardarraíl que corre en la
 // suite (apps/api/src/db/rls-coverage.guardrail.integration.test.ts).
-const existing = execFileSync(
-  'docker',
-  ['exec', CONTAINER, 'psql', '-U', 'postgres', '-d', DBT, '-tAc', `select tablename from pg_tables where schemaname='public'`],
-  { encoding: 'utf8' },
-).trim().split('\n');
+const existing = (
+  await (async () => {
+    const c = new pg.Client({ connectionString: dbUrl(DBT) });
+    await c.connect();
+    const r = await c.query(`select tablename from pg_tables where schemaname='public'`);
+    await c.end();
+    return r.rows.map((x) => x.tablename);
+  })()
+);
 const covered = RLS_TABLES.filter((t) => existing.includes(t));
 const skipped = RLS_TABLES.filter((t) => !existing.includes(t));
-writeFileSync(join(tmp, 'rls.sql'), rlsMigration(covered));
-execFileSync('docker', ['cp', join(tmp, 'rls.sql'), `${CONTAINER}:/tmp/rls.sql`]);
-execFileSync('docker', ['exec', CONTAINER, 'psql', '-U', 'postgres', '-d', DBT, '-v', 'ON_ERROR_STOP=1', '-q', '-f', '/tmp/rls.sql'], { stdio: 'pipe' });
+await run(dbUrl(DBT), rlsMigration(covered));
 console.log(`  políticas aplicadas desde apps/api/src/db/rls.ts (${covered.length} tablas)`);
 if (skipped.length) console.log(`  \x1b[2m${skipped.length} omitidas: las crea la app al arrancar, no el DDL canónico\x1b[0m`);
 console.log();
 
-const sqlT = (text) =>
-  execFileSync('docker', ['exec', '-i', CONTAINER, 'psql', '-U', 'postgres', '-d', DBT, '-v', 'ON_ERROR_STOP=1', '-tAq', '-f', '-'], {
-    input: text,
-    encoding: 'utf8',
-  }).trim();
-const asAppTRaw = (text) =>
-  execFileSync(
-    'docker',
-    ['exec', '-i', '-e', 'PGPASSWORD=app', CONTAINER, 'psql', '-U', APP_ROLE, '-h', '127.0.0.1', '-d', DBT, '-v', 'ON_ERROR_STOP=1', '-tAq', '-f', '-'],
-    { input: text, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
-  ).trim();
-/** Como asAppTRaw pero tolerante: si la sentencia falla devuelve null en vez de tirar, para que
- *  una aserción rota se reporte como ✗ y no tumbe la verificación entera. */
-const asAppT = (text) => {
-  try {
-    return asAppTRaw(text);
-  } catch {
-    return null;
-  }
-};
+/** SQL como superusuario sobre la base de prueba. Devuelve el primer valor escalar. */
+const sqlT = async (text) => run(dbUrl(DBT), text);
+/** SQL COMO EL ROL RESTRINGIDO — así se ejerce la RLS de verdad. */
+const asAppT = async (text) => run(dbUrl(DBT, APP_ROLE, 'app'), text);
 /** Igual, pero se ESPERA que falle (el rechazo de RLS es el resultado buscado). */
-const asAppTErr = (text) => {
+const asAppTErr = async (text) => {
   try {
-    execFileSync(
-      'docker',
-      ['exec', '-i', '-e', 'PGPASSWORD=app', CONTAINER, 'psql', '-U', APP_ROLE, '-h', '127.0.0.1', '-d', DBT, '-v', 'ON_ERROR_STOP=1', '-tAq', '-f', '-'],
-      { input: text, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+    await run(dbUrl(DBT, APP_ROLE, 'app'), text);
     return null;
   } catch (e) {
-    return String(e.stderr ?? e.message).trim();
+    return String(e.message ?? e).trim();
   }
 };
 
 // ── 3. Rol de la app: NO superusuario (si no, saltearía RLS) ───────────────────
-sqlT(`
+await sqlT(`
   DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${APP_ROLE}') THEN
       CREATE ROLE ${APP_ROLE} LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS;
@@ -133,12 +121,12 @@ sqlT(`
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE};
 `);
-const roleInfo = sqlT(`select rolsuper::text || '|' || rolbypassrls::text from pg_roles where rolname='${APP_ROLE}'`);
+const roleInfo = await sqlT(`select rolsuper::text || '|' || rolbypassrls::text from pg_roles where rolname='${APP_ROLE}'`);
 if (roleInfo === 'false|false') ok(`rol ${APP_ROLE}: NOSUPERUSER + NOBYPASSRLS (la RLS le aplica)`);
 else bad(`rol ${APP_ROLE} privilegiado`, `rolsuper|rolbypassrls = ${roleInfo}`);
 
 // ── 4. Datos de dos tenants (como superusuario, para tener qué aislar) ─────────
-sqlT(`
+await sqlT(`
   -- Catálogos globales mínimos: organizations/companies tienen FK a countries y currencies.
   INSERT INTO countries (code, name, name_en) VALUES ('AR','Argentina','Argentina') ON CONFLICT DO NOTHING;
   INSERT INTO currencies (code, name, symbol) VALUES ('ARS','Peso argentino','$') ON CONFLICT DO NOTHING;
@@ -154,23 +142,23 @@ ok('sembrados 2 tenants con datos (companies + farms)');
 console.log('\n\x1b[1m── Aserciones de aislamiento (conectado como el rol de la app)\x1b[0m');
 
 // A) Con app.tenant_id = A → solo se ven las filas de A.
-const seenA = asAppT(`SET app.tenant_id = '${TA}'; SELECT count(*) FROM farms;`);
-const namesA = asAppT(`SET app.tenant_id = '${TA}'; SELECT string_agg(name,',') FROM farms;`);
+const seenA = await asAppT(`SET app.tenant_id = '${TA}'; SELECT count(*) FROM farms;`);
+const namesA = await asAppT(`SET app.tenant_id = '${TA}'; SELECT string_agg(name,',') FROM farms;`);
 if (seenA === '1' && namesA === 'Finca A') ok(`tenant A ve solo lo suyo (${seenA} finca: ${namesA})`);
 else bad('tenant A ve filas de más', `count=${seenA} names=${namesA}`);
 
 // B) El tenant B no ve nada de A.
-const namesB = asAppT(`SET app.tenant_id = '${TB}'; SELECT string_agg(name,',') FROM farms;`);
+const namesB = await asAppT(`SET app.tenant_id = '${TB}'; SELECT string_agg(name,',') FROM farms;`);
 if (namesB === 'Finca B') ok(`tenant B ve solo lo suyo (${namesB})`);
 else bad('fuga cross-tenant', `B ve: ${namesB}`);
 
 // C) SIN la variable de sesión → cero filas (fail-closed, no "todo").
-const noVar = asAppT(`SELECT count(*) FROM farms;`);
+const noVar = await asAppT(`SELECT count(*) FROM farms;`);
 if (noVar === '0') ok('sin app.tenant_id → 0 filas (fail-closed)');
 else bad('sin app.tenant_id devuelve filas', `count=${noVar}`);
 
 // D) No se puede ESCRIBIR en otro tenant (WITH CHECK).
-const err = asAppTErr(`
+const err = await asAppTErr(`
   SET app.tenant_id = '${TA}';
   INSERT INTO farms (tenant_id, company_id, name)
   VALUES ('${TB}','${TB.replace(/2/g, 'b')}','Finca intrusa');
@@ -179,19 +167,19 @@ if (err && /row-level security|violates/i.test(err)) ok('escribir en otro tenant
 else bad('se pudo insertar en otro tenant', err ?? 'el INSERT no falló');
 
 // E) No se puede modificar una fila ajena (UPDATE no alcanza filas de otro tenant).
-const upd = asAppT(`SET app.tenant_id = '${TA}'; UPDATE farms SET name='hackeada' WHERE name='Finca B'; SELECT count(*) FROM farms WHERE name='hackeada';`);
-const stillB = sqlT(`SELECT name FROM farms WHERE tenant_id='${TB}'`);
+const upd = await asAppT(`SET app.tenant_id = '${TA}'; UPDATE farms SET name='hackeada' WHERE name='Finca B'; SELECT count(*) FROM farms WHERE name='hackeada';`);
+const stillB = await sqlT(`SELECT name FROM farms WHERE tenant_id='${TB}'`);
 if (upd === '0' && stillB === 'Finca B') ok('UPDATE no alcanza filas de otro tenant');
 else bad('UPDATE cruzó el tenant', `afectadas=${upd} B ahora=${stillB}`);
 
 // F) Idem DELETE.
-asAppT(`SET app.tenant_id = '${TA}'; DELETE FROM farms WHERE name='Finca B';`);
-const survives = sqlT(`SELECT count(*) FROM farms WHERE tenant_id='${TB}'`);
+await asAppT(`SET app.tenant_id = '${TA}'; DELETE FROM farms WHERE name='Finca B';`);
+const survives = await sqlT(`SELECT count(*) FROM farms WHERE tenant_id='${TB}'`);
 if (survives === '1') ok('DELETE no alcanza filas de otro tenant');
 else bad('DELETE borró filas de otro tenant', `quedan=${survives}`);
 
 // G) La protección alcanza a TODAS las tablas declaradas, no solo a la de ejemplo.
-const unprotected = sqlT(`
+const unprotected = await sqlT(`
   SELECT coalesce(string_agg(t,','),'') FROM unnest(ARRAY[${covered.map((t) => `'${t}'`).join(',')}]) AS t
   WHERE NOT EXISTS (
     SELECT 1 FROM pg_policies p WHERE p.schemaname='public' AND p.tablename=t AND p.policyname='tenant_isolation'
@@ -201,7 +189,7 @@ if (!unprotected) ok(`las ${covered.length} tablas verificadas tienen la políti
 else bad('tablas declaradas sin política', unprotected);
 
 // H) Y está FORZADA: sin FORCE, el dueño de la tabla la saltearía.
-const notForced = sqlT(`
+const notForced = await sqlT(`
   SELECT coalesce(string_agg(relname,','),'') FROM pg_class
   WHERE relnamespace='public'::regnamespace AND relkind='r' AND relrowsecurity AND NOT relforcerowsecurity
     AND relname = ANY(ARRAY[${covered.map((t) => `'${t}'`).join(',')}]);

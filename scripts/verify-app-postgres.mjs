@@ -17,9 +17,19 @@
 import { execFileSync, spawn } from 'child_process';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const CONTAINER = 'cowinance-pg';
+// Conexión al Postgres de pruebas. Por defecto el del docker-compose; en CI se apunta al service
+// container con PG_URL. Se usa el cliente `pg` (no `docker exec psql`) para que el script sirva
+// igual en local y en CI, donde el contenedor del service no es accesible por nombre.
+const PG_URL = process.env.PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5434/postgres';
+const base = new URL(PG_URL);
+const dbUrl = (name) => {
+  const u = new URL(PG_URL);
+  u.pathname = `/${name}`;
+  return u.toString();
+};
 const DB = 'app_verify';
 const PORT = 3057;
 const API = `http://127.0.0.1:${PORT}/v1`;
@@ -27,8 +37,13 @@ const API = `http://127.0.0.1:${PORT}/v1`;
 // `postgres`, sería superusuario y SALTEARÍA la RLS: el aislamiento que veríamos sería solo el
 // filtro por tenant que hacen las queries, no la política. El DDL de arranque va por la conexión
 // admin, igual que en producción (migrar con privilegios, servir con los mínimos).
-const URL_APP = `postgres://app_user:app@127.0.0.1:5434/${DB}`;
-const URL_ADMIN = `postgres://postgres:postgres@127.0.0.1:5434/${DB}`;
+const URL_ADMIN = dbUrl(DB);
+const URL_APP = (() => {
+  const u = new URL(dbUrl(DB));
+  u.username = 'app_user';
+  u.password = 'app';
+  return u.toString();
+})();
 
 let failures = 0;
 const ok = (m) => console.log(`  \x1b[32m✓\x1b[0m ${m}`);
@@ -37,11 +52,19 @@ const bad = (m, d) => {
   console.log(`  \x1b[31m✗\x1b[0m ${m}${d ? `\n      ${d}` : ''}`);
 };
 
-const psql = (sql, db = 'postgres') =>
-  execFileSync('docker', ['exec', '-i', CONTAINER, 'psql', '-U', 'postgres', '-d', db, '-v', 'ON_ERROR_STOP=1', '-tAq', '-f', '-'], {
-    input: sql,
-    encoding: 'utf8',
-  }).trim();
+/** SQL administrativo. Devuelve la primera columna de la primera fila (o '' si no hay filas). */
+const psql = async (sql, db = base.pathname.slice(1) || 'postgres') => {
+  const c = new pg.Client({ connectionString: dbUrl(db) });
+  await c.connect();
+  try {
+    const r = await c.query(sql);
+    const rows = Array.isArray(r) ? r[r.length - 1]?.rows : r.rows;
+    if (!rows?.length) return '';
+    return String(Object.values(rows[0])[0] ?? '');
+  } finally {
+    await c.end();
+  }
+};
 
 const api = async (path, { token, method = 'GET', body } = {}) => {
   const res = await fetch(`${API}${path}`, {
@@ -63,18 +86,18 @@ console.log('\n\x1b[1m══ verify:pg — la app entera sobre PostgreSQL real\x
 
 // Base limpia por corrida: el arranque de la app carga el DDL, migra y siembra.
 console.log('\x1b[2mPreparando base…\x1b[0m');
-psql(`DROP DATABASE IF EXISTS ${DB};`);
-psql(`CREATE DATABASE ${DB};`);
+await psql(`DROP DATABASE IF EXISTS ${DB};`);
+await psql(`CREATE DATABASE ${DB};`);
 // Rol de servicio + privilegios por defecto: las tablas las crea el arranque (rol admin), así que
 // se conceden de antemano para todo lo que se cree después.
-psql(`
+await psql(`
   DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN
       CREATE ROLE app_user LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS;
     END IF;
   END $$;
 `);
-psql(
+await psql(
   `
   GRANT USAGE ON SCHEMA public TO app_user;
   ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
@@ -121,7 +144,7 @@ try {
     process.exit(1);
   }
 
-  const roleFlags = psql(`select rolsuper::text||'|'||rolbypassrls::text from pg_roles where rolname='app_user'`);
+  const roleFlags = await psql(`select rolsuper::text||'|'||rolbypassrls::text from pg_roles where rolname='app_user'`);
   if (roleFlags === 'false|false') ok('la app sirve con un rol restringido (NOSUPERUSER NOBYPASSRLS → la RLS le aplica)');
   else bad('el rol de servicio puede saltear la RLS', `rolsuper|rolbypassrls = ${roleFlags}`);
 
