@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { computeUnitCost } from '@cowinance/domain';
+import { computeMargin, computeUnitCost } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { SALE_COUNTS } from '../commerce/sales.service';
 
 /**
  * Costos por CENTRO (G2 · Costos y rentabilidad, E1) — contabilidad de gestión.
@@ -37,6 +38,17 @@ export const COST_CATEGORIES = {
   machinery: 'Maquinaria — combustible y mantenimiento',
 } as const;
 export type CostCategory = keyof typeof COST_CATEGORIES;
+
+/** Niveles de rentabilidad (E3). `activity` compone E2; `lot`/`animal` componen E1. */
+export type ProfitLevel = 'lot' | 'animal' | 'activity';
+const PROFIT_LEVELS: ProfitLevel[] = ['lot', 'animal', 'activity'];
+/** Clave para las ventas cuyo animal ya no pertenece a ningún lote (no se descartan: ver E3). */
+const UNASSIGNED = '__unassigned__';
+/** La regla de dominio devuelve camelCase; la API del repo habla snake_case. Un solo traductor. */
+const margin = (input: { revenue: number; cost: number }) => {
+  const m = computeMargin(input);
+  return { margin: m.margin, margin_pct: m.marginPct, roi_pct: m.roiPct };
+};
 
 /** Actividades productivas con costo unitario propio (E2). */
 export type ActivityKind = 'beef' | 'milk' | 'crop';
@@ -143,6 +155,135 @@ export class CostingService {
     ];
     return { from, to, activities };
   }
+
+  /**
+   * RENTABILIDAD (E3) — cierra el circuito: ingresos − costos = margen, por lote, por animal o por
+   * actividad. No recalcula costos: compone los motores de E1/E2, así "cuánto costó" tiene una sola
+   * definición en todo el módulo.
+   *
+   * QUÉ CUENTA COMO INGRESO: `SALE_COUNTS` (la regla del módulo Comercial: ni borrador ni anulada),
+   * devengado por fecha de venta. En leche se agrega el ANTI-DOBLE-CONTEO simétrico al de costos:
+   * las remisiones a usina (`milk_deliveries`) se valorizan SOLO si todavía no están facturadas
+   * (`sale_id IS NULL`); si ya tienen venta, el ingreso lo aporta la venta.
+   *
+   * Un lote sin ventas NO es un lote con pérdida total: es hacienda en pie. Por eso `margin_pct`
+   * viene en null y no en −100 (regla `computeMargin`).
+   */
+  async profitability(params: { level?: ProfitLevel; from?: string; to?: string } = {}) {
+    const level = params.level ?? 'lot';
+    if (!PROFIT_LEVELS.includes(level))
+      throw new BadRequestException({ code: 'costing.invalid_level', title: `Nivel inválido: ${level}. Válidos: ${PROFIT_LEVELS.join(', ')}` });
+    const { from, to } = this.range(params);
+
+    const rows = level === 'activity' ? await this.profitByActivity(from, to) : await this.profitByCenter(level, from, to);
+    const totals = rows.reduce((a, r) => ({ revenue: a.revenue + r.revenue, cost: a.cost + r.cost }), { revenue: 0, cost: 0 });
+
+    return {
+      level,
+      from,
+      to,
+      rows: rows.sort((a, b) => b.margin - a.margin),
+      totals: { revenue: +totals.revenue.toFixed(2), cost: +totals.cost.toFixed(2), ...margin(totals) },
+    };
+  }
+
+  /** Lote o animal: costos de E1 + ingresos de las ventas atribuidas al mismo centro. */
+  private async profitByCenter(level: 'lot' | 'animal', from: string, to: string) {
+    const [costs, revenue] = await Promise.all([
+      this.costsByCenter({ level, from, to }),
+      this.db.query<any>(level === 'lot' ? CostingService.REVENUE_BY_LOT_SQL : CostingService.REVENUE_BY_ANIMAL_SQL, [this.db.tenant, from, to]),
+    ]);
+
+    // Unión, no intersección: un animal vendido sin costos imputados igual tiene que aparecer (su
+    // margen es todo ganancia aparente, que es justamente lo que hay que ver), y un lote con costos
+    // y sin ventas también. Quedarse con un solo lado escondería la mitad del negocio.
+    const merged = new Map<string, { reference_id: string | null; name: string; revenue: number; cost: number }>();
+    const keyOf = (id: string | null) => id ?? UNASSIGNED;
+    for (const c of costs.rows) merged.set(keyOf(c.reference_id), { reference_id: c.reference_id, name: c.name, revenue: 0, cost: c.total });
+    for (const r of revenue) {
+      const key = keyOf(r.reference_id);
+      const prev = merged.get(key);
+      // reference_id null = ventas de animales que ya no están en ningún lote. Se muestran aparte en
+      // vez de descartarlas: si no, los totales de rentabilidad no cerrarían con los de ventas.
+      if (prev) prev.revenue += +r.revenue;
+      else merged.set(key, { reference_id: r.reference_id, name: r.name ?? 'Sin lote asignado', revenue: +r.revenue, cost: 0 });
+    }
+
+    return [...merged.values()].map((r) => ({
+      reference_id: r.reference_id,
+      name: r.name,
+      revenue: +r.revenue.toFixed(2),
+      cost: +r.cost.toFixed(2),
+      ...margin(r),
+    }));
+  }
+
+  /** Actividad: costos y producción de E2 + ingresos por tipo de venta. Suma el margen por unidad. */
+  private async profitByActivity(from: string, to: string) {
+    const [unit, revenue] = await Promise.all([
+      this.unitCosts({ from, to }),
+      this.db.query<any>(CostingService.REVENUE_BY_ACTIVITY_SQL, [this.db.tenant, from, to]),
+    ]);
+    const byActivity = new Map(revenue.map((r) => [r.activity as ActivityKind, +r.revenue]));
+
+    return unit.activities.map((a) => {
+      const rev = byActivity.get(a.activity) ?? 0;
+      const m = margin({ revenue: rev, cost: a.cost });
+      return {
+        reference_id: a.activity,
+        name: a.label,
+        revenue: +rev.toFixed(2),
+        cost: a.cost,
+        ...m,
+        output: a.output,
+        output_unit: a.output_unit,
+        unit_cost: a.unit_cost,
+        /** Lo que deja cada kilo/litro producido — el número con el que se decide seguir o parar. */
+        margin_per_unit: computeUnitCost({ totalCost: m.margin, output: a.output }).unitCost,
+      };
+    });
+  }
+
+  /** Ingresos por LOTE: por el lote actual del animal vendido (misma aproximación que los costos). */
+  private static readonly REVENUE_BY_LOT_SQL = `
+    SELECT a.current_lot_id AS reference_id, NULL::text AS name, sum(sl.line_total)::float AS revenue
+    FROM sale_lines sl
+    JOIN sales sa ON sa.id = sl.sale_id AND sa.tenant_id = $1 AND sa.deleted_at IS NULL AND ${SALE_COUNTS}
+         AND sa.sale_date BETWEEN $2::date AND $3::date
+    JOIN animals a ON a.id = sl.animal_id AND a.tenant_id = $1
+    WHERE sl.tenant_id = $1 AND sl.deleted_at IS NULL AND sl.animal_id IS NOT NULL
+    GROUP BY a.current_lot_id`;
+
+  /** Ingresos por ANIMAL: exactos, la línea de venta apunta al animal. */
+  private static readonly REVENUE_BY_ANIMAL_SQL = `
+    SELECT sl.animal_id AS reference_id,
+           COALESCE((SELECT value FROM animal_identifiers x WHERE x.animal_id = sl.animal_id AND x.type='visual'
+                     AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1), sl.animal_id::text) AS name,
+           sum(sl.line_total)::float AS revenue
+    FROM sale_lines sl
+    JOIN sales sa ON sa.id = sl.sale_id AND sa.tenant_id = $1 AND sa.deleted_at IS NULL AND ${SALE_COUNTS}
+         AND sa.sale_date BETWEEN $2::date AND $3::date
+    WHERE sl.tenant_id = $1 AND sl.deleted_at IS NULL AND sl.animal_id IS NOT NULL
+    GROUP BY sl.animal_id`;
+
+  /**
+   * Ingresos por ACTIVIDAD: el tipo de venta ya clasifica (livestock/milk/crop). Se agrega la leche
+   * remitida y AÚN NO facturada (`sale_id IS NULL`) valorizada a su precio por litro — si tuviera
+   * venta asociada se contaría dos veces.
+   */
+  private static readonly REVENUE_BY_ACTIVITY_SQL = `
+    SELECT act AS activity, sum(revenue)::float AS revenue FROM (
+      SELECT CASE sa.type WHEN 'livestock' THEN 'beef' WHEN 'milk' THEN 'milk' WHEN 'crop' THEN 'crop' END AS act,
+             sa.total AS revenue
+      FROM sales sa
+      WHERE sa.tenant_id = $1 AND sa.deleted_at IS NULL AND ${SALE_COUNTS}
+        AND sa.sale_date BETWEEN $2::date AND $3::date AND sa.type IN ('livestock','milk','crop')
+      UNION ALL
+      SELECT 'milk' AS act, (md.liters * md.price_per_liter) AS revenue
+      FROM milk_deliveries md
+      WHERE md.tenant_id = $1 AND md.deleted_at IS NULL AND md.sale_id IS NULL AND md.price_per_liter IS NOT NULL
+        AND md.delivered_at::date BETWEEN $2::date AND $3::date
+    ) s WHERE act IS NOT NULL GROUP BY act`;
 
   private activity(activity: ActivityKind, label: string, outputUnit: string, r: any) {
     const cost = +(r?.cost ?? 0);

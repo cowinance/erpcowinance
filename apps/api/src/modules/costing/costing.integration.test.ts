@@ -25,6 +25,7 @@ describe('costing — costos por centro', () => {
   let cropId: string;
   let machineryId: string;
   let dairyLotId: string;
+  let looseAnimalId: string;
 
   // Todos los hechos "dentro de rango" caen en febrero de 2030; los de control, en 2029.
   const IN = '2030-02-10';
@@ -98,6 +99,40 @@ describe('costing — costos por centro', () => {
       `INSERT INTO harvests (tenant_id, crop_id, harvest_date, yield_quantity, yield_unit, yield_per_ha) VALUES ($1,$2,'2030-05-01',6500,'kg',650)`,
       [tenantId, cropId],
     );
+
+    // ── E3 · ingresos, para que el costo se vuelva margen ──────────────────────────────────────
+    const companyId = await one(`SELECT id FROM companies WHERE tenant_id=$1 LIMIT 1`, [tenantId]);
+    const customerId = await one(
+      `INSERT INTO business_partners (tenant_id, company_id, type, name) VALUES ($1,$2,'customer','Frigorífico Test') RETURNING id`,
+      [tenantId, companyId],
+    );
+    const mkSale = async (type: string, total: number, status = 'confirmed', date = '2030-07-01') =>
+      one(
+        `INSERT INTO sales (tenant_id, company_id, customer_partner_id, sale_date, type, currency, subtotal, tax_total, total, status)
+         VALUES ($1,$2,$3,$4,$5,'ARS',$6,0,$6,$7) RETURNING id`,
+        [tenantId, companyId, customerId, date, type, total, status],
+      );
+    const mkLine = (saleId: string, animal: string, total: number) =>
+      db.query(`INSERT INTO sale_lines (tenant_id, sale_id, animal_id, quantity, unit_price, line_total) VALUES ($1,$2,$3,1,$4,$4)`, [tenantId, saleId, animal, total]);
+
+    // Venta que SÍ cuenta: hacienda por 900 del animal del lote.
+    await mkLine(await mkSale('livestock', 900), animalId, 900);
+    // Borrador y anulada por el mismo animal: NO cuentan como ingreso.
+    await mkLine(await mkSale('livestock', 500, 'draft'), animalId, 500);
+    await mkLine(await mkSale('livestock', 700, 'canceled'), animalId, 700);
+    // Animal vendido que ya no pertenece a ningún lote: su ingreso no puede desaparecer.
+    looseAnimalId = await one(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status) VALUES ($1,$2,$3,'M','sold') RETURNING id`,
+      [tenantId, farmId, speciesId],
+    );
+    await mkLine(await mkSale('livestock', 120), looseAnimalId, 120);
+    // LECHE: una venta facturada (250) + remisión sin facturar (200 L × $2 = 400). La remisión que
+    // YA tiene venta asociada no se cuenta de nuevo.
+    const milkSaleId = await mkSale('milk', 250);
+    await db.query(`INSERT INTO milk_deliveries (tenant_id, delivered_at, liters, price_per_liter) VALUES ($1,'2030-03-01',200,2)`, [tenantId]);
+    await db.query(`INSERT INTO milk_deliveries (tenant_id, delivered_at, liters, price_per_liter, sale_id) VALUES ($1,'2030-03-02',999,2,$2)`, [tenantId, milkSaleId]);
+    // AGRICULTURA: venta de grano por 5000.
+    await mkSale('crop', 5000);
   }, 120_000);
 
   afterAll(() => {
@@ -251,6 +286,76 @@ describe('costing — costos por centro', () => {
 
     it('el rango inválido se rechaza igual que en costos por centro (misma guarda)', async () => {
       await expect(svc.unitCosts({ from: '2030-12-31', to: '2030-01-01' })).rejects.toThrow();
+    });
+  });
+
+  // ── E3 · rentabilidad ────────────────────────────────────────────────────────────────────────
+
+  describe('rentabilidad (E3)', () => {
+    it('lote: margen = ingresos de los animales del lote menos sus costos', async () => {
+      const res = await svc.profitability({ level: 'lot', ...RANGE });
+      const row = res.rows.find((r) => r.reference_id === lotId)!;
+      expect(row.revenue).toBe(900); // solo la venta confirmada
+      expect(row.cost).toBe(350);
+      expect(row.margin).toBe(550);
+      expect(row.margin_pct).toBe(61.11); // 550 / 900
+      expect(row.roi_pct).toBe(157.14); // 550 / 350
+    });
+
+    it('el borrador y la anulada no son ingreso (regla SALE_COUNTS de Comercial)', async () => {
+      const res = await svc.profitability({ level: 'animal', ...RANGE });
+      const row = res.rows.find((r) => r.reference_id === animalId)!;
+      expect(row.revenue).toBe(900); // no 900+500+700
+      expect(row.cost).toBe(150);
+      expect(row.margin).toBe(750);
+    });
+
+    it('un lote con costos y sin ventas no figura con −100%: la hacienda está en pie', async () => {
+      const res = await svc.profitability({ level: 'lot', ...RANGE });
+      const row = res.rows.find((r) => r.reference_id === dairyLotId)!;
+      expect(row.revenue).toBe(0);
+      expect(row.margin).toBe(-300);
+      expect(row.margin_pct).toBeNull();
+      expect(row.roi_pct).toBe(-100);
+    });
+
+    it('las ventas de animales sin lote se muestran aparte, no se descartan', async () => {
+      const res = await svc.profitability({ level: 'lot', ...RANGE });
+      const loose = res.rows.find((r) => r.reference_id === null)!;
+      expect(loose.name).toMatch(/Sin lote/);
+      expect(loose.revenue).toBe(120);
+      // Y por eso el total cierra con TODAS las ventas de hacienda del período, no solo las que
+      // siguen teniendo lote. (Leche y grano no se atribuyen a un lote: se ven por actividad.)
+      expect(res.totals.revenue).toBe(1020); // 900 + 120
+    });
+
+    it('actividad: cruza ingresos por tipo de venta con los costos y la producción de E2', async () => {
+      const res = await svc.profitability({ level: 'activity', ...RANGE });
+      const beef = res.rows.find((r) => r.reference_id === 'beef')! as any;
+      expect(beef.revenue).toBe(1020); // 900 + 120
+      expect(beef.cost).toBe(350);
+      expect(beef.margin).toBe(670);
+      expect(beef.output).toBe(60);
+      expect(beef.margin_per_unit).toBe(11.17); // 670 / 60 kg producidos
+    });
+
+    it('leche: suma la remisión sin facturar y NO cuenta dos veces la que ya tiene venta', async () => {
+      const res = await svc.profitability({ level: 'activity', ...RANGE });
+      const milk = res.rows.find((r) => r.reference_id === 'milk')! as any;
+      expect(milk.revenue).toBe(650); // 250 de la venta + 400 de la remisión sin facturar
+      expect(milk.cost).toBe(300);
+      expect(milk.margin).toBe(350);
+    });
+
+    it('ordena por margen: lo que más deja va primero', async () => {
+      const res = await svc.profitability({ level: 'activity', ...RANGE });
+      const margins = res.rows.map((r) => r.margin);
+      expect([...margins].sort((a, b) => b - a)).toEqual(margins);
+      expect(res.rows[0].reference_id).toBe('crop'); // 5000 − 325
+    });
+
+    it('rechaza un nivel que existe para costos pero no para rentabilidad', async () => {
+      await expect(svc.profitability({ level: 'machinery' as never })).rejects.toThrow();
     });
   });
 });

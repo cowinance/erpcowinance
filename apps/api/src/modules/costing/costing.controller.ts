@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { CostingService, type CostLevel } from './costing.service';
+import { CostingService, type CostLevel, type ProfitLevel } from './costing.service';
 
 /** Costos y rentabilidad (G2). E1: acumulación de costos reales por centro. */
 @Controller('costs')
@@ -16,5 +16,11 @@ export class CostingController {
   @Get('unit')
   unit(@Query('from') from?: string, @Query('to') to?: string) {
     return this.costing.unitCosts({ from, to });
+  }
+
+  /** Rentabilidad: ingresos − costos → margen por lote, animal o actividad (E3). */
+  @Get('profitability')
+  profitability(@Query('level') level?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.costing.profitability({ level: level as ProfitLevel | undefined, from, to });
   }
 }

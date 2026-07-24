@@ -428,7 +428,10 @@
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"machinery\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"paddocks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"lots\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
-      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"weighings\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)"
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"weighings\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"milk_deliveries\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"partners\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"milk_tanks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)"
     ]
   }
 }

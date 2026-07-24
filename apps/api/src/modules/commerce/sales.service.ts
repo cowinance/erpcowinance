@@ -5,6 +5,14 @@ import { InventoryService } from '../inventory/inventory.service';
 import { AnimalStatusService } from '../herd/animal-status.service';
 
 const STATUSES = ['draft', 'confirmed', 'delivered', 'invoiced', 'paid', 'canceled'];
+/**
+ * Qué venta CUENTA como ingreso — regla única, análoga a `LEDGER_COUNTS` del libro mayor. Un
+ * borrador todavía no es una operación y una anulada dejó de serlo; el resto sí, desde que se
+ * confirma (no desde que se cobra: el ingreso se devenga con la entrega, no con la caja).
+ * Cualquier reporte que sume ventas debe usar esta constante, no repetir el filtro.
+ * Prefija con `sa.`, el alias de `sales` en las consultas.
+ */
+export const SALE_COUNTS = "sa.status NOT IN ('draft','canceled')";
 const SALE_TYPES = ['livestock', 'milk', 'crop', 'product', 'service', 'other'];
 /** Transiciones permitidas de la máquina de estados de una venta. */
 const TRANSITIONS: Record<string, string[]> = {
