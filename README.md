@@ -93,6 +93,58 @@ npm run rebuild     # clean + build de todo
 Si la web aparece **sin estilos** o el server tira `Cannot find module './NNN.js'` / `/_app`, es el
 cache de Next dev corrompido: `npm run clean:web` y reiniciar. No es un error del código.
 
+## Despliegue con Docker
+
+Stack completo (PostgreSQL 17 + PostGIS · api-core · web) con las mismas imágenes que irían a un
+servidor:
+
+```bash
+cp .env.example .env
+```
+
+Completar en `.env` como mínimo `JWT_SECRET`, `POSTGRES_PASSWORD` y `APP_DB_PASSWORD`; después:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build
+```
+
+Verificar que quedó arriba:
+
+```bash
+curl http://localhost:3001/v1/healthz && curl http://localhost:3001/v1/readyz
+```
+
+Tres decisiones que no son de forma:
+
+- **Dos roles de base, no uno.** La API **sirve** con `cowinance_app` (`NOSUPERUSER NOBYPASSRLS`,
+  creado por [`deploy/postgres-init`](deploy/postgres-init/)) y **migra** con el rol
+  administrativo. Con un superusuario, PostgreSQL le saltea la RLS y el aislamiento por tenant
+  queda reducido a que ninguna query se olvide nunca del `WHERE tenant_id`.
+- **El esquema se aplica solo, y una vez.** Al arrancar, la API carga el DDL canónico si la base
+  está vacía y después aplica las migraciones pendientes de
+  [`packages/db/migrations/`](packages/db/migrations/), registrándolas en `schema_migrations`.
+- **`NEXT_PUBLIC_API_URL` se hornea en la imagen de la web.** Next la inlinea en el bundle del
+  navegador durante el build: es un `--build-arg`, no una variable de runtime. Una imagen por
+  entorno.
+
+Lo que este compose **no** resuelve (ver [la auditoría](docs/audits/auditoria-2026-07-24.md)):
+una sola instancia de API (el rate limit cuenta en memoria), archivos subidos en disco local, y
+el envío de email todavía va al log.
+
+### Migraciones de esquema
+
+```
+packages/db/cowinance_schema.sql   → versión 0000 (DDL canónico, solo si la base está vacía)
+packages/db/migrations/NNNN_*.sql  → se aplican una vez, en orden, cada una en su transacción
+```
+
+Una migración **ya aplicada es historia**: si cambia en disco, el arranque aborta con el detalle.
+Corregir siempre con una migración nueva, nunca editando la vieja — si no, esta base y una base
+nueva describen esquemas distintos sin que nada avise.
+
+Las **políticas de RLS no son migraciones**: se generan desde `RLS_TABLES` y se re-aplican en cada
+arranque, para que agregar una tabla a esa lista siga creando su política sola.
+
 ## Verificar el aislamiento por tenant (RLS) sobre PostgreSQL real
 
 En dev la app corre sobre PGlite, que conecta como **superusuario** — y un superusuario **saltea

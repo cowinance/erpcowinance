@@ -1,11 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PGlite } from '@electric-sql/pglite';
 import { PGliteDriver, PostgresDriver, type SqlDriver, type TxHandle } from './driver';
-import { readFileSync, existsSync, mkdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { readFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { bootstrapCatalogs, seedDemo } from './seed';
 import { requestContext } from '../common/request-context';
 import { RLS_TABLES, rlsMigration } from './rls';
+import { checksumOf, loadMigrations, recordBaseline, resolveDbPath, runMigrations } from './migrations';
 import type { Q } from './query';
 
 // Re-exportado para no romper a los consumidores que ya importan Q desde aquí.
@@ -26,364 +27,17 @@ export class DbService implements OnModuleInit {
   private userId!: string;
 
   /**
-   * Infra dev v0 (pendiente de incorporar al DDL canónico): cursor global de
-   * changesets, versiones HLC por campo (LWW), credenciales de login,
-   * refresh tokens con rotación, y outbox de eventos de dominio (F5).
-   */
-  private static readonly SYNC_MIGRATION = `
-    CREATE SEQUENCE IF NOT EXISTS sync_changesets_server_seq;
-    ALTER TABLE sync_changesets ADD COLUMN IF NOT EXISTS server_seq bigint DEFAULT nextval('sync_changesets_server_seq');
-    CREATE INDEX IF NOT EXISTS ix_sync_changesets_server_seq ON sync_changesets (tenant_id, server_seq);
-    -- Changesets de origen servidor (P2 oleada 2.2, ADR-0016): habilita propagar
-    -- entidades creadas server-side (importación) a dispositivos ya bootstrapeados,
-    -- vía pull, SIN dispositivo ni secuencia sintéticos. Para source='server',
-    -- sync_device_id y seq son NULL (seq NO se falsea); la idempotencia la da
-    -- (tenant_id, origin_ref). El CHECK prohíbe estados híbridos. Orden deliberado:
-    -- se rellena la columna source (default 'device') ANTES del CHECK, así las
-    -- filas existentes (todas device) ya satisfacen la forma válida. CHECK idempotente
-    -- por drop+add (sin plpgsql; PGlite-safe). Esta migración NO inserta filas
-    -- server (eso llega con el procesador) y NO toca el pull ni los tipos remotos
-    -- (commit 2.3).
-    ALTER TABLE sync_changesets ADD COLUMN IF NOT EXISTS source varchar(16) NOT NULL DEFAULT 'device';
-    ALTER TABLE sync_changesets ADD COLUMN IF NOT EXISTS origin_ref varchar(128);
-    ALTER TABLE sync_changesets ALTER COLUMN sync_device_id DROP NOT NULL;
-    ALTER TABLE sync_changesets ALTER COLUMN seq DROP NOT NULL;
-    ALTER TABLE sync_changesets DROP CONSTRAINT IF EXISTS ck_sync_changesets_source_shape;
-    ALTER TABLE sync_changesets ADD CONSTRAINT ck_sync_changesets_source_shape CHECK (
-      (source = 'device' AND sync_device_id IS NOT NULL AND seq IS NOT NULL AND origin_ref IS NULL)
-      OR
-      (source = 'server' AND sync_device_id IS NULL AND seq IS NULL AND origin_ref IS NOT NULL)
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_sync_changesets_server_origin
-      ON sync_changesets (tenant_id, origin_ref) WHERE source = 'server';
-    ALTER TABLE sync_conflicts ADD COLUMN IF NOT EXISTS detail text;
-    CREATE TABLE IF NOT EXISTS sync_row_state (
-      tenant_id uuid NOT NULL,
-      table_name varchar(255) NOT NULL,
-      row_id uuid NOT NULL,
-      versions jsonb DEFAULT '{}' NOT NULL,
-      updated_at timestamptz DEFAULT now() NOT NULL,
-      PRIMARY KEY (tenant_id, table_name, row_id)
-    );
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash varchar(255);
-    -- Verificación de email (P1.1): la columna existe desde ya; el envío y la
-    -- exposición en el token/perfil son P1.2. auth no la lee todavía.
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
-    CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
-      jti uuid PRIMARY KEY,
-      user_id uuid NOT NULL,
-      tenant_id uuid NOT NULL,
-      expires_at timestamptz NOT NULL,
-      rotated_at timestamptz,
-      revoked_at timestamptz,
-      created_at timestamptz DEFAULT now() NOT NULL
-    );
-    -- Tokens de acción por email (P1.2, ADR-0011): verificación de email y reset
-    -- de contraseña. SIN RLS a propósito (plano de identidad, como users y
-    -- auth_refresh_tokens): se consumen en flujos @Public sin contexto de tenant,
-    -- resueltos por user_id embebido en la fila. Se guarda el HASH del token, no
-    -- el token en claro (que viaja solo en el email). Un solo token vivo por
-    -- (user, purpose): issue() supersede los previos. Single-use vía consumed_at.
-    CREATE TABLE IF NOT EXISTS email_action_tokens (
-      id uuid PRIMARY KEY,
-      user_id uuid NOT NULL,
-      purpose varchar(32) NOT NULL,
-      token_hash varchar(64) NOT NULL,
-      expires_at timestamptz NOT NULL,
-      consumed_at timestamptz,
-      created_at timestamptz DEFAULT now() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS ix_email_action_tokens_hash ON email_action_tokens (token_hash);
-    CREATE INDEX IF NOT EXISTS ix_email_action_tokens_user ON email_action_tokens (user_id, purpose);
-    -- Outbox de eventos de dominio (F5, ADR-0005). Sin RLS a propósito (como
-    -- auth_refresh_tokens): el relay es un proceso interno de confianza que
-    -- drena cross-tenant post-commit. tenant_id se guarda para trazabilidad.
-    CREATE TABLE IF NOT EXISTS event_outbox (
-      id uuid PRIMARY KEY,
-      tenant_id uuid NOT NULL,
-      type varchar(255) NOT NULL,
-      payload jsonb NOT NULL,
-      occurred_at timestamptz NOT NULL,
-      created_at timestamptz DEFAULT now() NOT NULL,
-      published_at timestamptz
-    );
-    CREATE INDEX IF NOT EXISTS ix_event_outbox_unpublished ON event_outbox (created_at) WHERE published_at IS NULL;
-  `;
-
-  /**
-   * Migración de datos del ERP (P2 oleada 2.4, ADR-0016 relacionado). Dos tablas:
-   *  - import_batches: cabecera del job. RLS forzada + excepción de DESCUBRIMIENTO
-   *    (`app.job_scope='import_worker'`) para que el futuro procesador reclame
-   *    trabajo cross-tenant; ningún path de request fija ese GUC.
-   *  - import_rows: filas del archivo (dato del cliente). RLS estándar por
-   *    app.tenant_id (está en RLS_TABLES; la política la aplica rlsMigration).
-   * FK COMPUESTA multi-tenant (tenant_id, batch_id) -> (tenant_id, id): impide
-   * estructuralmente asociar una fila a un batch de otro tenant, aun ante un bug
-   * de código. SIN ON DELETE CASCADE (política de borrado de batches indefinida).
-   * `tenant_id` redundante en import_rows es deliberado: defensa estructural.
-   * Idempotente: la UNIQUE(tenant_id,id) la referencia la FK, así que se dropea
-   * primero la FK y luego la UNIQUE antes de re-crearlas (orden de dependencia;
-   * sin plpgsql). Esta oleada NO crea ImportClaimRepository, endpoints, procesador
-   * ni filas reales.
-   */
-  private static readonly IMPORT_MIGRATION = `
-    CREATE TABLE IF NOT EXISTS import_batches (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL,
-      entity_type varchar(64) NOT NULL DEFAULT 'animal',
-      source_filename varchar(255),
-      file_ref varchar(255),
-      mapping jsonb,
-      reconcile_mode varchar(32) NOT NULL DEFAULT 'create_skip_duplicates',
-      status varchar(32) NOT NULL DEFAULT 'uploaded',
-      phase varchar(16),
-      total_rows int NOT NULL DEFAULT 0,
-      created_count int NOT NULL DEFAULT 0,
-      skipped_count int NOT NULL DEFAULT 0,
-      invalid_count int NOT NULL DEFAULT 0,
-      error_count int NOT NULL DEFAULT 0,
-      heartbeat_at timestamptz,
-      started_at timestamptz,
-      finished_at timestamptz,
-      created_by uuid,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
-    );
-    ALTER TABLE import_batches DROP CONSTRAINT IF EXISTS ck_import_batches_status;
-    ALTER TABLE import_batches ADD CONSTRAINT ck_import_batches_status CHECK (
-      status IN ('uploaded','mapped','previewed','queued','processing','completed','completed_with_errors','failed'));
-    CREATE INDEX IF NOT EXISTS ix_import_batches_discovery ON import_batches (status, created_at);
-
-    CREATE TABLE IF NOT EXISTS import_rows (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL,
-      batch_id uuid NOT NULL,
-      row_number int NOT NULL,
-      raw jsonb NOT NULL,
-      normalized jsonb,
-      status varchar(16) NOT NULL DEFAULT 'pending',
-      skip_reason varchar(64),
-      errors jsonb,
-      warnings jsonb,
-      resulting_entity_id uuid,
-      processed_at timestamptz,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      UNIQUE (batch_id, row_number)
-    );
-    ALTER TABLE import_rows DROP CONSTRAINT IF EXISTS ck_import_rows_status;
-    ALTER TABLE import_rows ADD CONSTRAINT ck_import_rows_status CHECK (
-      status IN ('pending','created','skipped','invalid','error'));
-    CREATE INDEX IF NOT EXISTS ix_import_rows_batch ON import_rows (batch_id, row_number);
-
-    -- FK compuesta y su UNIQUE de respaldo (orden de dependencia: FK primero al dropear).
-    ALTER TABLE import_rows DROP CONSTRAINT IF EXISTS fk_import_rows_batch;
-    ALTER TABLE import_batches DROP CONSTRAINT IF EXISTS uq_import_batches_tenant_id_id;
-    ALTER TABLE import_batches ADD CONSTRAINT uq_import_batches_tenant_id_id UNIQUE (tenant_id, id);
-    ALTER TABLE import_rows ADD CONSTRAINT fk_import_rows_batch
-      FOREIGN KEY (tenant_id, batch_id) REFERENCES import_batches (tenant_id, id);
-
-    -- RLS de import_batches: tenant + excepción de descubrimiento del worker.
-    -- import_rows recibe la política estándar vía rlsMigration (RLS_TABLES).
-    ALTER TABLE import_batches ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE import_batches FORCE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS tenant_isolation ON import_batches;
-    CREATE POLICY tenant_isolation ON import_batches
-      USING (tenant_id = current_setting('app.tenant_id', true)::uuid
-             OR current_setting('app.job_scope', true) = 'import_worker')
-      WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid
-                  OR current_setting('app.job_scope', true) = 'import_worker');
-  `;
-
-  /**
-   * M-1.a (P3): columnas aditivas de `animal_movements` para el núcleo neutral de
-   * movimientos — `origin` (procedencia: web/map/sync) y `movement_id` (clave de
-   * idempotencia por operación). El índice único PARCIAL (movement_id NOT NULL)
-   * garantiza un solo hecho por (operación, animal) ante reproceso de changeset o
-   * reintento REST, sin chocar con las filas heredadas (movement_id NULL).
-   */
-  private static readonly MOVEMENT_MIGRATION = `
-    ALTER TABLE animal_movements ADD COLUMN IF NOT EXISTS origin varchar(16);
-    ALTER TABLE animal_movements ADD COLUMN IF NOT EXISTS movement_id uuid;
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_animal_movements_movement
-      ON animal_movements (tenant_id, movement_id, animal_id) WHERE movement_id IS NOT NULL;
-
-    -- Deduplicación de notificaciones (P7-1): una entrega por (usuario, canal, alerta). Incluye
-    -- channel para no colisionar entre in_app y push sobre la misma alerta en el futuro.
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_notifications_alert_user
-      ON notifications (tenant_id, user_id, channel, alert_id) WHERE alert_id IS NOT NULL AND deleted_at IS NULL;
-
-    -- Entregas push por dispositivo (P7-3): la notificación lógica push (notifications) es por
-    -- usuario/alerta; cada dispositivo activo con token genera una entrega independiente, con su
-    -- propio estado/reintentos/token_snapshot → se puede reintentar/invalidar solo el fallido y
-    -- evitar dobles envíos por claim. RLS estándar vía RLS_TABLES.
-    CREATE TABLE IF NOT EXISTS notification_deliveries (
-      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-      tenant_id uuid NOT NULL,
-      notification_id uuid NOT NULL REFERENCES notifications (id) ON DELETE CASCADE,
-      sync_device_id uuid NOT NULL REFERENCES sync_devices (id) ON DELETE CASCADE,
-      token_snapshot varchar(255) NOT NULL,
-      status varchar(16) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sent','failed')),
-      attempt_count int NOT NULL DEFAULT 0,
-      next_attempt_at timestamptz,
-      processing_at timestamptz,
-      last_error text,
-      sent_at timestamptz,
-      created_at timestamptz DEFAULT now() NOT NULL,
-      updated_at timestamptz DEFAULT now() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_notification_deliveries_device
-      ON notification_deliveries (tenant_id, notification_id, sync_device_id);
-    CREATE INDEX IF NOT EXISTS ix_notification_deliveries_claim
-      ON notification_deliveries (status, next_attempt_at);
-
-    -- Política RLS BESPOKE (P7-3.b), como import_batches: tenant normal + EXCEPCIÓN de
-    -- descubrimiento del worker de push (app.job_scope='push_worker'), que el
-    -- PushDeliveryClaimRepository fija SOLO en su tx de reclamo. Por eso NO va en RLS_TABLES.
-    ALTER TABLE notification_deliveries ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE notification_deliveries FORCE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS tenant_isolation ON notification_deliveries;
-    CREATE POLICY tenant_isolation ON notification_deliveries
-      USING (tenant_id = current_setting('app.tenant_id', true)::uuid
-             OR current_setting('app.job_scope', true) = 'push_worker')
-      WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid
-                  OR current_setting('app.job_scope', true) = 'push_worker');
-  `;
-
-  private static readonly WEIGHING_PROJECTION_MIGRATION = `
-    CREATE INDEX IF NOT EXISTS ix_weighings_tenant_animal_weighed_at
-      ON weighings (tenant_id, animal_id, weighed_at);
-    DROP VIEW IF EXISTS v_weighings;
-    CREATE VIEW v_weighings AS
-      SELECT ranked.id,
-             ranked.tenant_id,
-             ranked.animal_id,
-             ranked.weighed_at,
-             ranked.weight_kg,
-             ranked.method,
-             ranked.device_id,
-             CASE
-               WHEN ranked.prev_weight_kg IS NULL THEN NULL
-               ELSE ROUND(
-                 (ranked.weight_kg - ranked.prev_weight_kg)
-                 / GREATEST(1::numeric, EXTRACT(EPOCH FROM (ranked.weighed_at - ranked.prev_weighed_at))::numeric / 86400),
-                 3
-               )::numeric(14,3)
-             END AS adg_since_last,
-             ranked.body_condition,
-             ranked.created_at,
-             ranked.updated_at,
-             ranked.created_by,
-             ranked.deleted_at
-      FROM (
-        SELECT w.*,
-               LAG(w.weight_kg) OVER (
-                 PARTITION BY w.tenant_id, w.animal_id
-                 ORDER BY w.weighed_at, w.created_at, w.id
-               ) AS prev_weight_kg,
-               LAG(w.weighed_at) OVER (
-                 PARTITION BY w.tenant_id, w.animal_id
-                 ORDER BY w.weighed_at, w.created_at, w.id
-               ) AS prev_weighed_at
-        FROM weighings w
-        WHERE w.deleted_at IS NULL
-      ) ranked;
-  `;
-
-  /** Asignaciones de protocolo reproductivo a un lote (R-2.b): materializan un protocolo IATF en
-   *  tareas (P6). Tabla nueva; RLS estándar vía RLS_TABLES. */
-  private static readonly REPRO_ASSIGNMENTS_MIGRATION = `
-    CREATE TABLE IF NOT EXISTS repro_protocol_assignments (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
-      protocol_id uuid NOT NULL REFERENCES repro_protocols(id) ON DELETE RESTRICT,
-      lot_id uuid REFERENCES lots(id) ON DELETE SET NULL,
-      start_date date NOT NULL,
-      animal_count int NOT NULL DEFAULT 0,
-      status varchar(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active','canceled')),
-      created_by uuid REFERENCES users(id) ON DELETE SET NULL,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-      deleted_at timestamptz
-    );
-    CREATE INDEX IF NOT EXISTS ix_repro_assignments_tenant ON repro_protocol_assignments (tenant_id, status);
-    -- Reproducción E4: objetivo (lote/categoría/selección/hato), snapshot de animales y pasos completados.
-    ALTER TABLE repro_protocol_assignments ADD COLUMN IF NOT EXISTS target_type varchar(16) NOT NULL DEFAULT 'lot';
-    ALTER TABLE repro_protocol_assignments ADD COLUMN IF NOT EXISTS category_code varchar(255);
-    ALTER TABLE repro_protocol_assignments ADD COLUMN IF NOT EXISTS completed_steps jsonb NOT NULL DEFAULT '[]';
-    CREATE TABLE IF NOT EXISTS repro_protocol_assignment_animals (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
-      assignment_id uuid NOT NULL REFERENCES repro_protocol_assignments(id) ON DELETE CASCADE,
-      animal_id uuid NOT NULL REFERENCES animals(id) ON DELETE CASCADE,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      UNIQUE (assignment_id, animal_id)
-    );
-    CREATE INDEX IF NOT EXISTS ix_repro_assignment_animals ON repro_protocol_assignment_animals (tenant_id, assignment_id);
-  `;
-
-  /** Tareas — mejora a centro operativo: historial/trazabilidad + recurrencia. Tablas nuevas;
-   *  RLS estándar vía RLS_TABLES. `task_events` es server-authored (no sincroniza a devices). */
-  /**
-   * COSTO DE MANO DE OBRA (G2 · E6). Los partes de trabajo (`work_logs`, WL-1) ya registran horas por
-   * empleado y día, pero sin precio: quedaban fuera del costeo. Dos columnas cierran esa brecha —
-   * ninguna tabla nueva:
+   * Arranque de la persistencia, en tres capas que NO son intercambiables:
    *
-   *  - `employees.hourly_rate`: el precio de la hora. NULLABLE a propósito: un empleado sin tarifa
-   *    NO cuesta 0 (eso sería trabajo gratis), sus horas se informan aparte como «sin valorizar».
-   *  - `work_logs.cost_center_id`: a qué centro se imputa la jornada. También opcional; si falta, se
-   *    deriva de la tarea vinculada (`tasks.related_type/related_id`). Ver `CostingService`.
+   *  1. **Esquema canónico** (`cowinance_schema.sql`) — solo si la base está vacía. Es la
+   *     versión `0000`.
+   *  2. **Migraciones versionadas** (`packages/db/migrations/`) — se aplican una vez y quedan
+   *     registradas con su checksum; editar una ya aplicada aborta el arranque. Ver
+   *     `migrations.ts`.
+   *  3. **Políticas de RLS** — CONVERGENTES, no versionadas: se re-aplican en cada arranque
+   *     porque se generan desde `RLS_TABLES` y tienen que seguir a esa lista (agregar una tabla
+   *     a la lista crea su policy sola; versionarlas rompería esa propiedad).
    */
-  private static readonly COSTING_LABOR_MIGRATION = `
-    ALTER TABLE employees ADD COLUMN IF NOT EXISTS hourly_rate numeric(18,4);
-    ALTER TABLE work_logs ADD COLUMN IF NOT EXISTS cost_center_id uuid REFERENCES cost_centers(id) ON DELETE SET NULL;
-    CREATE INDEX IF NOT EXISTS ix_work_logs_tenant_date ON work_logs (tenant_id, work_date);
-  `;
-
-  private static readonly TASKS_OPS_MIGRATION = `
-    CREATE TABLE IF NOT EXISTS task_events (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
-      task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-      kind varchar(24) NOT NULL CHECK (kind IN ('created','status_change','rescheduled','assigned','priority_change','comment')),
-      from_value text,
-      to_value text,
-      note text,
-      actor_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
-      occurred_at timestamptz NOT NULL DEFAULT now(),
-      created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS ix_task_events_task ON task_events (task_id, occurred_at);
-    -- Recurrencia (E5): plantilla + intervalo; genera la próxima tarea al completar.
-    CREATE TABLE IF NOT EXISTS task_recurrences (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
-      farm_id uuid REFERENCES farms(id) ON DELETE SET NULL,
-      title varchar(255) NOT NULL,
-      description text,
-      type varchar(255) NOT NULL DEFAULT 'general',
-      priority varchar(255) NOT NULL DEFAULT 'normal',
-      assigned_to uuid REFERENCES users(id) ON DELETE SET NULL,
-      related_type varchar(255),
-      related_id uuid,
-      interval_days int NOT NULL CHECK (interval_days > 0),
-      anchor varchar(16) NOT NULL DEFAULT 'due_date' CHECK (anchor IN ('due_date','completed_at')),
-      next_due date NOT NULL,
-      active boolean NOT NULL DEFAULT true,
-      created_by uuid REFERENCES users(id) ON DELETE SET NULL,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-      deleted_at timestamptz
-    );
-    CREATE INDEX IF NOT EXISTS ix_task_recurrences_tenant ON task_recurrences (tenant_id, active);
-    -- Clave de dedup para tareas AUTOGENERADAS (E4): una tarea viva por (regla, entidad).
-    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS rule_key varchar(255);
-    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_id uuid;
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_rule_key_live
-      ON tasks (tenant_id, rule_key) WHERE rule_key IS NOT NULL AND deleted_at IS NULL AND status IN ('pending','in_progress');
-  `;
-
-  /** Tablas de dominio con aislamiento por tenant vía Row-Level Security. */
-
   async onModuleInit() {
     // Driver: PostgreSQL real si hay DATABASE_URL (prod y verificación de RLS), PGlite si no
     // (dev sin instalar nada). El resto del arranque es idéntico para ambos.
@@ -392,6 +46,14 @@ export class DbService implements OnModuleInit {
       this.db = new PostgresDriver(url, process.env.DATABASE_ADMIN_URL);
       this.logger.log('Base: PostgreSQL real (DATABASE_URL)');
     } else {
+      // PGlite en producción sería catastrófico y silencioso: una base EN PROCESO, sobre el disco
+      // efímero del contenedor, que se pierde entera en el próximo deploy. Es el mismo tipo de
+      // olvido que JWT_SECRET, así que la respuesta es la misma: no arrancar.
+      if (process.env.NODE_ENV === 'production')
+        throw new Error(
+          'DATABASE_URL es obligatoria en producción. Sin ella la API usaría PGlite (base embebida ' +
+            'en el proceso, sobre disco efímero): los datos se perderían en el próximo reinicio.',
+        );
       const dataDir = join(process.cwd(), '.data', 'pglite');
       mkdirSync(dataDir, { recursive: true });
       this.db = new PGliteDriver(new PGlite(dataDir));
@@ -400,31 +62,16 @@ export class DbService implements OnModuleInit {
     const has = await this.db.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public' AND table_name='organizations'`,
     );
+    const schemaSql = this.loadSchemaSql();
     if (has.rows[0].n === 0) {
       this.logger.log('Base vacía: cargando esquema canónico (140 tablas)…');
-      await this.db.exec(this.loadSchemaSql());
+      await this.db.exec(schemaSql);
       this.logger.log('Esquema cargado.');
     }
-    await this.db.exec(DbService.SYNC_MIGRATION);
-    // Tablas de import ANTES de rlsMigration: import_rows debe existir para que la
-    // política estándar (RLS_TABLES) se le aplique; import_batches trae su propia
-    // política bespoke dentro de IMPORT_MIGRATION.
-    await this.db.exec(DbService.IMPORT_MIGRATION);
-    await this.db.exec(DbService.MOVEMENT_MIGRATION);
-    await this.db.exec(DbService.WEIGHING_PROJECTION_MIGRATION);
-    await this.db.exec(DbService.REPRO_ASSIGNMENTS_MIGRATION);
-    await this.db.exec(DbService.TASKS_OPS_MIGRATION);
-    await this.db.exec(DbService.COSTING_LABOR_MIGRATION);
-    // PLANO DE IDENTIDAD — bug que solo se ve con un rol NO privilegiado (en dev PGlite conecta
-    // como superusuario y saltea toda RLS, así que pasaba inadvertido): el DDL canónico habilita
-    // RLS en `user_role_assignments` con una policy sobre `app.current_tenant`, variable que la
-    // app NUNCA fija (usa `app.tenant_id`) → deny-all. Y el LOGIN lee justo esa tabla para
-    // resolver el tenant ANTES de que exista contexto → en producción el login quedaba roto.
-    // Va SIN RLS a propósito (misma decisión que users/auth_refresh_tokens): no se puede filtrar
-    // por un tenant que todavía no se conoce. Se APAGA la RLS, no solo la policy: habilitada sin
-    // política también deniega todo. Por eso no está en RLS_TABLES y se trata acá.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_user_role_assignments ON "user_role_assignments";');
-    await this.db.exec('ALTER TABLE "user_role_assignments" DISABLE ROW LEVEL SECURITY;');
+    // El esquema canónico es la versión 0000: se registra exista o no (una base creada antes de
+    // que hubiera migraciones versionadas también lo tiene aplicado, solo que sin anotarlo).
+    await recordBaseline(this.db, checksumOf(schemaSql));
+    await runMigrations(this.db, loadMigrations(resolveDbPath('migrations')), (m) => this.logger.log(m));
 
     // El resto de las policies dispersas del DDL (`tenant_isolation_<tabla>` sobre
     // app.current_tenant) ya NO se borran acá una por una: `rlsMigration()` las elimina junto con
@@ -512,13 +159,7 @@ export class DbService implements OnModuleInit {
   }
 
   private loadSchemaSql(): string {
-    const candidates = [
-      resolve(process.cwd(), '../../packages/db/cowinance_schema.sql'),
-      resolve(__dirname, '../../../../packages/db/cowinance_schema.sql'),
-    ];
-    const path = candidates.find((p) => existsSync(p));
-    if (!path) throw new Error('No se encontró packages/db/cowinance_schema.sql');
-    const raw = readFileSync(path, 'utf8');
+    const raw = readFileSync(resolveDbPath('cowinance_schema.sql'), 'utf8');
     return raw
       .split('\n')
       .filter((l) => !l.trimStart().startsWith('CREATE EXTENSION'))

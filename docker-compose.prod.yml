@@ -1,0 +1,89 @@
+# Stack completo: PostgreSQL + api-core + web. Es el despliegue de referencia (una instancia de
+# cada cosa) y, sobre todo, la forma de VERIFICAR las imágenes de producción en local antes de
+# publicarlas — corriendo exactamente el mismo código que iría a un servidor.
+#
+#   cp .env.example .env    # y completar JWT_SECRET (obligatoria) y POSTGRES_PASSWORD
+#   docker compose -f docker-compose.prod.yml up --build
+#   curl http://localhost:3001/v1/healthz
+#
+# NO es una configuración de alta disponibilidad: una sola instancia de la API (el rate limit
+# cuenta en memoria) y los archivos subidos van al volumen local (ver H-11 en
+# docs/audits/auditoria-2026-07-24.md). Para varias instancias hacen falta almacenamiento de
+# objetos y un contador compartido.
+
+name: cowinance
+
+services:
+  db:
+    # Mismo stack que el docker-compose de desarrollo y que producción: PG 17 + PostGIS 3.5
+    # (el DDL canónico usa tipos geography). Build multi-arch: la imagen oficial postgis/postgis
+    # no publica arm64 y no arranca en Mac con Apple Silicon.
+    image: imresamu/postgis:17-3.5
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cowinance}
+      # Rol ADMINISTRATIVO: solo lo usa el DDL de arranque (esquema + migraciones).
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definí POSTGRES_PASSWORD en el .env}
+      # Rol de SERVICIO que crea el script de init: con él sirve la API, y por ser
+      # NOSUPERUSER NOBYPASSRLS la RLS se le aplica de verdad.
+      APP_DB_USER: ${APP_DB_USER:-cowinance_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?definí APP_DB_PASSWORD en el .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Corre UNA vez, al inicializar el volumen. Si el volumen ya existe, el rol ya está.
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cowinance}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    # `init: true` da un PID 1 que reenvía las señales: sin él, `docker stop` termina en SIGKILL
+    # tras el timeout en vez de un cierre ordenado.
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      # Obligatoria en producción: sin ella el proceso no arranca (clave de dev = pública).
+      JWT_SECRET: ${JWT_SECRET:?definí JWT_SECRET en el .env — openssl rand -base64 48}
+      # Servir con el mínimo privilegio; migrar con el administrativo. Que sean DOS conexiones
+      # distintas es el punto: con el superusuario, PostgreSQL SALTEA la RLS y el aislamiento por
+      # tenant se reduce al `WHERE tenant_id` de cada query.
+      DATABASE_URL: postgres://${APP_DB_USER:-cowinance_app}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB:-cowinance}
+      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-cowinance}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      # Hay un proxy/compose delante: sin esto el rate limit vería una sola IP para todos.
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      SEED_DEMO: ${SEED_DEMO:-false}
+    ports:
+      - '${API_PORT:-3001}:3001'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Se INLINEA en el bundle del navegador durante el build: cambiarla exige reconstruir la
+        # imagen. Por eso va como build-arg y no solo como variable de entorno.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/v1}
+    init: true
+    environment:
+      NODE_ENV: production
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  db-data:

@@ -1,0 +1,32 @@
+# Lo que NO entra al contexto de build. Sin esto, `docker build` sube ~1 GB de node_modules y
+# datos de desarrollo por cada build, y peor: un `node_modules` de la máquina host (compilado
+# para macOS) se colaría dentro de una imagen Linux.
+node_modules
+**/node_modules
+
+# Artefactos de build: se generan DENTRO de la imagen.
+dist
+**/dist
+.next
+**/.next
+*.tsbuildinfo
+
+# Datos y salidas locales
+.data
+coverage
+test-results
+playwright-report
+blob-report
+.git
+.github
+
+# Secretos: nunca en una imagen. La configuración entra por variables de entorno.
+.env
+.env.*
+!.env.example
+
+# App móvil: se distribuye por EAS/stores, no en un contenedor.
+apps/mobile
+
+.DS_Store
+*.log

@@ -116,11 +116,34 @@ servidor custom (SSRF en Server Actions) ni `rewrites` con destino controlable. 
 Esta es la brecha real, y explica por qué el producto todavía no es «final»: el sistema está
 completo por dentro y **no tiene con qué salir**.
 
-#### H-8 · ALTO — No hay artefactos de despliegue · **PENDIENTE** → paso 1
+#### H-8 · ALTO — No hay artefactos de despliegue · **CORREGIDO** (paso 1.1)
 
-No existe `Dockerfile` (ni para la API ni para la web), ni manifiestos, ni pipeline de deploy.
-El CI verifica, pero nada publica. Se agregó `.env.example` (**CORREGIDO**, no existía) documentando
-las 13 variables que el código lee, marcando cuáles son obligatorias en producción.
+No existía `Dockerfile` (ni para la API ni para la web), ni compose de producción, ni
+`.env.example`. El CI verificaba, pero nada publicaba.
+
+*Corrección:* `apps/api/Dockerfile` y `apps/web/Dockerfile` (multi-etapa, usuario no-root,
+healthcheck) + `docker-compose.prod.yml` + `.dockerignore` + `deploy/postgres-init/`.
+**Verificado levantando el stack entero**: PostgreSQL 17+PostGIS → esquema canónico → 8
+migraciones → seed → login → dashboard con datos reales → la web sirviendo y redirigiendo.
+
+Tres cosas que el trabajo destapó y que no eran obvias:
+
+1. **npm corre el `prepare` de los workspaces locales aunque se le pase `--ignore-scripts`.** El
+   `prepare` de `domain`/`sync-core`/`design-tokens` compila su `dist/` con `tsc`. En el stage de
+   build eso obliga a copiar las fuentes ANTES de instalar; en el de runtime, donde `tsc` no
+   existe, hay que sacarle el hook al `package.json` (el `dist/` ya viene del stage anterior).
+2. **`COPY` preserva los permisos del host**, y `cowinance_schema.sql` estaba en `0600`: el
+   contenedor corre como `node`, no como root, y el arranque moría con `EACCES` al leer el DDL.
+   Se normaliza con `chmod -R a+rX` en la imagen, no dependiendo de cada máquina.
+3. **El compose usa DOS roles de base.** La API sirve con `cowinance_app`
+   (`NOSUPERUSER NOBYPASSRLS`) y migra con el administrativo. Con el superusuario —que es lo que
+   sale por defecto— PostgreSQL le saltea la RLS y el aislamiento por tenant se reduce al
+   `WHERE tenant_id` de cada query. **Verificado con los dos tenants del seed: 57 y 5 animales,
+   cada uno viendo solo lo suyo, con `rolsuper=false rolbypassrls=false`.**
+
+*También corregido acá:* la API ya no arranca en producción sin `DATABASE_URL` — PGlite sobre el
+disco efímero de un contenedor perdería los datos en el próximo deploy. Mismo criterio que
+`JWT_SECRET`; ambos guardas verificados corriendo la imagen real.
 
 #### H-9 · ALTO — Sin sondas de plataforma · **CORREGIDO**
 
@@ -131,15 +154,32 @@ estaba cargando el esquema (140 tablas), y un proceso colgado no se reiniciaba n
 incidente de base marcara «muerto» al proceso, el orquestador lo reiniciaría en loop y empeoraría
 el incidente) y `GET /v1/readyz` (readiness; verifica la base, 503 si no responde).
 
-#### H-10 · ALTO — No hay migraciones versionadas · **PENDIENTE** → paso 1.2
+#### H-10 · ALTO — No hay migraciones versionadas · **CORREGIDO** (paso 1.2)
 
-El esquema se carga entero **solo si la base está vacía**; a partir de ahí, la evolución vive en
-constantes de DDL idempotente dentro de `db.service.ts` (`SYNC_MIGRATION`, `IMPORT_MIGRATION`,
-`MOVEMENT_MIGRATION`, `WEIGHING_PROJECTION_MIGRATION`, `REPRO_ASSIGNMENTS_MIGRATION`,
-`TASKS_OPS_MIGRATION`, `COSTING_LABOR_MIGRATION` — **7 y sumando**), que corren en cada arranque.
-Funciona, pero no hay versión aplicada, ni orden garantizado, ni rollback, ni forma de saber en
-qué estado está una base de producción. Cada módulo nuevo agrega una constante más a un archivo
-que ya es el más crítico del sistema.
+El esquema se cargaba entero solo si la base estaba vacía; de ahí en adelante la evolución vivía
+en 7 constantes de DDL idempotente dentro de `db.service.ts`, que corrían **completas en cada
+arranque**. Funcionaba, pero no había versión aplicada, ni orden garantizado, ni forma de saber
+en qué estado estaba una base de producción — y sobre todo, nada impedía **editar una migración
+ya aplicada**, que es el error más caro: el cambio entra en las bases nuevas y no en las viejas,
+y las dos divergen en silencio.
+
+*Corrección:* `packages/db/migrations/0001…0008.sql` + `apps/api/src/db/migrations.ts`
+(tabla `schema_migrations` con versión y checksum, aplicación solo de lo pendiente, cada
+migración en su propia transacción, y **aborto del arranque si cambió el checksum de una ya
+aplicada**). `db.service.ts` pasó de **588 a 229 líneas**. 14 tests nuevos, incluidos dos que
+verifican propiedades de las migraciones reales: que sigan siendo idempotentes (`IF NOT EXISTS`,
+`DROP … IF EXISTS` antes de crear) y que ninguna use `CREATE INDEX CONCURRENTLY`, que Postgres
+prohíbe dentro de una transacción.
+
+**La ruta de actualización está verificada, no supuesta:** una base que ya existía (sin
+`schema_migrations`) ve las 8 como pendientes, las re-aplica sin efecto —por idempotentes—, las
+registra, y el segundo arranque no aplica ninguna. Probado sobre la base de desarrollo real
+(57 animales, dashboard y login intactos después) y sobre PostgreSQL en contenedor.
+
+Lo que **no** se versionó, a propósito: las **políticas de RLS**. Son convergentes — se generan
+desde `RLS_TABLES` y tienen que re-aplicarse cuando esa lista cambia, que es justo lo que hace
+útil al guardarraíl (agregar una tabla crea su política sola). Versionarlas rompería esa
+propiedad, así que `rlsMigration()` sigue corriendo en cada arranque.
 
 #### H-11 · ALTO — Los archivos se guardan en el disco local · **PENDIENTE** → paso 1.3
 
@@ -212,11 +252,8 @@ software esté completo.
 
 ### Paso 1 — Despliegue (lo que separa «funciona» de «existe»)
 
-1. **`Dockerfile` para API y web** + `docker-compose.prod.yml`. Build multi-etapa; la API compila
-   los paquetes `@cowinance/*` (cuyo `dist/` está gitignoreado) vía el `prepare` que ya existe.
-2. **Migraciones versionadas.** Extraer las 7 constantes de DDL de `db.service.ts` a archivos
-   numerados con una tabla `schema_migrations`. Regla: el arranque aplica lo pendiente y registra
-   la versión; nunca DDL implícito. Cierra **H-10**.
+1. ~~**`Dockerfile` para API y web** + `docker-compose.prod.yml`.~~ **HECHO** — ver H-8.
+2. ~~**Migraciones versionadas.**~~ **HECHO** — ver H-10.
 3. **Almacenamiento de objetos** (S3/R2) detrás del puerto que `media.service` ya insinúa; el
    filesystem queda como adaptador de desarrollo. Cierra **H-11**.
 4. **Adaptador de email real** (SMTP/SES/Resend) implementando `EmailSender`. Sin esto el registro
@@ -273,6 +310,13 @@ software esté completo.
 | `apps/api/src/modules/auth/*.ts`, `identity.controller.ts` | `@RateLimit` en los 7 endpoints públicos de credenciales |
 | `.env.example` | H-8 · las 13 variables documentadas, con las obligatorias marcadas |
 | `package-lock.json` | H-7 · `npm audit fix` (Next 15.3 → 15.5.21) |
+| `packages/db/migrations/0001…0008.sql` | H-10 · las 7 constantes de DDL de `db.service.ts` + el fix del plano de identidad, ahora versionadas |
+| `apps/api/src/db/migrations.ts` (+test) | H-10 · corredor con `schema_migrations`, checksum y transacción por migración |
+| `apps/api/src/db/db.service.ts` | H-10 · 588 → 229 líneas; `DATABASE_URL` obligatoria en producción |
+| `apps/api/Dockerfile`, `apps/web/Dockerfile`, `.dockerignore` | H-8 · imágenes multi-etapa, usuario no-root, healthcheck |
+| `docker-compose.prod.yml`, `deploy/postgres-init/` | H-8 · stack de referencia con rol de servicio restringido |
+| `apps/web/next.config.ts` | H-8 · `output: 'standalone'` para que la imagen de la web no arrastre el monorepo |
 
-**Verificación tras los cambios: 943 tests verdes, typecheck limpio, build de producción OK,
-0 ciclos.**
+**Verificación tras los cambios: 957 tests verdes, typecheck limpio (5 proyectos + web), build de
+producción OK, 0 ciclos, y el stack de contenedores levantado de punta a punta contra
+PostgreSQL 17 + PostGIS con la RLS enforceada.**
