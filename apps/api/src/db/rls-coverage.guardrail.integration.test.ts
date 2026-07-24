@@ -22,28 +22,21 @@ import { DbService } from './db.service';
  */
 
 /**
- * Exclusiones CONSCIENTES de RLS (tienen tenant_id pero no política estándar). Al ACTIVAR cualquiera
- * de estas (que un servicio empiece a escribirla), moverla a RLS_TABLES y sacarla de acá.
+ * Exclusiones CONSCIENTES de RLS: tienen `tenant_id` pero NO la política estándar, por razones de
+ * diseño (no por olvido). La lista es corta a propósito — las tablas "dormidas" ya NO viven acá:
+ * se les dio la política estándar aunque todavía no las use nadie, así activarlas no depende de
+ * que alguien se acuerde de agregarlas.
  */
 const RLS_EXEMPT = new Set<string>([
-  // Especial: el login resuelve el tenant desde acá ANTES de tener app.tenant_id (no puede autofiltrarse).
+  // Plano de IDENTIDAD: se leen ANTES de que exista contexto de tenant (el login resuelve el
+  // tenant justamente desde acá), así que no pueden filtrarse por él.
   'user_role_assignments',
-  // Dormidas — fases futuras, ningún servicio activo las escribe todavía:
-  'ai_conversations', 'ai_messages', 'image_analyses', 'predictions', // IA/ML
-  'blockchain_anchors', 'verifiable_credentials', // blockchain
-  'api_keys', 'webhooks', 'webhook_deliveries', 'integrations', // integraciones
-  'marketplace_inquiries', 'marketplace_listings', 'marketplace_media', 'marketplace_transactions', // marketplace
-  'course_enrollments', 'course_modules', // academia
-  'sensor_readings', 'gps_positions', 'geofences', // IoT/GPS
-  'soil_analyses', 'shearing_records', 'storage_tanks', // features no-módulo / dormidas
-  'compliance_reports', 'contracts', 'audit_logs', 'invitations', 'devices', 'assets', // dormidas varias
-  'billing_payments', 'subscription_usage', // billing dormido
-  'notification_preferences', // notificaciones (preferencias dormidas)
-  'trace_events', // trazabilidad (traza fina dormida)
-  // tenant_id NULLABLE = catálogos globales+tenant: filtrar por tenant ocultaría las filas globales.
+  'auth_refresh_tokens',
+  // Catálogos GLOBALES + tenant (tenant_id NULLABLE): filtrar por tenant ocultaría las filas
+  // globales, que son la mayor parte del catálogo.
   'breeds', 'diagnoses', 'roles', 'courses', 'exchange_rates', 'market_prices',
-  // infra/auth: se leen ANTES del contexto de tenant o las procesa un worker.
-  'auth_refresh_tokens', 'event_outbox',
+  // Infra procesada por un worker cross-tenant post-commit (no hay request ni tenant fijado).
+  'event_outbox',
 ]);
 
 describe('RLS · guardarraíl de cobertura', () => {

@@ -143,6 +143,46 @@ export const RLS_TABLES = [
   // import_rows: política estándar por tenant. import_batches NO va aquí: lleva
   // una política bespoke (tenant + excepción app.job_scope) en IMPORT_MIGRATION.
   'import_rows',
+
+  // ── Dormidas: ningún servicio las escribe TODAVÍA (fases futuras) ──────────────────────
+  // Se les da la política estándar igual. Motivo: el DDL canónico las deja con una policy sobre
+  // `app.current_tenant` (deny-all para el rol de servicio), así que al activar el módulo el
+  // síntoma sería un "no devuelve nada" desconcertante… o peor, alguien la desactiva sin
+  // reemplazarla y quedan SIN aislamiento. Protegidas desde el día uno, activarlas no requiere
+  // acordarse de nada. Si alguna necesitara acceso cross-tenant de un worker, será una excepción
+  // explícita y documentada (como import_batches), no un descuido.
+  'ai_conversations',
+  'ai_messages',
+  'image_analyses',
+  'predictions',
+  'blockchain_anchors',
+  'verifiable_credentials',
+  'api_keys',
+  'webhooks',
+  'webhook_deliveries',
+  'integrations',
+  'marketplace_listings',
+  'marketplace_inquiries',
+  'marketplace_media',
+  'marketplace_transactions',
+  'course_enrollments',
+  'course_modules',
+  'sensor_readings',
+  'gps_positions',
+  'geofences',
+  'soil_analyses',
+  'shearing_records',
+  'storage_tanks',
+  'compliance_reports',
+  'contracts',
+  'audit_logs',
+  'invitations',
+  'devices',
+  'assets',
+  'billing_payments',
+  'subscription_usage',
+  'notification_preferences',
+  'trace_events',
 ];
 
 /**
@@ -150,6 +190,14 @@ export const RLS_TABLES = [
  * el owner la saltea). La política compara tenant_id con la variable de
  * sesión app.tenant_id, que el interceptor de auth fija por request con
  * SET LOCAL dentro de la transacción. Sin variable → cero filas.
+ *
+ * Cada tabla recibe además un DROP de la policy `tenant_isolation_<tabla>` que trae el DDL
+ * canónico: usa `current_setting('app.current_tenant')`, variable que la app NUNCA fija (usa
+ * `app.tenant_id`), así que para un rol NO privilegiado equivale a DENY-ALL. Antes se borraba a
+ * mano, tabla por tabla, al activar cada módulo (33 líneas sueltas acumuladas, y una trampa
+ * esperando al siguiente); ahora va en el mismo template que crea la policy correcta, así no hay
+ * nada que recordar. Las policies BESPOKE (import_batches, notification_deliveries) se llaman
+ * `tenant_isolation` SIN sufijo y no están en esta lista → no se tocan.
  *
  * `only` acota a un subconjunto (mismo template, sin duplicarlo): lo usa `verify:rls`, que corre
  * sobre el DDL canónico y por eso no tiene las tablas que la app crea en migraciones de arranque.
@@ -160,6 +208,7 @@ export function rlsMigration(only?: readonly string[]): string {
   (t) => `
       ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY;
       ALTER TABLE "${t}" FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";
       DROP POLICY IF EXISTS tenant_isolation ON "${t}";
       CREATE POLICY tenant_isolation ON "${t}"
         USING (tenant_id = current_setting('app.tenant_id', true)::uuid)

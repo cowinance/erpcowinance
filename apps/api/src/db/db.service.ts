@@ -398,105 +398,22 @@ export class DbService implements OnModuleInit {
     await this.db.exec(DbService.WEIGHING_PROJECTION_MIGRATION);
     await this.db.exec(DbService.REPRO_ASSIGNMENTS_MIGRATION);
     await this.db.exec(DbService.TASKS_OPS_MIGRATION);
-    // R-2.a: el esquema canónico traía una policy dispersa sobre `app.current_tenant` (que la app
-    // NUNCA setea → denegaba en prod). Se elimina; `repro_protocols` ya está en RLS_TABLES y recibe
-    // la policy estándar `tenant_isolation` sobre `app.tenant_id` en rlsMigration.
-    // PLANO DE IDENTIDAD — corrige un bug que solo se ve con un rol NO privilegiado (en dev
-    // PGlite conecta como superusuario y saltea toda RLS, así que esto pasaba inadvertido):
-    // el DDL canónico habilita RLS en `user_role_assignments` con una policy sobre
-    // `app.current_tenant`, variable que la app NUNCA fija (usa `app.tenant_id`). Resultado con
-    // rol restringido: deny-all. Y el LOGIN lee justo esa tabla para resolver el tenant del
-    // usuario ANTES de que exista contexto de tenant → en producción el login quedaba roto.
+    // PLANO DE IDENTIDAD — bug que solo se ve con un rol NO privilegiado (en dev PGlite conecta
+    // como superusuario y saltea toda RLS, así que pasaba inadvertido): el DDL canónico habilita
+    // RLS en `user_role_assignments` con una policy sobre `app.current_tenant`, variable que la
+    // app NUNCA fija (usa `app.tenant_id`) → deny-all. Y el LOGIN lee justo esa tabla para
+    // resolver el tenant ANTES de que exista contexto → en producción el login quedaba roto.
     // Va SIN RLS a propósito (misma decisión que users/auth_refresh_tokens): no se puede filtrar
-    // por un tenant que todavía no se conoce. Se apaga la RLS, no solo la policy: dejarla
-    // habilitada sin política también deniega todo.
+    // por un tenant que todavía no se conoce. Se APAGA la RLS, no solo la policy: habilitada sin
+    // política también deniega todo. Por eso no está en RLS_TABLES y se trata acá.
     await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_user_role_assignments ON "user_role_assignments";');
     await this.db.exec('ALTER TABLE "user_role_assignments" DISABLE ROW LEVEL SECURITY;');
 
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_repro_protocols ON "repro_protocols";');
-    // B-1: misma policy dispersa (app.current_tenant) en subscriptions → se elimina; ya está en
-    // RLS_TABLES y recibe la estándar sobre app.tenant_id.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_subscriptions ON "subscriptions";');
-    // INV-1: mismas policies dispersas (app.current_tenant) en las tablas de inventario activadas.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_inventory_categories ON "inventory_categories";');
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_inventory_items ON "inventory_items";');
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_warehouses ON "warehouses";');
-    // INV-2a: mismas policies dispersas en las tablas de kardex/existencias.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_stock_movements ON "stock_movements";');
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_stock_levels ON "stock_levels";');
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_inventory_batches ON "inventory_batches";');
-    // C-1: mismas policies dispersas (app.current_tenant) en las 9 tablas comerciales activadas.
-    for (const t of ['business_partners', 'suppliers', 'customers', 'contacts', 'price_lists', 'purchases', 'purchase_lines', 'sales', 'sale_lines']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // F-1: mismas policies dispersas en las 5 tablas del libro mayor.
-    for (const t of ['chart_of_accounts', 'fiscal_periods', 'cost_centers', 'journal_entries', 'journal_lines']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // F-2: misma policy dispersa en system_settings (mapa de cuentas de posteo).
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_system_settings ON "system_settings";');
-    // A3 (Configuración): misma policy dispersa (app.current_tenant) en feature_flags.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_feature_flags ON "feature_flags";');
-    // F-3a: misma policy dispersa en invoices.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_invoices ON "invoices";');
-    // F-3b: mismas policies dispersas en pagos/imputaciones/bancos.
-    for (const t of ['payments', 'payment_allocations', 'bank_accounts']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // N-1: mismas policies dispersas en raciones e ingredientes.
-    for (const t of ['rations', 'ration_ingredients']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // N-2: misma policy dispersa en feed_deliveries.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_feed_deliveries ON "feed_deliveries";');
-    // H-1: misma policy dispersa en employees.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_employees ON "employees";');
-    // H-2: mismas policies dispersas en liquidaciones e ítems.
-    for (const t of ['payroll_runs', 'payroll_items']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // AG-1: misma policy dispersa en crops.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_crops ON "crops";');
-    // AG-2: mismas policies dispersas en labores y cosechas.
-    for (const t of ['crop_operations', 'harvests']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // MQ-1: misma policy dispersa en machinery.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_machinery ON "machinery";');
-    // MQ-2: mismas policies dispersas en mantenimiento y combustible.
-    for (const t of ['maintenance_records', 'fuel_logs']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // G-1: misma policy dispersa en semen_batches.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_semen_batches ON "semen_batches";');
-    // G-2b: mismas policies dispersas en embriones y evaluaciones.
-    for (const t of ['embryos', 'genetic_evaluations']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // T-1: misma policy dispersa en movement_guides.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_movement_guides ON "movement_guides";');
-    // T-2: misma policy dispersa en certifications.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_certifications ON "certifications";');
-    // BG-1: mismas policies dispersas en presupuestos y sus líneas.
-    for (const t of ['budgets', 'budget_lines']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // FA-1: misma policy dispersa en carcass_records.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_carcass_records ON "carcass_records";');
-    // PG-1: misma policy dispersa en grazing_records.
-    await this.db.exec('DROP POLICY IF EXISTS tenant_isolation_grazing_records ON "grazing_records";');
-    // TB-1: mismas policies dispersas en tanques y producción diaria.
-    for (const t of ['milk_tanks', 'milk_production_daily']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // TB-2: mismas policies dispersas en entregas y tests de calidad.
-    for (const t of ['milk_deliveries', 'milk_quality_tests']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
-    // WL-1 + LAB-1: mismas policies dispersas en partes de trabajo y laboratorio.
-    for (const t of ['work_logs', 'labs', 'lab_samples', 'lab_results']) {
-      await this.db.exec(`DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";`);
-    }
+    // El resto de las policies dispersas del DDL (`tenant_isolation_<tabla>` sobre
+    // app.current_tenant) ya NO se borran acá una por una: `rlsMigration()` las elimina junto con
+    // la creación de la correcta, para TODA tabla de RLS_TABLES. Antes esto eran ~33 líneas que
+    // había que acordarse de sumar al activar cada módulo — y olvidarse dejaba la tabla en
+    // deny-all silencioso.
     await this.db.exec(rlsMigration());
 
     // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
