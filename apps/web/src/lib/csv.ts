@@ -13,6 +13,10 @@ const FORMULA_LEAD = /^[=+\-@\t\r]/;
 
 function cell(v: string | number | null | undefined): string {
   if (v == null) return '';
+  // Un NÚMERO nunca es una fórmula: la inyección viaja en texto. Escaparlo rompería el export sin
+  // ganar seguridad — un importe negativo (`-7331.57`) quedaría como `'-7331.57`, o sea TEXTO en
+  // Excel, y la columna dejaría de poder sumarse. Los reportes de costos son casi todos negativos.
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '';
   const raw = String(v);
   const safe = FORMULA_LEAD.test(raw) ? `'${raw}` : raw; // neutraliza inyección de fórmulas
   return NEEDS_QUOTE.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;

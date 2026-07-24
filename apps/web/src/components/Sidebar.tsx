@@ -28,6 +28,7 @@ import {
   Users,
   ShieldCheck,
   BarChart3,
+  Calculator,
   Bell,
   Inbox,
   CreditCard,
@@ -77,6 +78,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
     items: [
       { href: '/finanzas', label: 'Finanzas', icon: Landmark },
       { href: '/comercial', label: 'Compras y Ventas', icon: ShoppingCart },
+      { href: '/costos', label: 'Costos', icon: Calculator },
       { href: '/rrhh', label: 'Personal', icon: Users },
       { href: '/modulo/marketplace', label: 'Marketplace', icon: Store },
       { href: '/trazabilidad', label: 'Trazabilidad', icon: ShieldCheck },
