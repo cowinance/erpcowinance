@@ -32,6 +32,14 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      # `apps/mobile` NO es workspace de npm a propósito (Expo se rompe con el hoisting), así que
+      # tiene su propio package-lock y el `npm ci` de la raíz NO lo instala. Sin este paso, en CI
+      # faltan react-native/expo-* y el gate falla dos veces: en el typecheck de móvil y en los
+      # tests de móvil que la suite incluye. En local pasaba inadvertido porque el node_modules de
+      # mobile ya estaba instalado a mano.
+      - name: Instalar dependencias de móvil
+        run: npm ci --prefix apps/mobile
+
       # Gate único del repo: tokens sin deriva + typecheck (domain, sync-core, design-tokens, api,
       # móvil) + la suite completa de Vitest + cero ciclos de dependencia. Bloquea con exit ≠ 0.
       - name: Gates de arquitectura
@@ -78,6 +86,12 @@ jobs:
 
       - name: Instalar dependencias
         run: npm ci
+
+      # `verify:rls` importa la lista de tablas COMPILADA (apps/api/dist/db/rls.js) para no
+      # duplicar la fuente única. En local el dist ya existe de builds anteriores; en CI hay que
+      # generarlo. (`verify:pg` compila la API por su cuenta, pero corre después.)
+      - name: Compilar la API
+        run: npm run build -w @cowinance/api
 
       # 1) El MOTOR: las políticas aíslan cuando app.tenant_id está bien puesto.
       - name: RLS aísla (rol no privilegiado)
