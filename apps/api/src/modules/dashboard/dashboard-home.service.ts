@@ -32,17 +32,19 @@ export class DashboardHomeService {
   ) {}
 
   async home() {
-    const [base, taskK, alertK, agenda, healthK, reproK, openTasks, noWeigh, recent]: any[] = await Promise.all([
+    // `alerts.agendaAndKpis()` comparte el computeDesired (lo caro: herdStatus O(vientres)) entre
+    // la agenda y los KPIs. Antes se llamaba agenda() + kpis() por separado → se computaba DOS veces.
+    const [base, taskK, alertsBundle, healthK, reproK, openTasks, noWeigh, recent]: any[] = await Promise.all([
       this.dashboard.kpis(),
       this.tasks.kpis(),
-      this.alerts.kpis(),
-      this.alerts.agenda(),
+      this.alerts.agendaAndKpis(),
       this.health.kpis(),
       this.repro.kpis(),
       this.tasks.board({ status: 'open' }),
       this.noRecentWeighing(),
       this.recentActivity(),
     ]);
+    const { agenda, kpis: alertK } = alertsBundle as { agenda: any[]; kpis: any };
 
     // Señales repro-derivadas contadas desde la agenda (evita recomputar herdStatus).
     const agendaBy = (code: string) => agenda.filter((a: any) => a.code === code).length;

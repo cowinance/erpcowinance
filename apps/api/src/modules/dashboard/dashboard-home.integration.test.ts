@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
+import { requestContext } from '../../common/request-context';
 import { DashboardService } from './dashboard.service';
 import { DashboardHomeService } from './dashboard-home.service';
 import { TaskService } from '../tasks/task.service';
@@ -88,6 +89,18 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     expect(overdue.href).toContain('/tareas');
     // Estado operativo refleja la crítica.
     expect(['late', 'critical']).toContain(h.farm_status.operation);
+  });
+
+  it('expone el ROL del usuario de la request (base de la personalización del Inicio)', async () => {
+    // El Inicio web reordena el énfasis con este dato (lib/role-focus). Se ejercita el rol real
+    // de la request vía requestContext, que es de donde lo lee DbService.role.
+    const tenantId = db.tenant;
+    const asRole = (role: string) =>
+      requestContext.run({ userId, tenantId, role }, () => home.home() as Promise<any>);
+
+    expect((await asRole('veterinarian')).role).toBe('veterinarian');
+    expect((await asRole('foreman')).role).toBe('foreman');
+    expect((await asRole('owner')).role).toBe('owner');
   });
 
   it('la agenda combinada ordena por fecha (vencidas primero)', async () => {

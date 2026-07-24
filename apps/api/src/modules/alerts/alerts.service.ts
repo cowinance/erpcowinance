@@ -160,6 +160,23 @@ export class AlertsService {
   async agenda(): Promise<AgendaItemDto[]> {
     const desired = await this.computeDesired();
     await this.evaluate(desired); // read-through, sin recomputar
+    return this.toAgenda(desired);
+  }
+
+  /**
+   * Agenda + KPIs en UNA sola pasada (auditoría Fase 3, perf). `computeDesired()` es lo caro del
+   * módulo (corre `statusAlerts` → herdStatus, O(vientres)); llamar `agenda()` y `kpis()` por
+   * separado lo ejecutaba DOS veces. El Inicio agregado necesita ambos, así que se comparte el
+   * cómputo. Mismos resultados que llamarlos por separado, la mitad de trabajo.
+   */
+  async agendaAndKpis(): Promise<{ agenda: AgendaItemDto[]; kpis: Awaited<ReturnType<AlertsService['kpiCounts']>> }> {
+    const desired = await this.computeDesired();
+    await this.evaluate(desired);
+    return { agenda: this.toAgenda(desired), kpis: await this.kpiCounts() };
+  }
+
+  /** Proyección pura desired → agenda (sin tocar la base). */
+  private toAgenda(desired: Desired[]): AgendaItemDto[] {
     return desired
       .filter((d) => d.category === 'health' || d.category === 'reproduction')
       .map((d) => ({
@@ -211,6 +228,11 @@ export class AlertsService {
   /** KPIs con evaluación read-through (mantiene alertas y badge frescos). */
   async kpis() {
     await this.evaluate();
+    return this.kpiCounts();
+  }
+
+  /** Solo los conteos (sin evaluar): lo comparte `agendaAndKpis`, que ya evaluó una vez. */
+  private async kpiCounts() {
     const row = await this.db.one<any>(
       `SELECT
          count(*) FILTER (WHERE status = 'open')::int AS open,

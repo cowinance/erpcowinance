@@ -7,6 +7,7 @@ import { EmptyFarmState } from '@/components/EmptyFarmState';
 import { EVENT_LABELS, relativeTime } from '@/lib/format';
 import { Plus, Zap, CheckSquare, Stethoscope, Syringe, Heart, Baby, ArrowLeftRight, AlertTriangle, Scale, Scissors, StickyNote, Tag } from 'lucide-react';
 import { AgendaAttention } from '@/components/AgendaAttention';
+import { focusFor, orderActionsByRole, orderPriorityByRole } from '@/lib/role-focus';
 
 /** Acciones rápidas del Inicio (Home E3): actuar, no solo mirar. Rutas existentes + anchors de captura. */
 const QUICK_ACTIONS = [
@@ -20,30 +21,6 @@ const QUICK_ACTIONS = [
   { label: 'Mover', href: '/animales', Icon: ArrowLeftRight },
   { label: 'Tareas vencidas', href: '/tareas?bucket=overdue', Icon: AlertTriangle },
 ];
-
-/**
- * Personalización por rol (Home E5, estructura preparada): qué códigos de prioridad y qué acciones
- * rápidas se priorizan según el rol del usuario. owner/admin ven todo en el orden por severidad;
- * veterinario prioriza sanidad; capataz/operario prioriza campo (tareas/manga/mover). Si mañana se
- * agrega un rol de reproducción, basta sumarlo acá. Nunca OCULTA datos: solo reordena el énfasis.
- */
-const ROLE_FOCUS: Record<string, { label: string; codes: string[]; actions: string[] }> = {
-  veterinarian: {
-    label: 'Veterinario',
-    codes: ['active_withdrawals', 'clinical_cases', 'vaccines_overdue', 'in_treatment', 'vaccines_due'],
-    actions: ['Tratamiento', 'Vacuna', 'Modo manga'],
-  },
-  foreman: {
-    label: 'Capataz',
-    codes: ['tasks_overdue', 'tasks_urgent', 'no_recent_weighing'],
-    actions: ['Modo manga', 'Nueva tarea', 'Mover'],
-  },
-  worker: {
-    label: 'Operario',
-    codes: ['tasks_overdue', 'tasks_urgent', 'no_recent_weighing'],
-    actions: ['Modo manga', 'Nueva tarea'],
-  },
-};
 
 /** Ícono + color por tipo de evento para diferenciar la actividad reciente visualmente. */
 const EVENT_STYLE: Record<string, { Icon: any; cls: string }> = {
@@ -112,14 +89,9 @@ export default async function Dashboard() {
   const fs = home.farm_status ?? {};
 
   // Personalización por rol (E5): reordena énfasis sin ocultar nada. owner/admin/otros → orden base.
-  const focus = ROLE_FOCUS[home.role as string];
-  const focusCodes = new Set(focus?.codes ?? []);
-  const priority = ([...(home.priority ?? [])] as any[]).sort((a, b) => (focusCodes.has(a.code) ? 0 : 1) - (focusCodes.has(b.code) ? 0 : 1));
-  const actionRank = (label: string) => {
-    const i = focus?.actions.indexOf(label) ?? -1;
-    return i === -1 ? 99 : i;
-  };
-  const quickActions = [...QUICK_ACTIONS].sort((a, b) => actionRank(a.label) - actionRank(b.label));
+  const focus = focusFor(home.role);
+  const priority = orderPriorityByRole((home.priority ?? []) as any[], home.role);
+  const quickActions = orderActionsByRole(QUICK_ACTIONS, home.role);
   const allClear = priority.length === 0 && fs.operation === 'ok' && fs.health === 'stable' && fs.reproduction === 'stable';
 
   return (
