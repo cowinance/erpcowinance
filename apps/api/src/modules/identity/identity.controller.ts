@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { IdentityService } from './identity.service';
 import { Public } from '../auth/public.decorator';
+import { CREDENTIAL_RULE, EMAIL_RULE, RateLimit } from '../../common/rate-limit.guard';
 import { supportedCountries, type CountryOption } from './country-defaults';
 
 @Controller()
@@ -16,6 +17,7 @@ export class IdentityController {
    * responde 201. No auto-loguea — el cliente llama después a /auth/login.
    */
   @Public()
+  @RateLimit(CREDENTIAL_RULE)
   @Post('register')
   register(@Body() body: any) {
     return this.identity.register(body);
@@ -23,6 +25,7 @@ export class IdentityController {
 
   /** Verificación de email (P1.2). Público: el link del email trae el token. */
   @Public()
+  @RateLimit(CREDENTIAL_RULE)
   @Post('verify-email')
   verifyEmail(@Body() body: any) {
     return this.identity.verifyEmail(body);
@@ -30,6 +33,7 @@ export class IdentityController {
 
   /** Reenvío de verificación (P1.2). Público, respuesta constante (anti-enumeración). */
   @Public()
+  @RateLimit(EMAIL_RULE)
   @Post('resend-verification')
   resendVerification(@Body() body: any) {
     return this.identity.resendVerification(body);
@@ -37,6 +41,7 @@ export class IdentityController {
 
   /** Solicitud de reset de contraseña (P1.2). Público, respuesta constante (anti-enumeración). */
   @Public()
+  @RateLimit(EMAIL_RULE)
   @Post('forgot-password')
   forgotPassword(@Body() body: any) {
     return this.identity.forgotPassword(body);
@@ -44,6 +49,7 @@ export class IdentityController {
 
   /** Establecer contraseña nueva con el token de reset (P1.2). Público. */
   @Public()
+  @RateLimit(CREDENTIAL_RULE)
   @Post('reset-password')
   resetPassword(@Body() body: any) {
     return this.identity.resetPassword(body);

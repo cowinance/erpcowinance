@@ -167,7 +167,7 @@ export async function seedDemo(db: Queryable) {
   // ── Identidad y organización ──────────────────────────────────────────
   const [{ id: userId }] = await q(
     `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-AR',$1) RETURNING id`,
-    [hashPassword('cowinance')],
+    [await hashPassword('cowinance')],
   );
   const [{ id: org }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
@@ -476,7 +476,7 @@ export async function seedDemo(db: Queryable) {
   // ── Segundo tenant: prueba viviente del aislamiento RLS ───────────────
   const [{ id: mariaId }] = await q(
     `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('maria@elombu.com','María Fernández','es-AR',$1) RETURNING id`,
-    [hashPassword('ombu1234')],
+    [await hashPassword('ombu1234')],
   );
   const [{ id: orgB }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)

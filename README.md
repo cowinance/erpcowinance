@@ -150,8 +150,29 @@ mínimas**. Es lo que hace que la RLS se ejerza de verdad — con un superusuari
 | `APP_BASE_URL` | API | Base del front para armar los **enlaces de email** (verificación/reset) | `http://localhost:3000` — apuntar a la web real en despliegue |
 | `NEXT_PUBLIC_API_URL` | Web | URL de la API que consume la web (se **inlinea en build** para componentes cliente) | `http://localhost:3001/v1` |
 | `EXPO_PUBLIC_WEB_URL` | Móvil | Base pública de la web para el botón "Abrir Cowinance web" del estado vacío del hato (ADR-0012) | **sin default**: si falta, la UI muestra instrucciones en texto **sin** hardcodear dominios y **sin** botón |
+| `JWT_SECRET` | API | Clave HMAC de los JWT (access, refresh, tokens de archivo) | dev: clave pública de desarrollo. **Producción: obligatoria** — el proceso NO arranca sin ella, ni con la de desarrollo, ni con menos de 32 caracteres (`openssl rand -base64 48`) |
+| `CORS_ORIGINS` | API | Orígenes permitidos, separados por comas | dev: refleja el origen. Producción sin lista: **CORS deshabilitado** (móvil y render server-side siguen funcionando: no son navegadores con origen) |
+| `TRUST_PROXY` | API | ¿Hay balanceador delante? `true` (1 salto) o cantidad de saltos | `false`. Necesario para que el rate limit vea la IP real; sin proxy, confiar dejaría que el cliente elija su IP |
+| `FORCE_HTTPS` | API | Enviar `Strict-Transport-Security` | `false`. Activarlo sobre HTTP plano deja el host inaccesible en los navegadores que ya lo vieron |
+
+Plantilla completa con comentarios: [`.env.example`](.env.example).
 
 > Ningún token de acción se documenta ni se registra: viajan solo en el email y se guardan hasheados (ADR-0011).
+
+### Sondas de plataforma
+
+| Endpoint | Qué responde | Para qué |
+|---|---|---|
+| `GET /v1/healthz` | `{status, uptime_s}` | *Liveness*. **No** toca la base a propósito: si un incidente de base marcara "muerto" al proceso, el orquestador lo reiniciaría en loop y empeoraría el incidente |
+| `GET /v1/readyz` | `{status:"ready"}` o **503** | *Readiness*. Verifica la base. Falla → sale de la rotación del balanceador sin reiniciarse |
+
+### Límite de intentos
+
+Los endpoints públicos de credenciales (`/auth/login`, `/auth/refresh`, `register`, `verify-email`,
+`resend-verification`, `forgot-password`, `reset-password`) están limitados **por IP y por email a la
+vez** — la segunda dimensión frena el *password spraying*, que el límite por IP no ve. Credenciales:
+10 intentos / 5 min; endpoints que envían email: 5 / 15 min. El contador vive en el proceso: con
+varias instancias hay que moverlo a un almacén compartido (ver `docs/audits/auditoria-2026-07-24.md`, H-2).
 
 ### Tokens de diseño (fuente única — ADR-0013)
 

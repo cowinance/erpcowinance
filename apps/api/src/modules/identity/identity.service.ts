@@ -88,7 +88,7 @@ export class IdentityService {
       // Plano de identidad (sin tenant, sin RLS)
       const user = (await q.one<{ id: string }>(
         `INSERT INTO users (email, full_name, locale, password_hash) VALUES ($1,$2,$3,$4) RETURNING id`,
-        [email, fullName, defaults.locale, hashPassword(password)],
+        [email, fullName, defaults.locale, await hashPassword(password)],
       ))!;
       const org = (await q.one<{ id: string }>(
         `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
@@ -227,7 +227,7 @@ export class IdentityService {
     if (!userId)
       throw new BadRequestException({ code: 'identity.invalid_token', title: 'Token de reset inválido o expirado' });
 
-    await this.db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, hashPassword(newPassword)]);
+    await this.db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, await hashPassword(newPassword)]);
     await this.auth.revokeAllSessions(userId);
     this.logger.log(`Reset de contraseña completado para user=${userId}`);
     return { ok: true };

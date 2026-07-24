@@ -2,8 +2,9 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import { DbService } from '../../db/db.service';
-import { verifyPassword } from '../../common/passwords';
+import { hashPassword, needsRehash, verifyPassword } from '../../common/passwords';
 import { requestContext } from '../../common/request-context';
+import { resolveJwtSecret } from './jwt-secret';
 
 /**
  * Emisor de tokens para desarrollo con el mismo shape que un IdP OIDC
@@ -12,7 +13,7 @@ import { requestContext } from '../../common/request-context';
  * Keycloak/Auth0: el interceptor solo cambia de clave de verificación.
  */
 
-export const JWT_SECRET = process.env.JWT_SECRET ?? 'cowinance-dev-secret';
+export const JWT_SECRET = resolveJwtSecret();
 export const JWT_ISSUER = 'cowinance-dev';
 const ACCESS_TTL_S = 15 * 60;
 const REFRESH_TTL_S = 7 * 24 * 3600;
@@ -38,8 +39,17 @@ export class AuthService {
       `SELECT id, email, full_name, password_hash, status FROM users WHERE email = $1 AND deleted_at IS NULL`,
       [body.email.trim().toLowerCase()],
     );
-    if (!user || user.status !== 'active' || !verifyPassword(body.password, user.password_hash))
+    if (!user || user.status !== 'active' || !(await verifyPassword(body.password, user.password_hash)))
       throw new UnauthorizedException({ code: 'auth.invalid_credentials', title: 'Credenciales inválidas' });
+
+    // Re-hash transparente: el login es el ÚNICO momento con la contraseña en claro disponible,
+    // así que es acá donde un hash con parámetros viejos se sube al esquema actual. Sin esto, un
+    // usuario creado antes del cambio se quedaría para siempre con el costo débil.
+    if (needsRehash(user.password_hash))
+      await this.db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [
+        user.id,
+        await hashPassword(body.password),
+      ]);
 
     // Tenant y rol del actor (v0: primera asignación; multi-organización después)
     const assignment = await this.db.one<any>(
