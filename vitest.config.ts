@@ -20,6 +20,18 @@ export default defineConfig({
       'apps/web/src/**/*.{test,spec}.ts',
     ],
     exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/.data/**'],
+    /**
+     * Hooks: 120 s. Casi todas las pruebas de integración arrancan una PGlite propia y le cargan
+     * el DDL canónico en un `before*`; con la suite completa en paralelo y la máquina cargada ese
+     * arranque puede pasarse del default de 10 s y producir ROJOS INTERMITENTES ajenos al código
+     * (se detectó así en `identity/email-action-token`). Es el mismo margen que ya declaraban a
+     * mano la mayoría de los archivos; acá cubre también a los que no lo hacían.
+     *
+     * `testTimeout` se deja en el default a propósito: un test que se cuelga suele ser un deadlock
+     * real (p. ej. consultar por fuera de la tx con la conexión única de PGlite) y conviene que
+     * falle rápido en vez de esperar dos minutos.
+     */
+    hookTimeout: 120_000,
     coverage: {
       provider: 'v8',
       reportsDirectory: './coverage',

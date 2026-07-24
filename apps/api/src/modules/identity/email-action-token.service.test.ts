@@ -36,6 +36,9 @@ async function setup() {
 describe('EmailActionTokenService · tokens one-time con hash', () => {
   let pg: PGlite;
   let svc: EmailActionTokenService;
+  // Cada caso levanta su PROPIA PGlite + DDL (aislamiento total). El margen del hook lo fija
+  // `hookTimeout` en vitest.config.ts (120 s), porque el default de 10 s se quedaba corto con la
+  // suite completa en paralelo.
   beforeEach(async () => {
     ({ pg, svc } = await setup());
   });
