@@ -26,6 +26,7 @@ describe('costing — costos por centro', () => {
   let machineryId: string;
   let dairyLotId: string;
   let looseAnimalId: string;
+  let budgetId: string;
 
   // Todos los hechos "dentro de rango" caen en febrero de 2030; los de control, en 2029.
   const IN = '2030-02-10';
@@ -133,6 +134,33 @@ describe('costing — costos por centro', () => {
     await db.query(`INSERT INTO milk_deliveries (tenant_id, delivered_at, liters, price_per_liter, sale_id) VALUES ($1,'2030-03-02',999,2,$2)`, [tenantId, milkSaleId]);
     // AGRICULTURA: venta de grano por 5000.
     await mkSale('crop', 5000);
+
+    // ── E4 · presupuesto, para comparar contra el gasto operativo ──────────────────────────────
+    // Un centro de costo para el lote costeado y otro para un lote sin gasto (arranca en 0).
+    const ccLot = await one(
+      `INSERT INTO cost_centers (tenant_id, company_id, name, level, reference_id) VALUES ($1,$2,'CC Lote','lot',$3) RETURNING id`,
+      [tenantId, companyId, lotId],
+    );
+    const ccIdle = await one(
+      `INSERT INTO cost_centers (tenant_id, company_id, name, level, reference_id) VALUES ($1,$2,'CC Sin Gasto','lot',$3) RETURNING id`,
+      [tenantId, companyId, otherLotId],
+    );
+    // Una cuenta cualquiera de gasto (el tipo no importa acá: el costo operativo es siempre gasto).
+    const acctId = await one(
+      `INSERT INTO chart_of_accounts (tenant_id, company_id, code, name, type) VALUES ($1,$2,'5.1.99','Gastos operativos test','expense') RETURNING id`,
+      [tenantId, companyId],
+    );
+    budgetId = await one(
+      `INSERT INTO budgets (tenant_id, company_id, name, fiscal_year, status) VALUES ($1,$2,'Presupuesto 2030',2030,'approved') RETURNING id`,
+      [tenantId, companyId],
+    );
+    const mkBudgetLine = (cc: string, month: number, amount: number) =>
+      db.query(`INSERT INTO budget_lines (tenant_id, budget_id, account_id, cost_center_id, month, amount) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [tenantId, budgetId, acctId, cc, month, amount]);
+    // Lote costeado: presupuesto 300 (feb) → gasto real 350 ⇒ sobregiro de 50.
+    await mkBudgetLine(ccLot, 2, 300);
+    // Lote sin gasto: presupuesto 500 (marzo) → real 0 ⇒ bajo presupuesto (todavía no arrancó).
+    await mkBudgetLine(ccIdle, 3, 500);
   }, 120_000);
 
   afterAll(() => {
@@ -190,21 +218,24 @@ describe('costing — costos por centro', () => {
   });
 
   it('el centro de costo es opcional: sin fila en cost_centers la entidad igual aparece, y con fila se vincula', async () => {
-    const before = await svc.costsByCenter({ level: 'lot', ...RANGE });
-    expect(before.rows.find((r) => r.reference_id === lotId)!.cost_center_id).toBeNull();
-
+    // Lote propio del test: los del fixture ya tienen centro de costo (los usa E4).
     const companyId = (await db.query<{ id: string }>(`SELECT id FROM companies WHERE tenant_id=$1 LIMIT 1`, [tenantId]))[0].id;
+    const freshLot = (await db.query<{ id: string }>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote Sin CC') RETURNING id`, [tenantId, farmId]))[0].id;
+
+    const before = await svc.costsByCenter({ level: 'lot', ...RANGE });
+    expect(before.rows.find((r) => r.reference_id === freshLot)!.cost_center_id).toBeNull();
+
     const ccId = (
       await db.query<{ id: string }>(
-        `INSERT INTO cost_centers (tenant_id, company_id, name, level, reference_id) VALUES ($1,$2,'CC Lote Costos','lot',$3) RETURNING id`,
-        [tenantId, companyId, lotId],
+        `INSERT INTO cost_centers (tenant_id, company_id, name, level, reference_id) VALUES ($1,$2,'CC Fresh','lot',$3) RETURNING id`,
+        [tenantId, companyId, freshLot],
       )
     )[0].id;
 
     const after = await svc.costsByCenter({ level: 'lot', ...RANGE });
-    const row = after.rows.find((r) => r.reference_id === lotId)!;
+    const row = after.rows.find((r) => r.reference_id === freshLot)!;
     expect(row.cost_center_id).toBe(ccId);
-    expect(row.total).toBe(350); // vincular un centro no cambia el costo
+    expect(row.total).toBe(0); // el lote fresco no tiene gasto; vincular un centro no lo cambia
   });
 
   it('rechaza nivel inválido y rango invertido', async () => {
@@ -356,6 +387,60 @@ describe('costing — costos por centro', () => {
 
     it('rechaza un nivel que existe para costos pero no para rentabilidad', async () => {
       await expect(svc.profitability({ level: 'machinery' as never })).rejects.toThrow();
+    });
+  });
+
+  // ── E4 · real vs presupuesto ─────────────────────────────────────────────────────────────────
+
+  describe('real vs presupuesto (E4)', () => {
+    it('cruza el gasto operativo con el presupuesto del centro y calcula el desvío', async () => {
+      const res = await svc.budgetVsActual({ budgetId, level: 'lot' });
+      expect(res.fiscal_year).toBe(2030);
+      const row = res.rows.find((r) => r.reference_id === lotId)!;
+      expect(row.budget).toBe(300);
+      expect(row.actual).toBe(350); // el mismo total que E1
+      expect(row.variance).toBe(50); // sobregiro
+      expect(row.over_budget).toBe(true);
+    });
+
+    it('un centro presupuestado sin gasto todavía se ve (no desaparece), bajo presupuesto', async () => {
+      const res = await svc.budgetVsActual({ budgetId, level: 'lot' });
+      const row = res.rows.find((r) => r.reference_id === otherLotId)!;
+      expect(row.budget).toBe(500);
+      expect(row.actual).toBe(0);
+      expect(row.variance).toBe(-500);
+      expect(row.over_budget).toBe(false);
+    });
+
+    it('el gasto sin centro de costo no se pierde: suma en unbudgeted_actual', async () => {
+      const res = await svc.budgetVsActual({ budgetId, level: 'lot' });
+      // El dairyLot tiene gasto (300) pero ningún centro de costo asignado.
+      expect(res.totals.unbudgeted_actual).toBeGreaterThan(0);
+    });
+
+    it('los totales resumen el año: presupuestado, real y desvío global', async () => {
+      const res = await svc.budgetVsActual({ budgetId, level: 'lot' });
+      expect(res.totals.budget).toBe(800); // 300 + 500
+      expect(res.totals.actual).toBe(350); // solo los centros presupuestados
+      expect(res.totals.variance).toBe(-450);
+    });
+
+    it('acotar el rango a un mes recorta el presupuesto a ese mes (los dos lados miran la misma ventana)', async () => {
+      // Solo febrero: entra la línea del lote costeado (300), no la de marzo (500).
+      const res = await svc.budgetVsActual({ budgetId, level: 'lot', from: '2030-02-01', to: '2030-02-28' });
+      expect(res.totals.budget).toBe(300);
+      expect(res.rows.find((r) => r.reference_id === otherLotId)).toBeUndefined();
+    });
+
+    it('ordena por peor desvío primero (lo que más se pasó va arriba)', async () => {
+      const res = await svc.budgetVsActual({ budgetId, level: 'lot' });
+      const vs = res.rows.map((r) => r.variance);
+      expect([...vs].sort((a, b) => b - a)).toEqual(vs);
+    });
+
+    it('rechaza un presupuesto inexistente y un nivel inválido', async () => {
+      await expect(svc.budgetVsActual({ budgetId: '00000000-0000-0000-0000-000000000000', level: 'lot' })).rejects.toThrow();
+      await expect(svc.budgetVsActual({ budgetId, level: 'activity' as never })).rejects.toThrow();
     });
   });
 });

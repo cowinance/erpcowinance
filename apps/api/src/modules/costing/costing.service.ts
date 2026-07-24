@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { computeMargin, computeUnitCost } from '@cowinance/domain';
+import { computeBudgetVariance, computeMargin, computeUnitCost } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { SALE_COUNTS } from '../commerce/sales.service';
 
@@ -155,6 +155,107 @@ export class CostingService {
     ];
     return { from, to, activities };
   }
+
+  /**
+   * REAL vs PRESUPUESTO por centro (E4) — para que el desvío se vea ANTES de fin de ejercicio, no
+   * cuando ya no se puede corregir. El puente es `cost_centers`: una línea de presupuesto se imputa
+   * a un centro (`budget_lines.cost_center_id`) y ese centro apunta a la misma entidad (lote/animal/
+   * cultivo/máquina) que E1 costea, así que se comparan lado a lado con `computeBudgetVariance`
+   * (la misma regla de dominio que ya usa Finanzas, sin duplicarla).
+   *
+   * EN QUÉ SE DIFERENCIA DE FINANZAS (BG-2): aquel enfrenta el presupuesto contra el LIBRO MAYOR;
+   * este, contra los HECHOS OPERATIVOS —lo que este módulo eligió leer en E1—. Son dos vigilancias
+   * distintas y ambas válidas: la contable (lo asentado) y la de gestión (lo que pasó en el campo,
+   * que suele estar más al día). El costo operativo es siempre gasto, así que no hace falta
+   * normalizar por tipo de cuenta: desvío positivo = sobregiro.
+   *
+   * Rango por defecto = el año fiscal del presupuesto. `over_budget` marca lo que ya se pasó.
+   */
+  async budgetVsActual(params: { budgetId: string; level?: CostLevel; from?: string; to?: string }) {
+    const budgetId = String(params.budgetId ?? '').trim();
+    if (!budgetId) throw new BadRequestException({ code: 'costing.missing_budget', title: 'budgetId es obligatorio' });
+    const level = params.level ?? 'lot';
+    if (!LEVELS.includes(level))
+      throw new BadRequestException({ code: 'costing.invalid_level', title: `Nivel inválido: ${level}. Válidos: ${LEVELS.join(', ')}` });
+
+    const t = this.db.tenant;
+    const budget = await this.db.query<{ fiscal_year: number; name: string }>(
+      `SELECT fiscal_year, name FROM budgets WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+      [budgetId, t],
+    );
+    if (budget.length === 0) throw new BadRequestException({ code: 'costing.budget_not_found', title: 'Presupuesto no encontrado' });
+    const fy = budget[0].fiscal_year;
+
+    // Default: el año fiscal completo. Si el rango cae dentro del año, se acota también el mes de las
+    // líneas presupuestarias, para que los dos lados miren la misma ventana.
+    const from = params.from ?? `${fy}-01-01`;
+    const to = params.to ?? `${fy}-12-31`;
+    const { from: f, to: tt } = this.range({ from, to });
+    const fromMonth = new Date(f).getUTCFullYear() === fy ? new Date(f).getUTCMonth() + 1 : 1;
+    const toMonth = new Date(tt).getUTCFullYear() === fy ? new Date(tt).getUTCMonth() + 1 : 12;
+
+    const [costs, budgetRows] = await Promise.all([
+      this.costsByCenter({ level, from: f, to: tt }),
+      this.db.query<any>(CostingService.BUDGET_BY_CC_SQL, [t, budgetId, level, fromMonth, toMonth]),
+    ]);
+
+    // Anclado en el CENTRO DE COSTO: es la unidad en la que se presupuesta. Un centro con
+    // presupuesto y sin gasto (todavía no arrancó) tiene que verse; un gasto sin centro asignado no
+    // es comparable —no hay contra qué— y se agrega aparte como "gasto no presupuestado", que es un
+    // aviso en sí mismo.
+    const byCc = new Map<string, { cost_center_id: string; reference_id: string | null; name: string; budget: number; actual: number }>();
+    for (const b of budgetRows)
+      byCc.set(b.cost_center_id, { cost_center_id: b.cost_center_id, reference_id: b.reference_id, name: b.name, budget: +b.budget, actual: 0 });
+
+    let unbudgeted = 0;
+    for (const c of costs.rows) {
+      if (c.cost_center_id && byCc.has(c.cost_center_id)) byCc.get(c.cost_center_id)!.actual = c.total;
+      else if (c.total > 0) unbudgeted += c.total;
+    }
+
+    const rows = [...byCc.values()].map((r) => {
+      const { variance, variance_pct } = computeBudgetVariance(r.budget, r.actual);
+      return {
+        cost_center_id: r.cost_center_id,
+        reference_id: r.reference_id,
+        name: r.name,
+        budget: +r.budget.toFixed(2),
+        actual: +r.actual.toFixed(2),
+        variance,
+        variance_pct,
+        over_budget: variance > 0,
+      };
+    });
+    // Peor desvío primero: lo que más se pasó es lo que hay que mirar hoy.
+    rows.sort((a, b) => b.variance - a.variance);
+
+    const totBudget = rows.reduce((a, r) => a + r.budget, 0);
+    const totActual = rows.reduce((a, r) => a + r.actual, 0);
+    return {
+      budget_id: budgetId,
+      budget_name: budget[0].name,
+      fiscal_year: fy,
+      level,
+      from: f,
+      to: tt,
+      rows,
+      totals: {
+        budget: +totBudget.toFixed(2),
+        actual: +totActual.toFixed(2),
+        ...computeBudgetVariance(totBudget, totActual),
+        unbudgeted_actual: +unbudgeted.toFixed(2),
+      },
+    };
+  }
+
+  /** Presupuesto agregado por centro de costo del nivel pedido, dentro de la ventana de meses. */
+  private static readonly BUDGET_BY_CC_SQL = `
+    SELECT bl.cost_center_id, cc.reference_id, cc.name, sum(bl.amount)::float AS budget
+    FROM budget_lines bl
+    JOIN cost_centers cc ON cc.id = bl.cost_center_id AND cc.tenant_id = $1 AND cc.deleted_at IS NULL AND cc.level = $3
+    WHERE bl.tenant_id = $1 AND bl.budget_id = $2 AND bl.deleted_at IS NULL
+      AND bl.month BETWEEN $4 AND $5
+    GROUP BY bl.cost_center_id, cc.reference_id, cc.name`;
 
   /**
    * RENTABILIDAD (E3) — cierra el circuito: ingresos − costos = margen, por lote, por animal o por

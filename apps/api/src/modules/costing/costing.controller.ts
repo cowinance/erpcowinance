@@ -23,4 +23,10 @@ export class CostingController {
   profitability(@Query('level') level?: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.costing.profitability({ level: level as ProfitLevel | undefined, from, to });
   }
+
+  /** Real vs presupuesto por centro de costo: desvío antes de fin de ejercicio (E4). */
+  @Get('budget-vs-actual')
+  budgetVsActual(@Query('budget_id') budgetId?: string, @Query('level') level?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.costing.budgetVsActual({ budgetId: budgetId ?? '', level: level as CostLevel | undefined, from, to });
+  }
 }
