@@ -93,6 +93,8 @@ export interface TaskRow {
   priority: string;
   related_type: string | null;
   related_id: string | null;
+  /** Responsable (sincroniza vía TASK_SYNC_FIELDS). Permite filtrar «asignadas a mí» offline. */
+  assigned_to: string | null;
 }
 
 export interface LocalPregnancy {
@@ -125,6 +127,8 @@ interface SyncCtx {
   errorMsg?: string;
   userName?: string;
   userEmail?: string;
+  /** Id del usuario logueado: filtra «asignadas a mí» sin red. */
+  userId?: string;
   /**
    * Fetch autenticado (Bearer + rotación de refresh + 401→login). Expuesto para
    * que la capa de cuenta (AccountContext) reutilice el MISMO mecanismo de auth
@@ -154,6 +158,14 @@ interface SyncCtx {
   captureTaskCreate: (title: string, opts?: { dueDate?: string | null; priority?: string }) => void;
   /** Completa una tarea offline (put status='done' + completed_at del device). */
   captureTaskComplete: (taskId: string) => void;
+  /** Inicia una tarea offline (put status='in_progress'). */
+  captureTaskStart: (taskId: string) => void;
+  /** Cancela una tarea offline (put status='canceled'). */
+  captureTaskCancel: (taskId: string) => void;
+  /** Reprograma offline (put due_date, sin cambio de estado). `null` = sin fecha. */
+  captureTaskReschedule: (taskId: string, dueDate: string | null) => void;
+  /** Asigna/desasigna responsable offline (put assigned_to). `null` = desasignar. */
+  captureTaskAssign: (taskId: string, assignedTo: string | null) => void;
   /** Agenda diaria cacheada (P4-2), usable offline; `agendaAt` = cuándo se refrescó. */
   agenda: () => AgendaItem[];
   agendaAt?: string;
@@ -647,6 +659,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       errorMsg,
       userName: metaRef.current?.userName,
       userEmail: metaRef.current?.userEmail,
+      userId: metaRef.current?.userId,
       authFetch,
       login,
       logout,
@@ -754,6 +767,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
             priority: String(f.priority ?? 'normal'),
             related_type: (f.related_type as string) ?? null,
             related_id: (f.related_id as string) ?? null,
+            assigned_to: (f.assigned_to as string) ?? null,
           });
         }
         return list;
@@ -1081,6 +1095,44 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const d = deviceRef.current;
         if (!d) return;
         d.setFields('tasks', taskId, { status: 'done', completed_at: new Date().toISOString() });
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      // Paridad móvil de tareas: el TaskSyncHandler acepta estos puts offline (status /
+      // due_date-solo / assigned_to-solo) y los aplica con la regla única del TaskService.
+      captureTaskStart: (taskId: string) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        d.setFields('tasks', taskId, { status: 'in_progress' });
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      captureTaskCancel: (taskId: string) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        d.setFields('tasks', taskId, { status: 'canceled' });
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      captureTaskReschedule: (taskId: string, dueDate: string | null) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        d.setFields('tasks', taskId, { due_date: dueDate }); // sin status → el handler reprograma
+        d.commit();
+        bump();
+        scheduleSync();
+      },
+
+      captureTaskAssign: (taskId: string, assignedTo: string | null) => {
+        const d = deviceRef.current;
+        if (!d) return;
+        d.setFields('tasks', taskId, { assigned_to: assignedTo }); // sin status/due_date → asigna
         d.commit();
         bump();
         scheduleSync();

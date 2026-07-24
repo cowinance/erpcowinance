@@ -161,4 +161,27 @@ describe('TaskSyncHandler · integración', () => {
     const due = (await db.query<any>(`SELECT due_date::text AS d FROM tasks WHERE id=$1`, [id]))[0].d;
     expect(due).toContain('2026-09-10');
   });
+
+  it('asignar offline: put solo con assigned_to → asigna; y null desasigna (paridad móvil)', async () => {
+    const userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
+    const id = randomUUID();
+    await apply(put(id, { title: 'Asignar por sync' }));
+
+    const assigned = await apply(put(id, { assigned_to: userId }));
+    expect(assigned).toEqual([]);
+    expect((await db.query<any>(`SELECT assigned_to FROM tasks WHERE id=$1`, [id]))[0].assigned_to).toBe(userId);
+
+    const unassigned = await apply(put(id, { assigned_to: null }));
+    expect(unassigned).toEqual([]);
+    expect((await db.query<any>(`SELECT assigned_to FROM tasks WHERE id=$1`, [id]))[0].assigned_to).toBeNull();
+  });
+
+  it('asignar offline a un usuario inexistente → conflicto task.invalid_assignee (no 500)', async () => {
+    const id = randomUUID();
+    await apply(put(id, { title: 'Asignar inválido' }));
+    const conflicts = await apply(put(id, { assigned_to: randomUUID() }));
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].detail).toContain('task.invalid_assignee');
+    expect((await db.query<any>(`SELECT assigned_to FROM tasks WHERE id=$1`, [id]))[0].assigned_to).toBeNull();
+  });
 });

@@ -23,7 +23,12 @@ import { TaskService, TaskPriority } from './task.service';
  *
  * Vive en `tasks/` (ADR-0008), se auto-registra en el `SyncHandlerRegistry` al arrancar.
  */
-const DOMAIN_REJECTIONS = new Set(['task.missing_title', 'task.invalid_transition', 'task.not_found']);
+const DOMAIN_REJECTIONS = new Set([
+  'task.missing_title',
+  'task.invalid_transition',
+  'task.not_found',
+  'task.invalid_assignee', // asignar offline a un usuario que no existe/no es del tenant → conflicto
+]);
 const PRIORITIES = new Set<TaskPriority>(['low', 'normal', 'high', 'urgent']);
 
 @Injectable()
@@ -87,6 +92,14 @@ export class TaskSyncHandler implements SyncHandler, OnModuleInit {
         await this.tasks.rescheduleTask(
           q,
           { taskId: op.rowId, dueDate: (fields['due_date'] as string | null) ?? null },
+          { origin: 'sync', emitServerOrigin: false, hlc: op.hlc, actorUserId: this.db.user },
+        );
+      } else if (fields['assigned_to'] !== undefined && fields['status'] === undefined && fields['due_date'] === undefined) {
+        // ASIGNAR offline (paridad móvil): solo cambia el responsable. `null` = desasignar.
+        // La regla única valida que el usuario pertenezca al tenant (assignTask).
+        await this.tasks.assignTask(
+          q,
+          { taskId: op.rowId, assignedTo: (fields['assigned_to'] as string | null) ?? null },
           { origin: 'sync', emitServerOrigin: false, hlc: op.hlc, actorUserId: this.db.user },
         );
       } else {

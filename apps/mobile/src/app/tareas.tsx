@@ -1,9 +1,12 @@
 /**
- * Pantalla de Tareas (P6-3.b): lista las tareas pendientes del store LOCAL (bootstrap +
- * puts de la sesión), 100% offline, agrupadas por urgencia. Permite crear (put optimista)
- * y completar (put status='done' + completed_at del device). Ruta stack `/tareas`.
+ * Pantalla de Tareas (P6-3.b + paridad móvil, auditoría Fase 2): tareas del store LOCAL
+ * (bootstrap + puts de la sesión), 100% OFFLINE, agrupadas por urgencia. Permite crear,
+ * completar, INICIAR (pending→in_progress), REPROGRAMAR (presets de fecha), ASIGNARME/quitarme
+ * y CANCELAR — todo como puts que el TaskSyncHandler aplica con la regla única del TaskService.
  *
- * Cancelar es acción de oficina (web) — el handler no acepta cancelar del device en P6.
+ * Sin date-picker nativo a propósito: presets (Hoy / Mañana / +7 d / Sin fecha) son más rápidos
+ * con guantes y evitan sumar una dependencia. Asignar en móvil = a MÍ (no hay lista de usuarios
+ * local); la asignación a terceros vive en la web.
  */
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -40,29 +43,46 @@ function fmtDate(d: string | null): string {
   return new Date(d.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
 }
 
+/** Presets de reprogramación (offset en días desde hoy; null = sin fecha). */
+const RESCHEDULE: { label: string; days: number | null }[] = [
+  { label: 'Hoy', days: 0 },
+  { label: 'Mañana', days: 1 },
+  { label: '+7 d', days: 7 },
+  { label: 'Sin fecha', days: null },
+];
+const dateIn = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
 export default function TareasScreen() {
   const sync = useSync();
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState('normal');
+  const [mineOnly, setMineOnly] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // fuerza re-lectura de sync.tasks() tras cada acción
 
+  const refresh = () => setTick((n) => n + 1);
   const all = sync.tasks();
-  const pending = all.filter((t) => t.status === 'pending');
+  const myId = sync.userId;
+  // Abiertas = pendientes + en curso (el estado in_progress llegó con la mejora de Tareas).
+  const open = all.filter((t) => t.status === 'pending' || t.status === 'in_progress');
+  const visible = mineOnly && myId ? open.filter((t) => t.assigned_to === myId) : open;
   const doneSession = all.filter((t) => t.status === 'done');
   const today = new Date().toISOString().slice(0, 10);
+  const mineCount = myId ? open.filter((t) => t.assigned_to === myId).length : 0;
 
   function create() {
     if (!title.trim()) return;
     sync.captureTaskCreate(title, { priority });
     setTitle('');
     setPriority('normal');
-    setTick((n) => n + 1);
+    refresh();
   }
 
-  function complete(t: TaskRow) {
-    sync.captureTaskComplete(t.id);
-    setTick((n) => n + 1);
-  }
+  const act = (fn: () => void) => {
+    fn();
+    setExpanded(null);
+    refresh();
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }} key={tick}>
@@ -77,6 +97,23 @@ export default function TareasScreen() {
           )}
         </View>
         <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Tareas</Text>
+
+        {/* Filtro: todas / asignadas a mí */}
+        {myId ? (
+          <View style={{ flexDirection: 'row', gap: T.space['2'] }}>
+            {[
+              { label: `Todas (${open.length})`, on: false },
+              { label: `Asignadas a mí (${mineCount})`, on: true },
+            ].map((f) => {
+              const sel = mineOnly === f.on;
+              return (
+                <Pressable key={f.label} onPress={() => setMineOnly(f.on)} style={[styles.chip, sel && styles.chipSel]}>
+                  <Text style={[styles.chipText, sel && { color: T.brand700 }]}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* Crear */}
         <View style={{ gap: T.space['2'] }}>
@@ -95,13 +132,15 @@ export default function TareasScreen() {
           <Button label="Agregar tarea" onPress={create} disabled={!title.trim()} />
         </View>
 
-        {/* Pendientes */}
-        <Text style={styles.label}>Pendientes</Text>
-        {pending.length === 0 ? (
-          <Text style={{ fontSize: T.type.body, color: T.ink3, textAlign: 'center', paddingVertical: T.space['4'] }}>Sin tareas pendientes.</Text>
+        {/* Abiertas */}
+        <Text style={styles.label}>{mineOnly ? 'Asignadas a mí' : 'Abiertas'}</Text>
+        {visible.length === 0 ? (
+          <Text style={{ fontSize: T.type.body, color: T.ink3, textAlign: 'center', paddingVertical: T.space['4'] }}>
+            {mineOnly ? 'Sin tareas asignadas a vos.' : 'Sin tareas pendientes.'}
+          </Text>
         ) : (
           GROUPS.map((g) => {
-            const list = pending.filter((t) => urgency(t.due_date, today) === g.key);
+            const list = visible.filter((t) => urgency(t.due_date, today) === g.key);
             if (!list.length) return null;
             return (
               <View key={g.key} style={{ gap: T.space['1.5'] }}>
@@ -109,17 +148,71 @@ export default function TareasScreen() {
                   {g.label} · {list.length}
                 </Text>
                 {list.map((t) => {
-                  const meta = [t.type === 'health' ? 'Sanidad' : null, t.priority !== 'normal' ? PRIORITIES.find(([v]) => v === t.priority)?.[1] : null, t.due_date ? fmtDate(t.due_date) : null].filter(Boolean);
+                  const meta = [
+                    t.type === 'health' ? 'Sanidad' : null,
+                    t.priority !== 'normal' ? PRIORITIES.find(([v]) => v === t.priority)?.[1] : null,
+                    t.due_date ? fmtDate(t.due_date) : null,
+                    t.assigned_to && t.assigned_to === myId ? 'mía' : null,
+                  ].filter(Boolean);
+                  const isOpen = expanded === t.id;
                   return (
-                    <View key={t.id} style={styles.item}>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={styles.itemTitle} numberOfLines={2}>{t.title}</Text>
-                        {meta.length > 0 && <Text style={styles.itemMeta}>{meta.join(' · ')}</Text>}
+                    <View key={t.id} style={styles.card}>
+                      <View style={styles.item}>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1.5'] }}>
+                            <Text style={styles.itemTitle} numberOfLines={2}>{t.title}</Text>
+                            {t.status === 'in_progress' && (
+                              <Text style={styles.badge}>En curso</Text>
+                            )}
+                          </View>
+                          {meta.length > 0 && <Text style={styles.itemMeta}>{meta.join(' · ')}</Text>}
+                        </View>
+                        <Pressable onPress={() => act(() => sync.captureTaskComplete(t.id))} style={styles.completeBtn} hitSlop={6}>
+                          <Ionicons name="checkmark" size={16} color={T.success} />
+                          <Text style={{ fontSize: T.type.label, fontWeight: '600', color: T.success }}>Completar</Text>
+                        </Pressable>
+                        <Pressable onPress={() => setExpanded(isOpen ? null : t.id)} hitSlop={8} style={{ paddingHorizontal: T.space['1'] }}>
+                          <Ionicons name={isOpen ? 'chevron-up' : 'ellipsis-horizontal'} size={18} color={T.ink3} />
+                        </Pressable>
                       </View>
-                      <Pressable onPress={() => complete(t)} style={styles.completeBtn} hitSlop={6}>
-                        <Ionicons name="checkmark" size={16} color={T.success} />
-                        <Text style={{ fontSize: T.type.label, fontWeight: '600', color: T.success }}>Completar</Text>
-                      </Pressable>
+
+                      {isOpen && (
+                        <View style={styles.actions}>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
+                            {t.status === 'pending' && (
+                              <Pressable onPress={() => act(() => sync.captureTaskStart(t.id))} style={styles.actionChip}>
+                                <Ionicons name="play" size={13} color={T.brand700} />
+                                <Text style={styles.actionText}>Iniciar</Text>
+                              </Pressable>
+                            )}
+                            {myId && (
+                              <Pressable
+                                onPress={() => act(() => sync.captureTaskAssign(t.id, t.assigned_to === myId ? null : myId))}
+                                style={styles.actionChip}
+                              >
+                                <Ionicons name="person" size={13} color={T.brand700} />
+                                <Text style={styles.actionText}>{t.assigned_to === myId ? 'Quitarme' : 'Asignarme'}</Text>
+                              </Pressable>
+                            )}
+                            <Pressable onPress={() => act(() => sync.captureTaskCancel(t.id))} style={styles.actionChip}>
+                              <Ionicons name="close" size={13} color={T.danger} />
+                              <Text style={[styles.actionText, { color: T.danger }]}>Cancelar</Text>
+                            </Pressable>
+                          </View>
+                          <Text style={styles.reschedLabel}>Reprogramar</Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
+                            {RESCHEDULE.map((r) => (
+                              <Pressable
+                                key={r.label}
+                                onPress={() => act(() => sync.captureTaskReschedule(t.id, r.days === null ? null : dateIn(r.days)))}
+                                style={styles.actionChip}
+                              >
+                                <Text style={styles.actionText}>{r.label}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        </View>
+                      )}
                     </View>
                   );
                 })}
@@ -161,18 +254,37 @@ const styles = StyleSheet.create({
   chip: { borderWidth: 1, borderColor: T.borderStrong, borderRadius: T.radiusSm, paddingHorizontal: T.space['3'], paddingVertical: T.space['2'] },
   chipSel: { borderColor: T.brand700, backgroundColor: T.brand100 },
   chipText: { fontSize: T.type.body, fontWeight: '600', color: T.ink2 },
+  card: { borderWidth: 1, borderColor: T.borderSubtle, borderRadius: T.radiusSm, backgroundColor: T.sunken, overflow: 'hidden' },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: T.space['3'],
-    borderWidth: 1,
-    borderColor: T.borderSubtle,
-    borderRadius: T.radiusSm,
-    backgroundColor: T.sunken,
+    gap: T.space['2'],
     paddingHorizontal: T.space['3'],
     paddingVertical: T.space['2.5'],
   },
-  itemTitle: { fontSize: T.type.body, fontWeight: '600', color: T.ink },
+  itemTitle: { fontSize: T.type.body, fontWeight: '600', color: T.ink, flexShrink: 1 },
   itemMeta: { fontSize: T.type.label, color: T.ink3, marginTop: T.space['0.5'] },
-  completeBtn: { flexDirection: 'row', alignItems: 'center', gap: T.space['1'], paddingHorizontal: T.space['2'], paddingVertical: T.space['1'] },
+  badge: { fontSize: T.type.caption, fontWeight: '700', color: T.info },
+  completeBtn: { flexDirection: 'row', alignItems: 'center', gap: T.space['1'], paddingHorizontal: T.space['1'], paddingVertical: T.space['1'] },
+  actions: {
+    gap: T.space['2'],
+    paddingHorizontal: T.space['3'],
+    paddingBottom: T.space['3'],
+    paddingTop: T.space['1'],
+    borderTopWidth: 1,
+    borderTopColor: T.borderSubtle,
+  },
+  actionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: T.space['1'],
+    borderWidth: 1,
+    borderColor: T.borderStrong,
+    borderRadius: T.radiusSm,
+    paddingHorizontal: T.space['2.5'],
+    paddingVertical: T.space['1.5'],
+    backgroundColor: T.surface,
+  },
+  actionText: { fontSize: T.type.label, fontWeight: '600', color: T.ink2 },
+  reschedLabel: { fontSize: T.type.caption, fontWeight: '600', color: T.ink3, textTransform: 'uppercase', letterSpacing: 0.5 },
 });
