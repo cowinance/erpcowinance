@@ -30,3 +30,5 @@ export * from './documents';
 export * from './geo';
 // Hato — lotes/rodeos: validación de grupo de manejo (B1).
 export * from './herd';
+// Costos — costo unitario por actividad, regla única de división (G2).
+export * from './costing';

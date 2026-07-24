@@ -426,7 +426,9 @@
       "Bash(grep -E \"^  [a-z0-9-]+:$\" .github/workflows/ci.yml)",
       "Bash(python3 -c \"import json;d=json.load\\(open\\('package.json'\\)\\);print\\(' ',[k for k in d['scripts'] if k.startswith\\('verify'\\) or k=='audit:arch' or k.startswith\\('e2e'\\)]\\)\")",
       "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"machinery\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
-      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"paddocks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)"
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"paddocks\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"lots\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)",
+      "Bash(awk '/CREATE TABLE \\(IF NOT EXISTS \\)?\"weighings\" \\\\\\(/,/^\\\\\\);/' packages/db/cowinance_schema.sql)"
     ]
   }
 }

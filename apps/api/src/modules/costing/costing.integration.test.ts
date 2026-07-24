@@ -24,6 +24,7 @@ describe('costing — costos por centro', () => {
   let animalId: string;
   let cropId: string;
   let machineryId: string;
+  let dairyLotId: string;
 
   // Todos los hechos "dentro de rango" caen en febrero de 2030; los de control, en 2029.
   const IN = '2030-02-10';
@@ -51,7 +52,7 @@ describe('costing — costos por centro', () => {
     );
     const paddockId = await one(`INSERT INTO paddocks (tenant_id, farm_id, name) VALUES ($1,$2,'Potrero Maíz') RETURNING id`, [tenantId, farmId]);
     cropId = await one(
-      `INSERT INTO crops (tenant_id, paddock_id, crop_type, variety, planting_date) VALUES ($1,$2,'maiz','DK72','2030-01-05') RETURNING id`,
+      `INSERT INTO crops (tenant_id, paddock_id, crop_type, variety, planting_date, area_ha) VALUES ($1,$2,'maiz','DK72','2030-01-05',10) RETURNING id`,
       [tenantId, paddockId],
     );
     machineryId = await one(`INSERT INTO machinery (tenant_id, farm_id, name, type) VALUES ($1,$2,'Tractor 1','tractor') RETURNING id`, [tenantId, farmId]);
@@ -76,6 +77,27 @@ describe('costing — costos por centro', () => {
     // MAQUINARIA: combustible 400 + mantenimiento 60 en rango.
     await db.query(`INSERT INTO fuel_logs (tenant_id, machinery_id, fueled_at, liters, total_cost) VALUES ($1,$2,$3,120,400)`, [tenantId, machineryId, IN]);
     await db.query(`INSERT INTO maintenance_records (tenant_id, machinery_id, type, performed_at, cost) VALUES ($1,$2,'preventive',$3,60)`, [tenantId, machineryId, IN]);
+
+    // ── E2 · producción, para que los costos se vuelvan unitarios ──────────────────────────────
+    // CARNE: el animal pasa de 400 a 460 kg dentro del rango → 60 kg producidos.
+    await db.query(`INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg) VALUES ($1,$2,'2030-01-15',400),($1,$2,'2030-06-15',460)`, [tenantId, animalId]);
+    // LECHE: lote 'dairy' aparte, con su propio costo (90 sanidad + 210 ración = 300) y 200 litros.
+    dairyLotId = await one(`INSERT INTO lots (tenant_id, farm_id, name, purpose) VALUES ($1,$2,'Tambo','dairy') RETURNING id`, [tenantId, farmId]);
+    const cowId = await one(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, sex, current_lot_id, status) VALUES ($1,$2,$3,'F',$4,'active') RETURNING id`,
+      [tenantId, farmId, speciesId, dairyLotId],
+    );
+    await db.query(`INSERT INTO treatments (tenant_id, animal_id, applied_at, cost) VALUES ($1,$2,$3,90)`, [tenantId, cowId, IN]);
+    await db.query(`INSERT INTO feed_deliveries (tenant_id, lot_id, delivered_at, quantity_kg, total_cost) VALUES ($1,$2,$3,300,210)`, [tenantId, dairyLotId, IN]);
+    await db.query(
+      `INSERT INTO milk_production_daily (tenant_id, animal_id, production_date, total_liters) VALUES ($1,$2,'2030-02-10',120),($1,$2,'2030-02-11',80)`,
+      [tenantId, cowId],
+    );
+    // AGRICULTURA: 6500 kg cosechados sobre 10 ha (labores por 325 ya sembradas arriba).
+    await db.query(
+      `INSERT INTO harvests (tenant_id, crop_id, harvest_date, yield_quantity, yield_unit, yield_per_ha) VALUES ($1,$2,'2030-05-01',6500,'kg',650)`,
+      [tenantId, cropId],
+    );
   }, 120_000);
 
   afterAll(() => {
@@ -163,5 +185,72 @@ describe('costing — costos por centro', () => {
     expect(await codeOf(svc.costsByCenter({ level: 'finca' as never }))).toBe('costing.invalid_level');
     expect(await codeOf(svc.costsByCenter({ from: '2030-12-31', to: '2030-01-01' }))).toBe('costing.inverted_range');
     expect(await codeOf(svc.costsByCenter({ from: 'ayer' }))).toBe('costing.invalid_range');
+  });
+
+  // ── E2 · costo unitario por actividad ────────────────────────────────────────────────────────
+  // El rango 2030 aísla la fixture: el seed demo genera datos alrededor de hoy, no en 2030.
+
+  describe('costo unitario por actividad (E2)', () => {
+    const activityOf = async (kind: string) =>
+      (await svc.unitCosts(RANGE)).activities.find((a) => a.activity === kind)!;
+
+    it('carne: divide el costo del rodeo por los kilos efectivamente producidos', async () => {
+      const beef = await activityOf('beef');
+      expect(beef.cost).toBe(350); // 150 sanidad + 200 ración (el lote 'dairy' no entra)
+      expect(beef.output).toBe(60); // 460 − 400 dentro del rango
+      expect(beef.unit_cost).toBe(5.83); // 350 / 60
+      expect(beef.output_unit).toBe('kg ganados');
+      expect(beef.note).toBeNull();
+    });
+
+    it('leche: el costo del tambo se separa por el propósito del lote', async () => {
+      const milk = await activityOf('milk');
+      expect(milk.cost).toBe(300); // 90 sanidad + 210 ración, solo del lote 'dairy'
+      expect(milk.output).toBe(200); // 120 + 80 litros
+      expect(milk.unit_cost).toBe(1.5);
+      expect(milk.detail.lots).toBe(1);
+      expect(milk.detail.head).toBe(1);
+    });
+
+    it('agricultura: informa costo por kg cosechado Y por hectárea', async () => {
+      const crop = await activityOf('crop');
+      expect(crop.cost).toBe(325);
+      expect(crop.output).toBe(6500);
+      expect(crop.output_unit).toBe('kg'); // la unidad sale de harvests.yield_unit
+      expect(crop.unit_cost).toBe(0.05); // 325 / 6500
+      expect(crop.cost_per_ha).toBe(32.5); // 325 / 10 ha
+    });
+
+    it('las actividades no se pisan: el costo del tambo no se cuenta también como carne', async () => {
+      const { activities } = await svc.unitCosts(RANGE);
+      const total = activities.reduce((a, x) => a + x.cost, 0);
+      expect(total).toBe(975); // 350 carne + 300 leche + 325 agricultura, sin solapamiento
+    });
+
+    it('un período sin producción no devuelve costo unitario cero, sino null con explicación', async () => {
+      // 2029 tiene costos cargados (los de control) pero ninguna producción medida.
+      const res = await svc.unitCosts({ from: '2029-01-01', to: '2029-12-31' });
+      const beef = res.activities.find((a) => a.activity === 'beef')!;
+      expect(beef.cost).toBeGreaterThan(0);
+      expect(beef.output).toBe(0);
+      expect(beef.unit_cost).toBeNull(); // cero lo ordenaría como el más eficiente
+      expect(beef.note).toMatch(/pesajes/);
+    });
+
+    it('avisa cuando hay leche pero ningún lote marcado como tambo (costo imposible de separar)', async () => {
+      // Se saca el propósito 'dairy': la leche sigue existiendo, el costo ya no se puede aislar.
+      await db.query(`UPDATE lots SET purpose='breeding' WHERE id=$1`, [dairyLotId]);
+      const res = await svc.unitCosts(RANGE);
+      const milk = res.activities.find((a) => a.activity === 'milk')!;
+      expect(milk.output).toBe(200);
+      expect(milk.cost).toBe(0);
+      expect(milk.unit_cost).toBeNull();
+      expect(milk.note).toMatch(/tambo/);
+      await db.query(`UPDATE lots SET purpose='dairy' WHERE id=$1`, [dairyLotId]);
+    });
+
+    it('el rango inválido se rechaza igual que en costos por centro (misma guarda)', async () => {
+      await expect(svc.unitCosts({ from: '2030-12-31', to: '2030-01-01' })).rejects.toThrow();
+    });
   });
 });

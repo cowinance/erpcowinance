@@ -11,4 +11,10 @@ export class CostingController {
   byCenter(@Query('level') level?: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.costing.costsByCenter({ level: level as CostLevel | undefined, from, to });
   }
+
+  /** Costo unitario por actividad: $/kg producido, $/litro y $/kg cosechado + $/ha (E2). */
+  @Get('unit')
+  unit(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.costing.unitCosts({ from, to });
+  }
 }

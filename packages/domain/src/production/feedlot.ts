@@ -1,3 +1,5 @@
+import { computeUnitCost } from '../costing/unit-cost';
+
 /**
  * Métricas de engorde a corral (C2 · feedlot) — DERIVADAS, regla única. Un corral es un lote con
  * `purpose='fattening'`. Sobre los datos ya existentes (consumo de alimento de `feed_deliveries`,
@@ -5,7 +7,8 @@
  * calcula al leer, reusando el GDP como fuente única (ADR-0007).
  *
  * - `conversion`: kg de alimento por kg ganado (kgFeed / kgGained). null si no hubo ganancia.
- * - `costPerKgGained`: costo del kilo ganado (feedCost / kgGained). null si no hubo ganancia.
+ * - `costPerKgGained`: costo del kilo ganado. Delega en `computeUnitCost` (regla única de costo
+ *   unitario, G2): la división y sus guardas viven en un solo lugar. null si no hubo ganancia.
  * - `daysToFinish`: días a terminación = (pesoObjetivo − pesoActual) / GDP. null si falta objetivo,
  *   el GDP no es positivo, o ya se alcanzó el objetivo.
  */
@@ -34,7 +37,7 @@ export function computeFeedlotMetrics(input: FeedlotInput): FeedlotMetrics {
   const gained = Number.isFinite(kgGained) && kgGained > 0;
 
   const conversion = gained && Number.isFinite(feedKg) ? round2(feedKg / kgGained) : null;
-  const costPerKgGained = gained && Number.isFinite(feedCost) ? round2(feedCost / kgGained) : null;
+  const { unitCost: costPerKgGained } = computeUnitCost({ totalCost: feedCost, output: kgGained });
 
   let daysToFinish: number | null = null;
   const target = input.targetWeightKg;
