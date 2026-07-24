@@ -1,0 +1,26 @@
+# PostgreSQL REAL para verificar lo que PGlite no puede: el aislamiento por tenant (RLS).
+#
+# En dev la app corre sobre PGlite, que conecta como SUPERUSUARIO — y un superusuario SALTEA
+# RLS aunque la política exista. O sea: las policies se crean, pero nunca se ejercen. Este
+# compose levanta el Postgres de producción (17 + PostGIS, los tipos geography del DDL) para
+# poder conectarse con un rol NO privilegiado y comprobar que el aislamiento realmente aísla.
+#
+#   docker compose up -d db     # levantar
+#   npm run verify:rls          # cargar esquema + políticas y correr las aserciones
+#   docker compose down -v      # borrar (incluido el volumen)
+services:
+  db:
+    # Misma versión que producción (PG 17 + PostGIS 3.5). Se usa el build multi-arch: la imagen
+    # oficial `postgis/postgis` no publica arm64 y no arranca en Mac con Apple Silicon.
+    image: imresamu/postgis:17-3.5
+    container_name: cowinance-pg
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cowinance
+    ports:
+      - '5434:5432' # 5434 afuera: el 5432 y el 5433 suelen estar tomados por otros proyectos
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d cowinance']
+      interval: 2s
+      timeout: 3s
+      retries: 30

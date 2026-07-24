@@ -93,6 +93,28 @@ npm run rebuild     # clean + build de todo
 Si la web aparece **sin estilos** o el server tira `Cannot find module './NNN.js'` / `/_app`, es el
 cache de Next dev corrompido: `npm run clean:web` y reiniciar. No es un error del código.
 
+## Verificar el aislamiento por tenant (RLS) sobre PostgreSQL real
+
+En dev la app corre sobre PGlite, que conecta como **superusuario** — y un superusuario **saltea
+RLS aunque la política exista**. Es decir: en desarrollo las policies se crean pero nunca se
+ejercen, así que una fuga cross-tenant recién aparecería en producción. Para cerrar ese hueco:
+
+```bash
+docker compose up -d db   # PostgreSQL 17 + PostGIS 3.5 (el stack de producción)
+npm run verify:rls        # carga el DDL, aplica las políticas y ejerce el aislamiento
+docker compose down -v    # al terminar
+```
+
+El script se conecta con un rol **no privilegiado** (`NOSUPERUSER NOBYPASSRLS`, como debe conectar
+la app en prod) y comprueba que: cada tenant ve solo lo suyo, sin `app.tenant_id` no ve **nada**
+(fail-closed), y no puede escribir, modificar ni borrar filas de otro tenant. Aplica las políticas
+desde `apps/api/src/db/rls.ts` —la **misma fuente** que usa el arranque de la app—, así que verifica
+lo que realmente corre, no una copia.
+
+> Complementa al guardarraíl `rls-coverage.guardrail.integration.test.ts` de la suite, que exige
+> que toda tabla con `tenant_id` tenga política o esté exenta a propósito: ese cubre la
+> **cobertura**; este, que el aislamiento **efectivamente aísla**.
+
 ## Configuración por variables de entorno
 
 | Variable | Ámbito | Propósito | Default / ausencia |
