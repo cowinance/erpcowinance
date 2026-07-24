@@ -78,6 +78,21 @@ npm run web    # web en http://localhost:3000
 
 En producción el mismo DDL corre sobre PostgreSQL 17 + PostGIS + TimescaleDB (los tipos `geography` se degradan a `jsonb` solo en dev).
 
+`npm install` compila automáticamente los paquetes internos (`domain`, `sync-core`, `design-tokens`)
+vía su script `prepare`: su `dist/` está gitignoreado, así que sin ese paso un clone fresco no
+resolvería `@cowinance/domain` y compañía.
+
+### Limpiar artefactos
+
+```bash
+npm run clean:web   # borra apps/web/.next
+npm run clean       # además: dist de la API y de los paquetes
+npm run rebuild     # clean + build de todo
+```
+
+Si la web aparece **sin estilos** o el server tira `Cannot find module './NNN.js'` / `/_app`, es el
+cache de Next dev corrompido: `npm run clean:web` y reiniciar. No es un error del código.
+
 ## Configuración por variables de entorno
 
 | Variable | Ámbito | Propósito | Default / ausencia |

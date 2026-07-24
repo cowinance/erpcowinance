@@ -385,7 +385,14 @@
       "Bash(echo \"TESTS_DONE exit=$?\")",
       "Bash(timeout 240 npm run build --workspace @cowinance/web)",
       "Bash(echo \"BUILD exit=$?\")",
-      "Bash(awk '/^CREATE TABLE \"/{t=$3; gsub\\(/\"/,\"\",t\\)} /\"tenant_id\" uuid NOT NULL/{print t}' packages/db/cowinance_schema.sql)"
+      "Bash(awk '/^CREATE TABLE \"/{t=$3; gsub\\(/\"/,\"\",t\\)} /\"tenant_id\" uuid NOT NULL/{print t}' packages/db/cowinance_schema.sql)",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('apps/mobile/package.json'\\)\\);print\\({k:v for k,v in d.get\\('dependencies',{}\\).items\\(\\) if 'cowinance' in k}\\)\")",
+      "Bash(sed -n '/export interface AnimalRow/,/^}/p' apps/mobile/src/sync/SyncContext.tsx)",
+      "Bash(sed -n '/export interface WeighingValidationInput/,/^}/p' packages/domain/src/production/weighing.ts)",
+      "Bash(sed -n '/export interface WeighingValidationResult/,/^}/p' packages/domain/src/production/weighing.ts)",
+      "Bash(python3 -c \"import json;print\\(json.dumps\\(json.load\\(open\\('package.json'\\)\\).get\\('scripts',{}\\),indent=1,ensure_ascii=False\\)\\)\")",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('packages/domain/package.json'\\)\\);print\\(json.dumps\\({k:d.get\\(k\\) for k in ['name','main','types','exports','scripts','files']},indent=1,ensure_ascii=False\\)\\)\")",
+      "Bash(git diff *)"
     ]
   }
 }
