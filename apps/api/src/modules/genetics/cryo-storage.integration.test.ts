@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { CryoStorageService } from './cryo-storage.service';
 import { SemenService } from './semen.service';
+import { StrawsService } from './straws.service';
 
 /**
  * Ubicación criogénica (GT-1).
@@ -29,7 +30,7 @@ describe('cryo storage — termo → canasta → gobelete', () => {
     await db.onModuleInit();
     await db.defaultFarm();
     cryo = new CryoStorageService(db);
-    semen = new SemenService(db);
+    semen = new SemenService(db, new StrawsService(db));
   }, 120_000);
 
   afterAll(() => {
@@ -55,6 +56,15 @@ describe('cryo storage — termo → canasta → gobelete', () => {
 
   it('el código es obligatorio', async () => {
     await expect(cryo.createTank({ name: 'Termo de la sala' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  // El listado y el detalle son el mismo termo mirado desde dos lados: si el conteo solo viniera en
+  // uno, la cabecera del detalle mostraría «undefined canastas».
+  it('el detalle trae el conteo de canastas igual que el listado', async () => {
+    const t: any = await cryo.createTank({ code: 'CONTEO' });
+    expect(((await cryo.getTank(t.id)) as any).canister_count).toBe(0);
+    await cryo.createCanister(t.id, { code: '1' });
+    expect(((await cryo.getTank(t.id)) as any).canister_count).toBe(1);
   });
 
   it('arma el árbol completo: canastas con color y sus gobeletes', async () => {

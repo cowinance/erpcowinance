@@ -14,6 +14,8 @@ interface Embryo {
   stage: string | null;
   production_method: string | null;
   straws_available: number;
+  straws_located: number;
+  straws_unlocated: number;
 }
 interface Animal {
   id: string;
@@ -89,10 +91,18 @@ export function EmbryosManager({ embryos, animals }: { embryos: Embryo[]; animal
         ) : (
           <ul className="divide-y divide-subtle">
             {embryos.map((e) => (
-              <li key={e.id} className="flex items-center justify-between py-2">
-                <div>
+              <li key={e.id} className="flex flex-wrap items-center justify-between gap-y-1 py-2">
+                <div className="min-w-0">
                   <span className="text-body font-medium">{METHODS.find(([c]) => c === e.production_method)?.[1] ?? e.production_method ?? 'Embrión'}</span>
                   {e.stage && <span className="ml-2 text-label text-ink-3">{e.stage}</span>}
+                  {/* Cada embrión de la colecta es una unidad distinguible: hay que poder ir a
+                      buscar EL que se planificó, no uno cualquiera del montón. */}
+                  <a
+                    href={`/genetica/pajuelas?embryo_id=${e.id}`}
+                    className={`ml-2 rounded-md px-1.5 py-0.5 text-caption hover:underline ${e.straws_unlocated > 0 ? 'bg-warning/10 text-warning' : 'text-ink-3'}`}
+                  >
+                    {e.straws_unlocated > 0 ? `${e.straws_unlocated} sin ubicar` : 'ver unidades'}
+                  </a>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" size="sm" disabled={busy || e.straws_available <= 0} onClick={() => call('POST', `/genetics/embryos/${e.id}/adjust`, { delta: -1, reason: 'loss' })} aria-label={`Restar embrión ${e.id.slice(0, 8)}`}>

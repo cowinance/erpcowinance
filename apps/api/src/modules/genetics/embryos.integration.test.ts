@@ -6,6 +6,7 @@ import { DbService } from '../../db/db.service';
 import { EmbryosService } from './embryos.service';
 import { EvaluationsService } from './evaluations.service';
 import { SemenService } from './semen.service';
+import { StrawsService } from './straws.service';
 import { WeaningService } from '../repro/weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { ReproService } from '../repro/repro.service';
@@ -29,9 +30,9 @@ describe('genetics — embriones y evaluaciones', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    embryos = new EmbryosService(db);
+    embryos = new EmbryosService(db, new StrawsService(db));
     evaluations = new EvaluationsService(db);
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db), embryos);
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), embryos, new StrawsService(db));
     hembraId = (await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id=$1 AND sex='F' AND status='active' AND deleted_at IS NULL LIMIT 1`, [db.tenant]))[0].id;
   }, 120_000);
 

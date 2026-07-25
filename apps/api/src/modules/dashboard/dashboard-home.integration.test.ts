@@ -13,6 +13,7 @@ import { HealthService } from '../health/health.service';
 import { ReproService } from '../repro/repro.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { StrawsService } from '../genetics/straws.service';
 
 /**
  * Inicio E1 — endpoint agregado `/dashboard/home`. Verifica que COMPONE los servicios reales
@@ -37,7 +38,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     db = new DbService();
     await db.onModuleInit();
     tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
-    const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any);
+    const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any, new StrawsService(db));
     const alerts = new AlertsService(db, repro as any, new WeatherService(db));
     const health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
     home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);

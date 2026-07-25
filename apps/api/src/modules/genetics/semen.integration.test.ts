@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { SemenService } from './semen.service';
+import { StrawsService } from './straws.service';
 
 /**
  * Integración de partidas de semen (G-1): CRUD, validación de referencias y saldo de pajuelas como
@@ -23,7 +24,7 @@ describe('genetics — semen', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    svc = new SemenService(db);
+    svc = new SemenService(db, new StrawsService(db));
     sireId = (await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id=$1 AND sex='M' AND deleted_at IS NULL LIMIT 1`, [db.tenant]))[0]?.id
       ?? (await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id=$1 AND deleted_at IS NULL LIMIT 1`, [db.tenant]))[0].id;
   }, 120_000);
@@ -65,7 +66,9 @@ describe('genetics — semen', () => {
   it('edita y archiva', async () => {
     const b: any = await svc.create({ batch_code: 'EDIT-1', sire_name_external: 'Y', straws_available: 3 });
     const upd: any = await svc.update(b.id, { canister: 'C9', unit_cost: 12.5 });
-    expect(upd.canister).toBe('C9');
+    // `canister` era la ubicación en texto libre; desde GT-2 la real vive en la pajuela y ésta se
+    // devuelve como dato heredado, que es la pista para el inventario físico del termo.
+    expect(upd.legacy_location).toBe('C9');
     expect(upd.unit_cost).toBe(12.5);
     await svc.remove(b.id);
     await expect(svc.get(b.id)).rejects.toMatchObject({ status: 404 });

@@ -8,6 +8,7 @@ import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { SemenService } from '../genetics/semen.service';
 import { EmbryosService } from '../genetics/embryos.service';
+import { StrawsService } from '../genetics/straws.service';
 
 @Injectable()
 export class ReproService {
@@ -17,6 +18,7 @@ export class ReproService {
     private readonly tasks: TaskService,
     private readonly semen: SemenService,
     private readonly embryos: EmbryosService,
+    private readonly straws: StrawsService,
   ) {}
 
   /**
@@ -126,13 +128,22 @@ export class ReproService {
     // ni el servicio ni el consumo (en una request comparten la misma tx). Móvil/sync aún no lo envía.
     const semenBatchId = method === 'service_ai' && body?.semen_batch_id ? body.semen_batch_id : null;
     const embryoId = method === 'embryo_transfer' && body?.embryo_id ? body.embryo_id : null;
-    if (semenBatchId) await this.semen.adjustStraws(semenBatchId, -1, 'insemination');
-    if (embryoId) await this.embryos.adjustStraws(embryoId, -1, 'transfer');
+    // `straw_id` (GT-2/GT-3): la pajuela CONCRETA. Si viene, se consume ésa —es el plan de servicio,
+    // y también el desvío en el corral cuando el técnico usa otra distinta de la planificada—. Si no
+    // viene, se toma la disponible más antigua y ubicada.
+    const strawId = body?.straw_id ?? null;
+    const consumidas: string[] = [];
+    if (semenBatchId) consumidas.push(...(await this.semen.consumeStraw(semenBatchId, 'insemination', strawId)));
+    if (embryoId) consumidas.push(...(await this.embryos.consumeStraw(embryoId, 'transfer', strawId)));
     const row = await this.db.one<any>(
       `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, technician_id, protocol_id, notes, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING RETURNING id, type, occurred_at`,
       [id, this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.technician_id ?? null, body?.protocol_id ?? null, body?.notes ?? null, this.db.user],
     );
+    // Atar la pajuela al servicio: es lo que responde «¿QUÉ le pusimos a la 001?» con la unidad
+    // concreta y no solo con la partida. Va después del INSERT porque necesita el id del evento, y
+    // es atómico porque toda la request comparte una transacción.
+    if (consumidas.length > 0 && row?.id) await this.straws.linkToEvent(this.db, consumidas, row.id);
     await insertAnimalEvent(
       this.db,
       animalId,
@@ -140,7 +151,7 @@ export class ReproService {
       { method: body.method, sire_id: body?.sire_id ?? null, expected_due: computeExpectedDueDateFromService(new Date(occurredAt)) },
       occurredAt,
     );
-    return { ...row, tag: animal.tag, warnings };
+    return { ...row, tag: animal.tag, warnings, straw_ids: consumidas };
   }
 
   /**

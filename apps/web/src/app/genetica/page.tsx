@@ -14,7 +14,7 @@ export default async function GeneticsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Genética</h1>
-        <p className="mt-0.5 text-body text-ink-3">Partidas de semen (pajuelas). El saldo se ajusta con +/− (una inseminación lo descuenta).</p>
+        <p className="mt-0.5 text-body text-ink-3">Partidas de semen. El saldo es el conteo de sus pajuelas: cada una es una unidad con su ubicación e historia.</p>
       </div>
       <GeneticsNav />
       <SemenManager batches={batches ?? []} animals={animals.filter((a: any) => a.sex === 'M')} />

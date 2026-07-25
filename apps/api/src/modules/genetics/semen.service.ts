@@ -1,36 +1,64 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService, Q } from '../../db/db.service';
+import { StrawsService } from './straws.service';
 
 const ADJUST_REASONS = ['acquisition', 'insemination', 'adjustment', 'loss'];
 
 /**
- * Genética — partidas de semen (G-1): `semen_batches` (pajuelas por toro/lote). El saldo de pajuelas
- * (`straws_available`) es materializado y su ÚNICA mutación pasa por `adjustStraws` (sin negativo);
- * en G-2 la inseminación lo consumirá. Todo por tenant; baja lógica por `deleted_at`.
+ * Genética — partidas de semen (G-1): `semen_batches` (pajuelas por toro/lote).
+ *
+ * Desde GT-2 el saldo YA NO se guarda: `straws_available` era una columna materializada y ahora es
+ * el resultado de contar las pajuelas de `cryo_straws` que siguen disponibles. Un contador y unas
+ * filas serían dos fuentes del mismo número, y un día no coinciden. La partida quedó como lo que
+ * siempre fue —el origen genético y comercial: qué toro, qué colecta, a quién se le compró— y el
+ * stock vive en las unidades.
  */
 @Injectable()
 export class SemenService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly straws: StrawsService,
+  ) {}
 
   async list() {
-    return this.db.query(
-      `SELECT sb.id, sb.batch_code, sb.sire_id, a_tag.value AS sire_tag, sb.sire_name_external, sb.breed_id,
-              sb.supplier_id, sb.straws_available, sb.tank_id, sb.canister, sb.acquired_date, sb.unit_cost::float AS unit_cost
-       FROM semen_batches sb
-       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = sb.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) a_tag ON true
-       WHERE sb.tenant_id=$1 AND sb.deleted_at IS NULL ORDER BY sb.straws_available DESC, sb.batch_code`,
-      [this.db.tenant],
-    );
+    const [filas, saldos] = await Promise.all([
+      this.db.query<any>(
+        `SELECT sb.id, sb.batch_code, sb.sire_id, a_tag.value AS sire_tag, sb.sire_name_external, sb.breed_id,
+                sb.supplier_id, sb.tank_id, sb.canister AS legacy_location, sb.acquired_date, sb.unit_cost::float AS unit_cost
+         FROM semen_batches sb
+         LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = sb.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) a_tag ON true
+         WHERE sb.tenant_id=$1 AND sb.deleted_at IS NULL ORDER BY sb.batch_code`,
+        [this.db.tenant],
+      ),
+      this.straws.countsByOwner('semen_batch_id'),
+    ]);
+    return filas.map((f) => ({ ...f, ...this.saldo(saldos.get(f.id)) }));
   }
 
   async get(id: string) {
-    const b = await this.db.one(
-      `SELECT id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, straws_available, tank_id, canister, acquired_date, unit_cost::float AS unit_cost
+    const b = await this.db.one<any>(
+      `SELECT id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, tank_id,
+              canister AS legacy_location, acquired_date, unit_cost::float AS unit_cost
        FROM semen_batches WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
       [id, this.db.tenant],
     );
     if (!b) throw new NotFoundException({ code: 'genetics.batch_not_found', title: 'Partida de semen no encontrada' });
-    return b;
+    const saldos = await this.straws.countsByOwner('semen_batch_id');
+    return { ...b, ...this.saldo(saldos.get(id)) };
+  }
+
+  /**
+   * `straws_available` se sigue devolviendo con el mismo nombre —lo consumen la web, el móvil y
+   * reproducción— pero ahora es un conteo. Al lado viaja el desglose, que es lo que el contador
+   * nunca pudo decir: cuántas de esas están realmente ubicadas dentro de un termo.
+   */
+  private saldo(c: { available: number; located: number; unlocated: number; used: number } | undefined) {
+    return {
+      straws_available: c?.available ?? 0,
+      straws_located: c?.located ?? 0,
+      straws_unlocated: c?.unlocated ?? 0,
+      straws_used: c?.used ?? 0,
+    };
   }
 
   async create(body: any) {
@@ -42,12 +70,16 @@ export class SemenService {
     await this.requireRef('breeds', body?.breed_id, 'genetics.breed_not_found', 'Raza no encontrada');
     await this.requireRef('suppliers', body?.supplier_id, 'genetics.supplier_not_found', 'Proveedor no encontrado');
     await this.requireRef('storage_tanks', body?.tank_id, 'genetics.tank_not_found', 'Termo no encontrado');
-    return this.db.one(
-      `INSERT INTO semen_batches (tenant_id, sire_id, sire_name_external, breed_id, supplier_id, batch_code, straws_available, tank_id, canister, acquired_date, unit_cost, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       RETURNING id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, straws_available, tank_id, canister, acquired_date, unit_cost::float AS unit_cost`,
-      [this.db.tenant, body?.sire_id ?? null, body?.sire_name_external ?? null, body?.breed_id ?? null, body?.supplier_id ?? null, code, straws, body?.tank_id ?? null, body?.canister ?? null, body?.acquired_date ?? null, body?.unit_cost ?? null, this.db.user],
+    const row = await this.db.one<any>(
+      `INSERT INTO semen_batches (tenant_id, sire_id, sire_name_external, breed_id, supplier_id, batch_code, tank_id, canister, acquired_date, unit_cost, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, tank_id, canister AS legacy_location, acquired_date, unit_cost::float AS unit_cost`,
+      [this.db.tenant, body?.sire_id ?? null, body?.sire_name_external ?? null, body?.breed_id ?? null, body?.supplier_id ?? null, code, body?.tank_id ?? null, body?.canister ?? null, body?.acquired_date ?? null, body?.unit_cost ?? null, this.db.user],
     );
+    // Comprar una partida es comprar pajuelas: se dan de alta como unidades sin ubicar, porque la
+    // caja llegó y todavía nadie abrió el termo para cargarlas.
+    if (straws > 0) await this.straws.createBatch({ semen_batch_id: row!.id }, { quantity: straws });
+    return { ...row, ...this.saldo({ available: straws, located: 0, unlocated: straws, used: 0 }) };
   }
 
   async update(id: string, body: any) {
@@ -77,7 +109,7 @@ export class SemenService {
     params.push(id, this.db.tenant);
     const row = await this.db.one(
       `UPDATE semen_batches SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} AND deleted_at IS NULL
-       RETURNING id, batch_code, sire_id, sire_name_external, straws_available, canister, unit_cost::float AS unit_cost`,
+       RETURNING id, batch_code, sire_id, sire_name_external, canister AS legacy_location, unit_cost::float AS unit_cost`,
       params,
     );
     if (!row) throw new NotFoundException({ code: 'genetics.batch_not_found', title: 'Partida de semen no encontrada' });
@@ -85,24 +117,49 @@ export class SemenService {
   }
 
   /**
-   * ÚNICO punto de mutación del saldo de pajuelas: suma (alta/compra) o resta (consumo). Nunca deja el
-   * saldo negativo (403). En G-2 la inseminación reusa este método con reason='insemination'.
+   * Ajuste por cantidad. Mantiene la firma de siempre —la usan reproducción y los botones +/− de la
+   * web— pero por dentro ya no hay ningún contador que mover: sumar crea unidades sin ubicar y
+   * restar consume las disponibles más antiguas. La regla única del stock se mudó a `StrawsService`.
    */
   async adjustStraws(id: string, delta: number, reason: string) {
     if (!ADJUST_REASONS.includes(reason)) throw new BadRequestException({ code: 'genetics.invalid_reason', title: `reason inválido (${ADJUST_REASONS.join('|')})` });
     if (!Number.isInteger(delta) || delta === 0) throw new BadRequestException({ code: 'genetics.invalid_delta', title: 'delta debe ser un entero distinto de 0' });
-    return this.db.tx(async (q) => this.applyStrawsDelta(q, id, delta));
+    return this.db.tx(async (q) => this.applyStrawsDelta(q, id, delta, reason));
   }
 
-  /** Aplica el delta al saldo con lock de fila y guard de no-negativo. Reutilizable dentro de una tx. */
-  async applyStrawsDelta(q: Q, id: string, delta: number) {
-    const t = this.db.tenant;
-    const b = await q.one<{ id: string; straws_available: number }>(`SELECT id, straws_available FROM semen_batches WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL FOR UPDATE`, [id, t]);
+  /** Reutilizable dentro de una tx. Devuelve el saldo ya recontado, no un número acumulado. */
+  async applyStrawsDelta(q: Q, id: string, delta: number, reason = 'adjustment') {
+    const b = await q.one<{ id: string }>(`SELECT id FROM semen_batches WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
     if (!b) throw new NotFoundException({ code: 'genetics.batch_not_found', title: 'Partida de semen no encontrada' });
-    const next = b.straws_available + delta;
-    if (next < 0) throw new ForbiddenException({ code: 'genetics.insufficient_straws', title: `Pajuelas insuficientes: hay ${b.straws_available}, se intenta retirar ${-delta}.` });
-    await q.query(`UPDATE semen_batches SET straws_available=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3`, [next, id, t]);
-    return { id, straws_available: next };
+
+    let consumed: string[] = [];
+    if (delta > 0) await this.createUnitsInTx(q, id, delta);
+    else consumed = await this.straws.consume(q, { semen_batch_id: id }, -delta, reason);
+
+    const n = await q.one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM cryo_straws WHERE tenant_id=$1 AND semen_batch_id=$2 AND status='stored' AND deleted_at IS NULL`,
+      [this.db.tenant, id],
+    );
+    return { id, straws_available: n?.n ?? 0, consumed_straw_ids: consumed };
+  }
+
+  /**
+   * Consume UNA pajuela para un servicio. Con `strawId` se consume ésa en concreto; sin él, la
+   * disponible más antigua y ya ubicada. Devuelve los ids para poder atarlos al evento después.
+   *
+   * No abre transacción propia: toda la request comparte una, así que si el servicio falla más
+   * adelante el consumo se deshace con él.
+   */
+  async consumeStraw(batchId: string, reason: string, strawId?: string | null): Promise<string[]> {
+    return this.straws.consume(this.db, { semen_batch_id: batchId }, 1, reason, strawId ?? null);
+  }
+
+  private async createUnitsInTx(q: Q, batchId: string, n: number) {
+    await q.query(
+      `INSERT INTO cryo_straws (tenant_id, kind, semen_batch_id, created_by)
+       SELECT $1, 'semen', $2, $3 FROM generate_series(1, $4)`,
+      [this.db.tenant, batchId, this.db.user, n],
+    );
   }
 
   async remove(id: string) {

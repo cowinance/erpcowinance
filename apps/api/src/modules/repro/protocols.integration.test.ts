@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
 import { SemenService } from '../genetics/semen.service';
+import { StrawsService } from '../genetics/straws.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import type { WeaningService } from './weaning.service';
 import type { TaskService } from '../tasks/task.service';
@@ -26,7 +27,7 @@ describe('repro protocolos — CRUD', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db), new EmbryosService(db));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db));
   }, 120_000);
 
   afterAll(() => {

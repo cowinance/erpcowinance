@@ -82,7 +82,10 @@ export class CryoStorageService {
     );
 
     return {
+      // `canister_count` también acá: el listado lo devuelve y la cabecera del detalle lo muestra.
+      // Sin él la pantalla decía «undefined canastas» en cuanto el termo no tenía capacidad fijada.
       ...tank,
+      canister_count: canisters.length,
       canisters: canisters.map((c) => ({ ...c, goblets: goblets.filter((g) => g.canister_id === c.id) })),
     };
   }

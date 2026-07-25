@@ -15,6 +15,11 @@ interface Batch {
   sire_tag: string | null;
   sire_name_external: string | null;
   straws_available: number;
+  /** Desglose de GT-2: cuántas de las disponibles están realmente ubicadas en un termo. */
+  straws_located: number;
+  straws_unlocated: number;
+  /** Ubicación heredada en texto libre (pre GT-2): la pista para el inventario físico. */
+  legacy_location?: string | null;
 }
 interface Animal {
   id: string;
@@ -85,10 +90,26 @@ export function SemenManager({ batches, animals }: { batches: Batch[]; animals: 
         ) : (
           <ul className="divide-y divide-subtle">
             {batches.map((b) => (
-              <li key={b.id} className="flex items-center justify-between py-2">
-                <div>
+              <li key={b.id} className="flex flex-wrap items-center justify-between gap-y-1 py-2">
+                <div className="min-w-0">
                   <span className="text-body font-medium">{b.batch_code}</span>
                   <span className="ml-2 text-label text-ink-3">{b.sire_tag ?? b.sire_name_external ?? '—'}</span>
+                  {/* Lo que el contador nunca pudo decir: cuántas de esas se pueden ir a buscar de
+                      verdad. Un saldo completo con media partida sin ubicar parece sano y no lo es. */}
+                  {b.straws_unlocated > 0 && (
+                    <a
+                      href={`/genetica/pajuelas?semen_batch_id=${b.id}`}
+                      className="ml-2 rounded-md bg-warning/10 px-1.5 py-0.5 text-caption text-warning hover:underline"
+                    >
+                      {b.straws_unlocated} sin ubicar
+                      {b.legacy_location ? ` · antes: ${b.legacy_location}` : ''}
+                    </a>
+                  )}
+                  {b.straws_located > 0 && b.straws_unlocated === 0 && (
+                    <a href={`/genetica/pajuelas?semen_batch_id=${b.id}`} className="ml-2 text-caption text-ink-3 hover:underline">
+                      ubicadas
+                    </a>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" size="sm" disabled={busy || b.straws_available <= 0} onClick={() => call('POST', `/genetics/semen/${b.id}/adjust`, { delta: -1, reason: 'loss' })} aria-label={`Restar pajuela ${b.batch_code}`}>

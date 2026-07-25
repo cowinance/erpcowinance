@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { SemenService } from '../genetics/semen.service';
+import { StrawsService } from '../genetics/straws.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
@@ -32,8 +33,8 @@ describe('repro — consumo de pajuela en inseminación', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    semen = new SemenService(db);
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, semen, new EmbryosService(db));
+    semen = new SemenService(db, new StrawsService(db));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, semen, new EmbryosService(db, new StrawsService(db)), new StrawsService(db));
     hembraId = (await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id=$1 AND sex='F' AND status='active' AND deleted_at IS NULL LIMIT 1`, [db.tenant]))[0].id;
   }, 120_000);
 
