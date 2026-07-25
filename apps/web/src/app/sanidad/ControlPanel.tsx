@@ -102,7 +102,7 @@ export function ControlPanel() {
       <div className="grid grid-cols-2 gap-4 max-lg:grid-cols-1">
         {/* Animales críticos */}
         <div className={cardCls}>
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-subheading font-semibold">
               <AlertTriangle size={16} className="text-warning" /> Animales críticos
             </h2>
@@ -141,7 +141,7 @@ export function ControlPanel() {
 
         {/* Sanidad por lote */}
         <div className={cardCls}>
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-subheading font-semibold">
               <Activity size={16} className="text-brand" /> Sanidad por lote
             </h2>

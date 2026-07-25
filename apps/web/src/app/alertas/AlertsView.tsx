@@ -68,12 +68,12 @@ export function AlertsView() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 rounded-md bg-sunken p-1">
+        <div className="tab-strip flex gap-1 rounded-md bg-sunken p-1">
           {(['active', 'resolved'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`h-8 rounded px-3 text-body font-medium ${
+              className={`h-8 shrink-0 whitespace-nowrap rounded px-3 text-body font-medium ${
                 filter === f ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2 hover:text-ink'
               }`}
             >

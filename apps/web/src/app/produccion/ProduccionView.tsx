@@ -133,10 +133,12 @@ export function ProduccionView({ lots, initial }: { lots: Lot[]; initial: Data }
         ) : (
           <div className="mt-2 space-y-2">
             {prodRows.map((r) => (
-              <div key={r.lote} className="flex items-center gap-3">
-                <div className="w-40 shrink-0 truncate text-body">{r.lote}</div>
+              // En un teléfono los tres bloques (nombre + barra + cifras) suman más que el ancho de
+              // pantalla: se dejan envolver, y las cifras pasan abajo en vez de empujar la página.
+              <div key={r.lote} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="w-40 shrink-0 truncate text-body max-sm:w-full">{r.lote}</div>
                 <Bar pct={(r.pesajes / maxPesajes) * 100} tone="bg-brand" />
-                <div className="w-44 shrink-0 text-right text-label text-ink-3">
+                <div className="w-44 shrink-0 text-right text-label text-ink-3 max-sm:w-full max-sm:text-left">
                   <span className="font-semibold text-ink">{r.gdp_promedio != null ? `${r.gdp_promedio} kg/día` : '—'}</span>
                   {' · '}
                   {r.peso_promedio} kg · {r.animales} anim.

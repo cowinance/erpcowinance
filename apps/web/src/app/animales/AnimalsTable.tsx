@@ -47,7 +47,7 @@ export function AnimalsTable({ animals, lots, categories = [] }: { animals: any[
 
   return (
     <>
-      <div className="overflow-hidden rounded-[10px] border border-subtle bg-surface shadow-[var(--shadow-1)]">
+      <div className="overflow-x-auto rounded-[10px] border border-subtle bg-surface shadow-[var(--shadow-1)]">
         <table className="w-full text-body">
           <thead>
             <tr className="h-8 border-b border-subtle bg-sunken text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">

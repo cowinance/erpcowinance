@@ -73,9 +73,9 @@ export function TamboView({ byDay, tanks, deliveries, quality, animals }: { byDa
 
   return (
     <div className="space-y-4">
-      <nav className="flex gap-1 border-b border-subtle">
+      <nav className="tab-strip flex gap-1 border-b border-subtle">
         {TABS.map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k as any)} className={`-mb-px border-b-2 px-3 py-2 text-body font-medium ${tab === k ? 'border-brand text-brand' : 'border-transparent text-ink-3 hover:text-ink-1'}`}>
+          <button key={k} onClick={() => setTab(k as any)} className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-body font-medium ${tab === k ? 'border-brand text-brand' : 'border-transparent text-ink-3 hover:text-ink-1'}`}>
             {label}
           </button>
         ))}

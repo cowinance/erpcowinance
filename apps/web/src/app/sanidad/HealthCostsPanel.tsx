@@ -43,7 +43,7 @@ export function HealthCostsPanel() {
     <div className="mt-4 grid grid-cols-3 gap-4 max-lg:grid-cols-1">
       {/* Costo sanitario */}
       <div className={cardCls}>
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-subheading font-semibold">
             <DollarSign size={16} className="text-brand" /> Costo sanitario
           </h2>
@@ -92,7 +92,7 @@ export function HealthCostsPanel() {
 
       {/* Alertas de stock */}
       <div className={cardCls}>
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-subheading font-semibold">
             <AlertTriangle size={16} className="text-warning" /> Alertas de stock
           </h2>

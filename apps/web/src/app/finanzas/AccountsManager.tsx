@@ -119,7 +119,7 @@ export function AccountsManager({ accounts, periods, costCenters }: { accounts: 
             <CardTitle>Períodos fiscales</CardTitle>
             <div className="mb-3 space-y-2">
               <Input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Nombre (p.ej. Ejercicio 2030)" aria-label="Nombre del período" />
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Input type="date" value={pStart} onChange={(e) => setPStart(e.target.value)} aria-label="Inicio del período" />
                 <Input type="date" value={pEnd} onChange={(e) => setPEnd(e.target.value)} aria-label="Fin del período" />
               </div>

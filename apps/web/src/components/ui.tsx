@@ -8,9 +8,17 @@ export function Card({ children, className = '' }: { children: React.ReactNode; 
   );
 }
 
+/**
+ * Encabezado de tarjeta: título + acciones opcionales (filtros, totales, botones).
+ *
+ * `flex-wrap` no es decorativo: en un teléfono el título y dos selectores no entran en 375 px, y sin
+ * envolver la fila empujaba la PÁGINA ENTERA a scrollear en horizontal — con lo que las acciones
+ * quedaban fuera de pantalla y sin forma de llegar a ellas. Al envolver, bajan a la línea siguiente
+ * y todo queda alcanzable.
+ */
 export function CardTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="mb-3 flex items-center justify-between">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-subheading font-semibold">{children}</h2>
       {action}
     </div>

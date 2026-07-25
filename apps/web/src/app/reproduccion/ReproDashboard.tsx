@@ -30,7 +30,7 @@ const QUICK = [
 function Bucket({ title, icon: Icon, tone, rows, empty, render }: { title: string; icon: any; tone?: string; rows: any[]; empty: string; render: (r: any) => React.ReactNode }) {
   return (
     <div className={cardCls}>
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-subheading font-semibold"><Icon size={16} className={tone ?? 'text-brand'} /> {title}</h2>
         <span className="text-label text-ink-3">{rows.length}</span>
       </div>
@@ -99,7 +99,7 @@ export function ReproDashboard() {
 
         {/* Protocolos activos */}
         <div className={cardCls}>
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-subheading font-semibold"><ClipboardList size={16} className="text-brand" /> Protocolos activos</h2>
             <Link href="/reproduccion/protocolos" className="text-caption text-brand hover:underline">gestionar</Link>
           </div>

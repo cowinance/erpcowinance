@@ -110,7 +110,7 @@ export default async function Dashboard() {
       ) : (
         <>
           {/* Cabecera */}
-          <div className="mb-5 flex items-end justify-between">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold">
                 {greeting}, {me?.name?.split(' ')[0] ?? ''}

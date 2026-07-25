@@ -68,7 +68,8 @@ export function HerdStatus({ lots }: { lots: { id: string; name: string }[] }) {
     <Card>
       <CardTitle
         action={
-          <div className="flex gap-2">
+          // `flex-wrap`: dos selectores no entran al lado del título en un teléfono.
+          <div className="flex flex-wrap gap-2">
             <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} controlSize="sm" fullWidth={false} aria-label="Filtrar por estado">
               <option value="">Todos los estados</option>
               {Object.entries(STATUS).filter(([k]) => (counts[k] ?? 0) > 0).map(([k, v]) => (

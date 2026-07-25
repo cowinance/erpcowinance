@@ -214,7 +214,7 @@ function CoverageCard({ products }: { products: any[] }) {
 
   return (
     <div className={cardCls}>
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-subheading font-semibold">Cobertura de vacunación</h2>
         <div className="flex gap-2">
           <Select value={by} onChange={(e) => setBy(e.target.value as any)} controlSize="sm" fullWidth={false}>

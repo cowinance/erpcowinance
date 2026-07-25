@@ -62,14 +62,14 @@ export function AnimalTabs({
   return (
     <div>
       {/* Barra de pestañas */}
-      <div className="mb-4 flex gap-1 border-b border-subtle">
+      <div className="mb-4 tab-strip flex gap-1 border-b border-subtle">
         {tabs.map((t) => {
           const badge = t === 'Sanidad' ? healthBadge : t === 'Movimientos' ? movements.length : 0;
           return (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`relative -mb-px border-b-2 px-3 py-2 text-body font-medium ${
+              className={`relative -mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-body font-medium ${
                 tab === t ? 'border-brand text-brand' : 'border-transparent text-ink-2 hover:text-ink'
               }`}
             >

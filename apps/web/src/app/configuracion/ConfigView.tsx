@@ -52,12 +52,12 @@ export function ConfigView({ catalogs, currency, params, flags, rules }: { catal
 
   return (
     <div className="space-y-4">
-      <nav className="flex gap-1 border-b border-subtle">
+      <nav className="tab-strip flex gap-1 border-b border-subtle">
         {TABS.map((t) => (
           <button
             key={t}
             onClick={() => { setTab(t); setError(''); }}
-            className={`-mb-px border-b-2 px-3 py-2 text-body font-medium ${tab === t ? 'border-brand text-brand' : 'border-transparent text-ink-3 hover:text-ink-1'}`}
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-body font-medium ${tab === t ? 'border-brand text-brand' : 'border-transparent text-ink-3 hover:text-ink-1'}`}
           >
             {t}
           </button>

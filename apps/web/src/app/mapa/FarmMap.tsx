@@ -153,7 +153,7 @@ export function FarmMap({ paddocks, lots }: { paddocks: Paddock[]; lots: any[] }
       <div className="col-span-2 rounded-[10px] border border-subtle bg-surface p-3 shadow-[var(--shadow-1)]">
         <div className="mb-2 flex items-center justify-between px-1">
           {mode === 'view' ? (
-            <div className="flex gap-1 rounded-md bg-sunken p-1">
+            <div className="tab-strip flex gap-1 rounded-md bg-sunken p-1">
               {(['cabezas', 'carga'] as Metric[]).map((m) => (
                 <button key={m} onClick={() => setMetric(m)} className={`h-7 rounded px-3 text-label font-medium ${metric === m ? 'bg-surface text-ink shadow-[var(--shadow-1)]' : 'text-ink-2'}`}>
                   {m === 'cabezas' ? 'Ocupación' : 'Carga (cab/ha)'}

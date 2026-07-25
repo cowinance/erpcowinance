@@ -24,7 +24,7 @@ export default async function AnimalsPage({
 
   return (
     <div>
-      <div className="mb-5 flex items-end justify-between">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Animales</h1>
           <p className="mt-0.5 text-body text-ink-3">Vista 360 del hato — buscá, filtrá y abrí la ficha de cada animal</p>

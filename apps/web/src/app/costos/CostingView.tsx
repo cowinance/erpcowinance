@@ -169,14 +169,14 @@ export function CostingView({
         </div>
       </Card>
 
-      <div className="flex gap-1 border-b border-subtle" role="tablist">
+      <div className="tab-strip flex gap-1 border-b border-subtle" role="tablist">
         {TABS.map((t) => (
           <button
             key={t.key}
             role="tab"
             aria-selected={tab === t.key}
             onClick={() => switchTab(t.key)}
-            className={`-mb-px border-b-2 px-3 py-2 text-body font-medium transition-colors ${
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-body font-medium transition-colors ${
               tab === t.key ? 'border-brand text-ink' : 'border-transparent text-ink-3 hover:text-ink'
             }`}
           >

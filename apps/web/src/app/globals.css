@@ -20,3 +20,45 @@ body {
   background: var(--brand-300);
   color: var(--brand-900);
 }
+
+/**
+ * Tira de pestañas / botones segmentados.
+ *
+ * En un teléfono estas tiras no entran: Configuración tiene 9 pestañas y en 375 px se ven 4 — el
+ * resto quedaba FUERA de la pantalla y arrastraba a toda la página a scrollear en horizontal. Acá
+ * deslizan solas, que es el gesto que la persona ya espera en el celular, y la página queda quieta.
+ *
+ * `overflow-y: hidden` es deliberado: sin él, el navegador computa `auto` en el eje vertical al
+ * fijar el horizontal y aparece una barra de scroll fantasma. `padding-bottom: 1px` compensa el
+ * `-mb-px` del subrayado de la pestaña activa, que si no quedaría recortado.
+ */
+.tab-strip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 1px;
+  scrollbar-width: none; /* Firefox */
+  -webkit-overflow-scrolling: touch;
+}
+.tab-strip::-webkit-scrollbar {
+  display: none; /* WebKit: en el celular la barra es superpuesta y acá solo estorba */
+}
+
+/**
+ * Tablas de datos en pantallas angostas.
+ *
+ * Una tabla de 8 columnas no entra en 375 px y no tiene por qué: lo que NO puede pasar es que
+ * arrastre a la página entera a scrollear en horizontal, porque entonces el encabezado, los filtros
+ * y los botones se van de pantalla y no hay forma de volver. Con esto la tabla desliza dentro de su
+ * tarjeta y el resto de la página queda quieto.
+ *
+ * Acotado a `max-width: 767px` a propósito: en escritorio las tablas siguen exactamente igual —
+ * `display: block` cambia cómo resuelven el ancho y no hay razón para arriesgar ese cambio donde el
+ * problema no existe.
+ */
+@media (max-width: 767px) {
+  table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
