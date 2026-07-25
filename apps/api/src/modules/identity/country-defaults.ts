@@ -22,6 +22,13 @@ interface CountryConfig extends CountryDefaults {
 }
 
 const SUPPORTED: Record<string, CountryConfig> = {
+  // Moneda funcional USD a propósito, y no el bolívar: el negocio ganadero venezolano se pacta,
+  // se cobra y se costea en dólares, así que ES la moneda funcional aunque no sea la del país.
+  // El bolívar no desaparece — vive en el COMPROBANTE (tasa BCV + equivalente en Bs, por documento),
+  // que es donde la ley lo exige; ahí es un dato del papel, no la unidad en la que se lleva el libro.
+  // Meter Bs como funcional obligaría a reexpresar todo con cada movimiento de la tasa. Cambiable
+  // por tenant desde /config/currency.
+  VE: { name: 'Venezuela', currency: 'USD', locale: 'es-VE', timezone: 'America/Caracas' },
   AR: { name: 'Argentina', currency: 'ARS', locale: 'es-AR', timezone: 'America/Argentina/Buenos_Aires' },
   UY: { name: 'Uruguay', currency: 'UYU', locale: 'es-UY', timezone: 'America/Montevideo' },
   MX: { name: 'México', currency: 'MXN', locale: 'es-MX', timezone: 'America/Mexico_City' },

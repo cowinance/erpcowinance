@@ -49,6 +49,7 @@ export async function bootstrapCatalogs(db: Queryable) {
 
   // ── Catálogos globales ────────────────────────────────────────────────
   for (const [code, name, nameEn, auth] of [
+    ['VE', 'Venezuela', 'Venezuela', 'INSAI'],
     ['AR', 'Argentina', 'Argentina', 'SENASA'],
     ['UY', 'Uruguay', 'Uruguay', 'SNIG'],
     ['MX', 'México', 'Mexico', 'SINIIGA'],
@@ -59,6 +60,7 @@ export async function bootstrapCatalogs(db: Queryable) {
     await q(`INSERT INTO countries (code, name, name_en, traceability_authority) VALUES ($1,$2,$3,$4)`, [code, name, nameEn, auth]);
 
   for (const [code, name, symbol] of [
+    ['VES', 'Bolívar', 'Bs.'],
     ['ARS', 'Peso argentino', '$'],
     ['UYU', 'Peso uruguayo', '$U'],
     ['MXN', 'Peso mexicano', '$'],

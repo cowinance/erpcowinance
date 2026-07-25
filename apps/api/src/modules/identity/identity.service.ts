@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { hashPassword } from '../../common/passwords';
-import { countryDefaults, isSupportedCountry } from './country-defaults';
+import { countryDefaults, isSupportedCountry, supportedCountries } from './country-defaults';
 import { EmailActionTokenService } from './email-action-token.service';
 import { EMAIL_SENDER, type EmailSender } from '../../application/ports/email-sender.port';
 import { AuthService } from '../auth/auth.service';
@@ -71,7 +71,11 @@ export class IdentityService {
     if (!isSupportedCountry(countryCode))
       throw new BadRequestException({
         code: 'identity.unsupported_country',
-        title: `País no soportado: ${countryCode}. Países disponibles: AR, UY, MX, CO, US, BR`,
+        // La lista se deriva de la fuente canónica: escrita a mano se desactualiza al agregar un
+        // país (pasó con VE) y el mensaje empieza a mentirle a quien se registra.
+        title: `País no soportado: ${countryCode}. Países disponibles: ${supportedCountries()
+          .map((c) => c.code)
+          .join(', ')}`,
       });
 
     const defaults = countryDefaults(countryCode);
