@@ -182,6 +182,7 @@ export const RLS_TABLES = [
   'repro_service_plans',
   'cryo_nitrogen_readings',
   'cryo_nitrogen_refills',
+  'fiscal_series',
   'compliance_reports',
   'contracts',
   'audit_logs',

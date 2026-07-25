@@ -102,6 +102,15 @@ jobs:
       - name: La app sostiene el aislamiento por HTTP
         run: npm run verify:pg
 
+      # 3) La numeración fiscal NO se pisa bajo concurrencia (G4-2). Va acá y no en el gate de
+      #    tests porque PGlite es de UNA sola conexión: allá el `FOR UPDATE` nunca llega a
+      #    bloquear y la suite pasaría igual si lo borráramos. Solo con PostgreSQL de verdad el
+      #    test puede fallar — y sin `FOR UPDATE` falla: 50 emisiones simultáneas dan 37 números.
+      - name: El correlativo fiscal no se repite bajo concurrencia
+        env:
+          PG_TEST_URL: postgres://postgres:postgres@127.0.0.1:5434/postgres
+        run: npx vitest run apps/api/src/modules/tax/numbering-concurrency
+
   # Recorrido real por el navegador (40 specs). Va en un job aparte del de gates para que el
   # feedback rápido no dependa de arrancar Chromium y una API.
   e2e-web:
