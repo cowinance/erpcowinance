@@ -41,6 +41,9 @@ de email, sondas de plataforma, métricas y backup con restore ensayado. El deta
 qué falta y por qué— está en [la auditoría](docs/audits/auditoria-2026-07-24.md); cada módulo tiene
 además su documento en [docs/sprints/](docs/sprints/).
 
+**Para retomar el proyecto:** [handoff del 2026-07-25](docs/handoff/session-handoff-2026-07-25.md) —
+qué se hizo, en qué estado quedó el despliegue y qué sigue, en orden.
+
 Antes de un despliegue real hay que configurar `STORAGE_DRIVER=s3` y `EMAIL_PROVIDER=smtp`: con los
 valores de desarrollo el arranque avisa exactamente qué queda roto.
 
