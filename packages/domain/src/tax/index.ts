@@ -32,3 +32,14 @@ export {
   validateSeries,
 } from './numbering';
 export type { FiscalDocumentType, SeriesPurpose, SeriesHealth, SeriesStatus } from './numbering';
+
+export {
+  VAT_TREATMENTS,
+  VAT_TREATMENT_LABEL,
+  TAXABLE_TREATMENTS,
+  InvalidVatRateError,
+  computeVatBreakdown,
+  isVatTreatment,
+  validateVatRates,
+} from './vat';
+export type { VatTreatment, VatRates, VatGroup, VatLineInput, VatBreakdown } from './vat';

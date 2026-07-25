@@ -1,14 +1,20 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { NumberingService } from './numbering.service';
+import { VatService } from './vat.service';
 
 /**
- * Fiscal (G4) — administración de las series de numeración. La ASIGNACIÓN no se expone: un número
- * fiscal no se pide suelto, se toma dentro de la transacción del comprobante que lo va a usar. Un
- * endpoint para «dame el próximo número» sería precisamente el modo de generar huecos.
+ * Fiscal (G4) — series de numeración (G4-2) y alícuotas de IVA (G4-3).
+ *
+ * La ASIGNACIÓN de números no se expone: un número fiscal no se pide suelto, se toma dentro de la
+ * transacción del comprobante que lo va a usar. Un endpoint para «dame el próximo número» sería
+ * precisamente el modo de generar huecos.
  */
 @Controller('tax')
 export class TaxController {
-  constructor(private readonly numbering: NumberingService) {}
+  constructor(
+    private readonly numbering: NumberingService,
+    private readonly vat: VatService,
+  ) {}
 
   /** Series con su estado DERIVADO (cuánto queda del lote, si hay que pedir uno nuevo). */
   @Get('series')
@@ -30,5 +36,27 @@ export class TaxController {
   @Post('series/:id/replace')
   replace(@Param('id') id: string, @Body() body: any) {
     return this.numbering.replace(id, body);
+  }
+
+  // ── IVA (G4-3) ────────────────────────────────────────────────────────────
+  /** Alícuotas vigentes de la empresa. Son configuración: en Venezuela cambian por providencia. */
+  @Get('vat-rates')
+  vatRates() {
+    return this.vat.rates();
+  }
+
+  @Put('vat-rates')
+  setVatRates(@Body() body: any) {
+    return this.vat.setRates(body);
+  }
+
+  /**
+   * Desglose de IVA de un conjunto de líneas, sin emitir nada. Existe para que la UI muestre el
+   * impuesto con la MISMA regla que va a llevar el comprobante, y no con una cuenta aproximada del
+   * frontend que después no coincide con el papel.
+   */
+  @Post('vat-preview')
+  vatPreview(@Body() body: any) {
+    return this.vat.preview(body);
   }
 }
