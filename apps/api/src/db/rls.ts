@@ -212,6 +212,32 @@ export const RLS_TABLES = [
  * `only` acota a un subconjunto (mismo template, sin duplicarlo): lo usa `verify:rls`, que corre
  * sobre el DDL canónico y por eso no tiene las tablas que la app crea en migraciones de arranque.
  */
+/**
+ * El tenant de la sesión, como expresión SQL para las policies.
+ *
+ * **El `NULLIF` no es cosmético: sin él la app se cae en producción y no en desarrollo.**
+ *
+ * PostgreSQL NO "desfija" un GUC personalizado al terminar la transacción: después de un
+ * `SET LOCAL app.tenant_id = …`, al cerrar la tx el parámetro vuelve a **cadena vacía**, no a
+ * indefinido. Comprobado contra PostgreSQL 17:
+ *
+ *   antes de cualquier SET      → current_setting('app.tenant_id', true) = NULL   → NULL::uuid, OK
+ *   después de un SET LOCAL     → current_setting('app.tenant_id', true) = ''     → ''::uuid, ERROR
+ *
+ * Con PGlite eso nunca se ve: hay UNA sola conexión y el arranque le fija un valor real. Con
+ * PostgreSQL real hay un POOL, así que toda conexión que ya atendió una request autenticada queda
+ * devolviendo `''` para siempre. Cualquier consulta posterior FUERA de una request —el worker de
+ * importación, que sondea cada 2 segundos— toma una de esas conexiones y muere con
+ * «invalid input syntax for type uuid: ""».
+ *
+ * Es exactamente el fallo que tenía trabado el workflow de Release: la API no terminaba de
+ * levantar y `readyz` nunca respondía.
+ *
+ * `NULLIF(…, '')` devuelve NULL para la cadena vacía, y comparar contra NULL no da filas: sin
+ * tenant no se ve nada, que es el fail-closed que se busca.
+ */
+const TENANT_GUC = `NULLIF(current_setting('app.tenant_id', true), '')::uuid`;
+
 export function rlsMigration(only?: readonly string[]): string {
   const targets = only ? RLS_TABLES.filter((t) => only.includes(t)) : RLS_TABLES;
   return targets.map(
@@ -221,7 +247,7 @@ export function rlsMigration(only?: readonly string[]): string {
       DROP POLICY IF EXISTS tenant_isolation_${t} ON "${t}";
       DROP POLICY IF EXISTS tenant_isolation ON "${t}";
       CREATE POLICY tenant_isolation ON "${t}"
-        USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-        WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);`,
+        USING (tenant_id = ${TENANT_GUC})
+        WITH CHECK (tenant_id = ${TENANT_GUC});`,
   ).join('\n');
 }

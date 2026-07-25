@@ -157,6 +157,25 @@ const noVar = await asAppT(`SELECT count(*) FROM farms;`);
 if (noVar === '0') ok('sin app.tenant_id → 0 filas (fail-closed)');
 else bad('sin app.tenant_id devuelve filas', `count=${noVar}`);
 
+// C-bis) Y DESPUÉS de una transacción que fijó el tenant, sobre la MISMA conexión.
+//
+// Éste es el caso que tuvo trabado el Release y que ningún test veía. PostgreSQL NO desfija un GUC
+// personalizado al cerrar la transacción: lo deja en CADENA VACÍA, no indefinido. Con un pool, toda
+// conexión que ya atendió una request queda devolviendo '' para siempre, y `''::uuid` revienta.
+// Cualquier consulta fuera de una request —el worker de importación, que sondea cada 2 segundos—
+// tomaba una de esas conexiones y moría.
+//
+// En PGlite es invisible (una sola conexión, con valor real fijado al arrancar), así que solo puede
+// probarse acá, contra PostgreSQL de verdad.
+const trasTx = `BEGIN; SELECT set_config('app.tenant_id', '${TA}', true); COMMIT; SELECT count(*) FROM farms;`;
+const errTrasTx = await asAppTErr(trasTx);
+if (errTrasTx) bad('el GUC vacío tras una tx rompe la RLS', errTrasTx);
+else {
+  const cuenta = await asAppT(trasTx);
+  if (cuenta === '0') ok("tras cerrar la tx el tenant queda en '' → 0 filas, sin error");
+  else bad("tras cerrar la tx se ven filas sin tenant", `count=${cuenta}`);
+}
+
 // D) No se puede ESCRIBIR en otro tenant (WITH CHECK).
 const err = await asAppTErr(`
   SET app.tenant_id = '${TA}';
