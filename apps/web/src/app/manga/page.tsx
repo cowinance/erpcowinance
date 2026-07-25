@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { validateWeighing } from '@cowinance/domain';
+import { mangaCardAlerts, validateWeighing } from '@cowinance/domain';
 import { API_URL, authHeaders } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { MangaCapture, type MangaMode } from './MangaCapture';
@@ -96,18 +96,25 @@ function fmtClock(t: number): string {
   return new Date(t).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Alertas rápidas derivadas de la tarjeta (máx 3). `mode` → tocar la alerta salta a ese modo. */
-function cardAlerts(a: Animal): { text: string; tone: 'danger' | 'warning'; mode?: MangaMode }[] {
-  const out: { text: string; tone: 'danger' | 'warning'; mode?: MangaMode }[] = [];
-  if (a.has_withdrawal) out.push({ text: `RETIRO ACTIVO${a.meat_withdrawal_until ? ` hasta ${fmtDate(a.meat_withdrawal_until)}` : ''}`, tone: 'danger' });
-  if ((a.open_cases ?? 0) > 0) out.push({ text: `CASO ABIERTO${a.case_severity === 'severe' ? ' (grave)' : ''} · tratar`, tone: 'danger', mode: 'Tratamiento' });
-  if (a.sex === 'F' && a.expected_due_date) {
-    const days = Math.round((new Date(a.expected_due_date).getTime() - Date.now()) / 86400000);
-    if (days <= 21 && days >= -10) out.push({ text: `PARTO PRÓXIMO (${days <= 0 ? 'vencido' : `${days} d`})`, tone: 'warning', mode: 'Reproducción' });
-  }
-  if (!a.lot_id) out.push({ text: 'SIN LOTE · mover', tone: 'warning', mode: 'Movimiento' });
-  if (a.days_since_weighing == null || a.days_since_weighing > 90) out.push({ text: a.days_since_weighing == null ? 'SIN PESAJE · pesar' : 'SIN PESAJE RECIENTE · pesar', tone: 'warning', mode: 'Pesaje' });
-  return out.slice(0, 3);
+/**
+ * Alertas de la tarjeta. La REGLA vive en `@cowinance/domain` y la comparten la manga de la web y
+ * la del móvil: cuando cada canal decidía por su cuenta, el móvil no mostraba retiro activo ni caso
+ * clínico abierto — las dos que impiden mandar el animal a faena o pasarlo de largo estando enfermo.
+ * Acá solo se traduce la forma del DTO de `herd.lookup` a la entrada del dominio.
+ */
+function cardAlerts(a: Animal) {
+  return mangaCardAlerts({
+    meatWithdrawalUntil: a.meat_withdrawal_until,
+    // `has_withdrawal` es true también cuando solo hay retiro de LECHE, que no trae fecha en el
+    // DTO: se pasa la de carne como marca para que la alerta igual aparezca.
+    milkWithdrawalUntil: a.has_withdrawal && !a.meat_withdrawal_until ? new Date().toISOString() : null,
+    openCases: a.open_cases,
+    caseSeverity: a.case_severity,
+    sex: a.sex,
+    expectedDueDate: a.expected_due_date,
+    lotId: a.lot_id,
+    daysSinceWeighing: a.days_since_weighing,
+  });
 }
 
 export default function MangaPage() {
@@ -550,7 +557,7 @@ export default function MangaPage() {
                   {alerts.map((al) =>
                     al.mode ? (
                       <button
-                        key={al.text}
+                        key={al.code}
                         onClick={() => setMode(al.mode!)}
                         className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'} ${mode === al.mode ? 'ring-2 ring-white' : ''}`}
                         title={`Ir a ${al.mode}`}
@@ -558,7 +565,7 @@ export default function MangaPage() {
                         {al.text} →
                       </button>
                     ) : (
-                      <span key={al.text} className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}>
+                      <span key={al.code} className={`rounded-lg px-3 py-2 text-[15px] font-bold ${al.tone === 'danger' ? 'bg-[#f87171] text-black' : 'bg-[#facc15] text-black'}`}>
                         {al.text}
                       </span>
                     ),

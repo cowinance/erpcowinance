@@ -179,6 +179,8 @@ export class SyncService {
               a.current_lot_id, a.current_paddock_id, l.name AS lot_name,
               ai.value AS visual_tag,
               w.weight_kg::float AS last_weight_kg, w.weighed_at AS last_weighed_at,
+              wd.meat_until::text AS meat_withdrawal_until, wd.milk_until::text AS milk_withdrawal_until,
+              COALESCE(oc.n, 0) AS open_cases, oc.severity AS case_severity,
               rs.versions
        FROM animals a
        LEFT JOIN animal_categories c ON c.id = a.category_id
@@ -189,6 +191,22 @@ export class SyncService {
        LEFT JOIN LATERAL (
          SELECT weight_kg, weighed_at FROM weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL
          ORDER BY weighed_at DESC LIMIT 1) w ON true
+       -- Retiros VIGENTES y casos clínicos abiertos: sin esto la tarjeta del móvil no puede avisar
+       -- que el animal no va a faena ni que está enfermo. Es la diferencia entre la manga de la web
+       -- y la del campo, que es justamente donde la decisión se toma.
+       LEFT JOIN LATERAL (
+         SELECT max(t.meat_withdrawal_until) AS meat_until, max(t.milk_withdrawal_until) AS milk_until
+         FROM treatments t
+         WHERE t.animal_id = a.id AND t.deleted_at IS NULL
+           AND (t.meat_withdrawal_until >= CURRENT_DATE OR t.milk_withdrawal_until >= now())) wd ON true
+       -- «Caso abierto» son TRES estados, no uno: abierto, en tratamiento y en observación. Misma
+       -- definición que herd.lookup (la manga de la web); si acá contara solo 'open', el mismo
+       -- animal mostraría alerta en la web y no en el móvil.
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS n, max(cc.severity) AS severity
+         FROM clinical_cases cc
+         WHERE cc.animal_id = a.id AND cc.deleted_at IS NULL
+           AND cc.status IN ('open','in_treatment','observation')) oc ON true
        LEFT JOIN sync_row_state rs ON rs.tenant_id = a.tenant_id AND rs.table_name = 'animals' AND rs.row_id = a.id
        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.status = 'active'`,
       [this.db.tenant],
@@ -246,6 +264,12 @@ export class SyncService {
             lot_name: r.lot_name,
             last_weight_kg: r.last_weight_kg,
             last_weighed_at: r.last_weighed_at,
+            // Derivados de solo lectura para la tarjeta de manga. El dispositivo NUNCA los pone en
+            // un put: los recalcula el servidor y el móvil los combina con lo que capturó offline.
+            meat_withdrawal_until: r.meat_withdrawal_until,
+            milk_withdrawal_until: r.milk_withdrawal_until,
+            open_cases: r.open_cases,
+            case_severity: r.case_severity,
           },
           versions: r.versions ?? {},
         },

@@ -13,6 +13,7 @@ import {
   computeWithdrawal,
   computeExpectedDueDateFromService,
   computeExpectedDueDateFromDiagnosis,
+  latestWithdrawal,
   newbornCategoryCode,
 } from '@cowinance/domain';
 import { createStorage } from './storage';
@@ -64,6 +65,15 @@ export interface AnimalRow {
   lot_name?: string;
   last_weight_kg?: number;
   last_weighed_at?: string;
+  /**
+   * Derivados de SOLO LECTURA que manda el servidor para la tarjeta de manga (retiro vigente y
+   * casos clínicos abiertos). El dispositivo nunca los pone en un put: los recalcula el servidor.
+   * Lo que el dispositivo capturó offline se combina aparte — ver `withdrawalOf`.
+   */
+  meat_withdrawal_until?: string | null;
+  milk_withdrawal_until?: string | null;
+  open_cases?: number;
+  case_severity?: string | null;
 }
 
 export interface VetProduct {
@@ -188,6 +198,13 @@ interface SyncCtx {
   /** Refresca el feed in_app con anti-ráfaga (debounce trailing); para pushes en foreground. */
   scheduleNotificationsRefresh: () => void;
   openPregnancy: (animalId: string) => LocalPregnancy | null;
+  /**
+   * Fin de retiro EFECTIVO de un animal: lo que dijo el servidor combinado con los tratamientos
+   * que este dispositivo capturó sin señal. Gana el más lejano — un tratamiento aplicado recién en
+   * la manga extiende el retiro, y quedarse con el dato del servidor diría que el animal ya está
+   * apto cuando no lo está.
+   */
+  withdrawalOf: (animalId: string) => { meat: string | null; milk: string | null };
   captureWeighing: (animalId: string, kg: number, cc?: number) => void;
   captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
   captureTreatment: (animalId: string, productId: string, dose?: number, route?: string) => { meatUntil: string | null };
@@ -237,6 +254,10 @@ function rowToAnimal(id: string, fields: Record<string, unknown>, lotName?: (lot
     lot_name: currentLotId ? lotName?.(currentLotId) : undefined,
     last_weight_kg: fields.last_weight_kg as number,
     last_weighed_at: fields.last_weighed_at as string,
+    meat_withdrawal_until: (fields.meat_withdrawal_until as string) ?? null,
+    milk_withdrawal_until: (fields.milk_withdrawal_until as string) ?? null,
+    open_cases: (fields.open_cases as number) ?? 0,
+    case_severity: (fields.case_severity as string) ?? null,
   };
 }
 
@@ -791,6 +812,28 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       pushLastToken: metaRef.current?.lastPushToken,
       syncPushToken,
       scheduleNotificationsRefresh,
+
+      /**
+       * Retiro efectivo: el que trajo el bootstrap (tratamientos de cualquier canal) combinado con
+       * los que ESTE dispositivo capturó offline y todavía no subió. La regla de cuál gana vive en
+       * el dominio (`latestWithdrawal`), igual que la de las alertas.
+       */
+      withdrawalOf: (animalId: string) => {
+        const animal = store()?.getRow('animals', animalId)?.fields as Record<string, unknown> | undefined;
+        const locales: { meat: (string | null)[]; milk: (string | null)[] } = { meat: [], milk: [] };
+        const tratamientos = store()?.events.get('treatments');
+        if (tratamientos) {
+          for (const [, row] of tratamientos) {
+            if ((row as any).animal_id !== animalId) continue;
+            locales.meat.push((row as any).meat_withdrawal_until ?? null);
+            locales.milk.push((row as any).milk_withdrawal_until ?? null);
+          }
+        }
+        return {
+          meat: latestWithdrawal((animal?.meat_withdrawal_until as string) ?? null, ...locales.meat),
+          milk: latestWithdrawal((animal?.milk_withdrawal_until as string) ?? null, ...locales.milk),
+        };
+      },
 
       openPregnancy: (animalId: string) => {
         const m = store()?.rows.get('pregnancies');

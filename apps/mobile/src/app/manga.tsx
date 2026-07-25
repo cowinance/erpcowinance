@@ -13,7 +13,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, Vibration, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { validateWeighing } from '@cowinance/domain';
+import { mangaCardAlerts, validateWeighing, type MangaAlert } from '@cowinance/domain';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 
 const GREEN = '#4ADE80';
@@ -291,7 +291,7 @@ export default function Manga() {
           </>
         ) : (
           <>
-            <AnimalCard animal={animal} />
+            <AnimalCard animal={animal} sync={sync} onAlertPress={setMode} />
             {!!error && <Text style={styles.error}>{error}</Text>}
             <ModeCapture
               mode={mode}
@@ -318,8 +318,25 @@ export default function Manga() {
   );
 }
 
-/** Tarjeta del animal escaneado — datos LOCALES (offline). */
-function AnimalCard({ animal }: { animal: AnimalRow }) {
+/**
+ * Tarjeta del animal escaneado — datos LOCALES (offline).
+ *
+ * Las alertas salen de `mangaCardAlerts`, la MISMA regla que usa la manga de la web: antes cada
+ * canal decidía por su cuenta y el móvil no mostraba retiro activo ni caso clínico abierto, que son
+ * justo las dos que impiden mandar el animal a faena o pasarlo de largo estando enfermo.
+ *
+ * Y son accionables: tocar una salta al modo que la resuelve. Un aviso que obliga a recordar y
+ * navegar —con guantes, en la manga— es un aviso que se ignora.
+ */
+function AnimalCard({
+  animal,
+  sync,
+  onAlertPress,
+}: {
+  animal: AnimalRow;
+  sync: ReturnType<typeof useSync>;
+  onAlertPress: (mode: Mode) => void;
+}) {
   const days = animal.last_weighed_at
     ? Math.floor((Date.now() - new Date(animal.last_weighed_at).getTime()) / 86400000)
     : null;
@@ -327,6 +344,21 @@ function AnimalCard({ animal }: { animal: AnimalRow }) {
   if (animal.last_weight_kg != null) facts.push(['ÚLTIMO PESO', `${Math.round(animal.last_weight_kg)} kg${days != null ? ` · hace ${days} d` : ''}`]);
   facts.push(['LOTE', animal.lot_name ?? 'sin lote']);
   if (animal.sex) facts.push(['SEXO', animal.sex === 'F' ? 'Hembra' : 'Macho']);
+
+  // El retiro combina lo del servidor con lo que este dispositivo capturó sin señal; la preñez
+  // abierta ya viaja en el bootstrap.
+  const retiro = sync.withdrawalOf(animal.id);
+  const prenez = sync.openPregnancy(animal.id);
+  const alerts: MangaAlert[] = mangaCardAlerts({
+    meatWithdrawalUntil: retiro.meat,
+    milkWithdrawalUntil: retiro.milk,
+    openCases: animal.open_cases,
+    caseSeverity: animal.case_severity,
+    sex: animal.sex,
+    expectedDueDate: prenez?.expected_due_date ?? null,
+    lotId: animal.current_lot_id,
+    daysSinceWeighing: days,
+  });
 
   return (
     <View style={styles.card}>
@@ -342,10 +374,27 @@ function AnimalCard({ animal }: { animal: AnimalRow }) {
           </View>
         ))}
       </View>
-      {(!animal.current_lot_id || days == null || days > 90) && (
+      {alerts.length > 0 && (
         <View style={styles.alertRow}>
-          {!animal.current_lot_id && <Text style={styles.alertChip}>SIN LOTE</Text>}
-          {(days == null || days > 90) && <Text style={styles.alertChip}>{days == null ? 'SIN PESAJE' : 'SIN PESAJE RECIENTE'}</Text>}
+          {alerts.map((al) => {
+            const chip = [styles.alertChip, al.tone === 'danger' ? styles.alertChipDanger : null];
+            // Sin modo (el retiro) no es tocable: no hay nada que capturar, hay que esperar.
+            return al.mode ? (
+              <Pressable
+                key={al.code}
+                onPress={() => onAlertPress(al.mode as Mode)}
+                accessibilityRole="button"
+                accessibilityLabel={al.text}
+                hitSlop={8}
+              >
+                <Text style={chip}>{al.text}</Text>
+              </Pressable>
+            ) : (
+              <Text key={al.code} style={chip}>
+                {al.text}
+              </Text>
+            );
+          })}
         </View>
       )}
     </View>
@@ -648,6 +697,8 @@ const styles = StyleSheet.create({
   factValue: { color: '#fff', fontSize: 17, fontFamily: 'monospace', marginTop: 2 },
   alertRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   alertChip: { backgroundColor: AMBER, color: '#000', fontSize: 13, fontWeight: '800', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, overflow: 'hidden' },
+  // Rojo para lo que impide seguir (retiro, caso abierto); ámbar para lo que conviene resolver.
+  alertChipDanger: { backgroundColor: RED, color: '#fff' },
   statRow: { flexDirection: 'row', gap: 10, width: '100%' },
   stat: { flex: 1, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 12 },
   statValue: { fontSize: 30, fontWeight: '800', fontFamily: 'monospace' },
