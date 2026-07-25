@@ -27,8 +27,11 @@ async function bootstrap() {
   app.use(securityHeaders());
   app.enableCors({ origin: resolveCorsOrigin() });
   app.useGlobalFilters(new DomainExceptionFilter());
-  // Imágenes en base64 (subida de fotos) superan el límite JSON por defecto
-  app.useBodyParser('json', { limit: '12mb' });
+  // Las imágenes viajan en base64 dentro del JSON, y el base64 INFLA UN 33%: una foto de 12 MB
+  // —el techo de `media.service`— son ~16 MB de cuerpo. Con el límite en 12mb el rechazo llegaba
+  // ACÁ y no allá, como un 413 sin explicación, justo con las fotos de teléfono que son el caso
+  // normal del campo. Este número tiene que quedar por encima de MAX_BYTES × 1.34.
+  app.useBodyParser('json', { limit: '20mb' });
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);
   new Logger('api-core').log(`Cowinance api-core escuchando en http://localhost:${port}/v1`);

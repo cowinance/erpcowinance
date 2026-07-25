@@ -4,7 +4,17 @@ import { DbService } from '../../db/db.service';
 import { signFileToken, verifyFileToken } from '../../common/file-token';
 import { FILE_STORAGE, fileKey, type FileStorage } from '../../application/ports/file-storage.port';
 
-const MAX_BYTES = 8 * 1024 * 1024; // 8 MB por imagen
+/**
+ * Techo por imagen. Es un RESPALDO, no el mecanismo principal: la web achica la foto en el
+ * navegador antes de subirla (`lib/image`), así que lo normal son ~300 KB. Este límite existe para
+ * el cliente que no achica —la API es pública para el tenant— y por eso está holgado: una foto de
+ * teléfono actual llega a 12 MB y rechazarla es romper el caso más común del campo.
+ *
+ * OJO con el cuerpo HTTP: la imagen viaja en base64 dentro de un JSON, que **infla un 33%**. 12 MB
+ * de foto son ~16 MB de cuerpo, así que el límite del body parser (`main.ts`) tiene que ir por
+ * encima de eso o el rechazo llega antes, como un 413 sin explicación.
+ */
+const MAX_BYTES = 12 * 1024 * 1024; // 12 MB por imagen
 const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,(.+)$/i;
 
 @Injectable()
@@ -34,7 +44,13 @@ export class MediaService {
       throw new BadRequestException({ code: 'media.not_image', title: 'Solo se admiten imágenes' });
     const buffer = Buffer.from(m[2], 'base64');
     if (buffer.length === 0 || buffer.length > MAX_BYTES)
-      throw new BadRequestException({ code: 'media.size', title: `La imagen debe pesar entre 1 byte y ${MAX_BYTES / 1024 / 1024} MB` });
+      throw new BadRequestException({
+        code: 'media.size',
+        title:
+          buffer.length === 0
+            ? 'La imagen llegó vacía'
+            : `La imagen pesa ${(buffer.length / 1024 / 1024).toFixed(1)} MB y el máximo es ${MAX_BYTES / 1024 / 1024} MB`,
+      });
 
     const checksum = createHash('sha256').update(buffer).digest('hex');
 

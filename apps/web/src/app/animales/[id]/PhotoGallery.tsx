@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders, fileUrl, PhotoRef } from '@/lib/api';
+import { formatBytes, prepareImageForUpload } from '@/lib/image';
 import { ImagePlus, Star, Trash2, Loader2 } from 'lucide-react';
 
 interface Photo extends PhotoRef {
@@ -24,6 +25,8 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  /** Aviso de que la foto se achicó. No es un error: es para que nadie crea que se perdió algo. */
+  const [note, setNote] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -38,25 +41,26 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
 
   async function onFile(file: File) {
     setError('');
+    setNote('');
     if (!file.type.startsWith('image/')) return setError('El archivo debe ser una imagen.');
-    if (file.size > 8 * 1024 * 1024) return setError('La imagen supera los 8 MB.');
+    // Ya NO se rechaza por tamaño: una foto de teléfono pesa entre 3 y 12 MB y es lo normal en el
+    // campo. Se achica antes de subirla (ver lib/image), así entra igual y encima viaja liviana
+    // con mala señal.
     setUploading(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result as string);
-        r.onerror = reject;
-        r.readAsDataURL(file);
-      });
+      const img = await prepareImageForUpload(file);
       const res = await fetch(`${API_URL}/animals/${animalId}/photos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ data_url: dataUrl, taken_at: file.lastModified ? new Date(file.lastModified).toISOString() : undefined }),
+        body: JSON.stringify({ data_url: img.dataUrl, taken_at: file.lastModified ? new Date(file.lastModified).toISOString() : undefined }),
       });
       if (!res.ok) {
         const b = await res.json().catch(() => null);
-        throw new Error(b?.message?.title ?? 'No se pudo subir la imagen');
+        // La API devuelve `{code, title}`: leer `message.title` daba siempre undefined y el usuario
+        // veía el texto genérico en vez del motivo.
+        throw new Error(b?.title ?? b?.message?.title ?? 'No se pudo subir la imagen');
       }
+      if (img.resized) setNote(`Foto optimizada: ${formatBytes(img.originalBytes)} → ${formatBytes(img.bytes)}`);
       await load();
       router.refresh(); // actualiza la foto principal en la cabecera
     } catch (e: any) {
@@ -89,6 +93,7 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
         onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
       />
       {error && <p className="mb-2 text-label text-danger">{error}</p>}
+      {!error && note && <p className="mb-2 text-label text-ink-3">{note}</p>}
 
       {loading ? (
         <div className="flex justify-center py-8 text-ink-3">
