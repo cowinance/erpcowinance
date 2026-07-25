@@ -112,9 +112,6 @@ Valen más que los módulos: son las que hay que respetar al seguir.
 
 ---
 
-> **Antes que nada, leer la §8:** quedó trabajo sin commitear y con el gate de arquitectura sin
-> resolver.
-
 ## 5. LO ÚNICO ABIERTO: la configuración del servidor del productor
 
 El despliegue en `app.cowinance.com` **funciona**, pero quedaron dudas sin cerrar. Esto es lo
@@ -197,50 +194,50 @@ decisiones que no se deducen del código. Empezar por `MEMORY.md`.
 
 ---
 
-## 8. Adenda — trabajo SIN COMMITEAR al cerrar la sesión
+## 8. Adenda — TLS contra la base gestionada (RESUELTO)
 
-**Hay cambios en el árbol de trabajo que NO están commiteados y cuyo gate de arquitectura NO se
-verificó del todo.** Retomar por acá.
+El productor movió todo a AWS: **API en EC2 y PostgreSQL en RDS**, en la misma VPC. Confirmó que
+**no hay datos que migrar**.
 
-### Qué es
-Soporte de **TLS verificado contra la base**, para poder apuntar a una PostgreSQL gestionada. El
-productor creó una **RDS en AWS** al final de la sesión y esto era el bloqueo: `pg` 8.22 interpreta
-`?sslmode=require` como `verify-full`, y la CA de RDS no está en el almacén de confianza de Node, así
-que la conexión falla. El único atajo era `?sslmode=no-verify`, que **cifra sin verificar con quién
-habla**: la contraseña de la base viaja hacia quien se haya puesto en el medio.
+Eso destapó que el driver no podía verificar el certificado: `pg` 8.22 interpreta `?sslmode=require`
+como `verify-full`, y la CA de RDS no está en el almacén de Node. El único atajo era
+`?sslmode=no-verify`, que cifra **sin verificar con quién habla**.
 
-Archivos:
+**Resuelto en `84aa508`:** `DATABASE_SSL_CA` acepta la ruta a un archivo o el PEM pegado en la
+variable. Si la base es un host remoto y no se pide TLS, el arranque avisa (avisa, no falla: contra
+el Postgres del compose exigir certificados sería ceremonia sin riesgo).
 
-| Archivo | Estado |
-|---|---|
-| `apps/api/src/db/db-ssl.ts` | **nuevo** — `dbSslFromEnv` (ruta o PEM pegado) + `warnsAboutPlaintext` |
-| `apps/api/src/db/db-ssl.test.ts` | **nuevo** — 10 tests, en verde |
-| `apps/api/src/db/driver.ts` | modificado — el pool recibe `ssl` cuando hay CA |
-| `docker-compose.prod.yml`, `.env.example`, `README.md` | documentan `DATABASE_SSL_CA` |
+### Lo que falta hacer EN LA EC2 (no está hecho)
 
-### Estado de verificación
-- `npx tsc -p apps/api` → **OK**
-- `npx vitest run` → **1266 tests en verde** (185 archivos, +10 de esta adenda)
-- `npm run audit:arch` → **FALLÓ**, y no se llegó a identificar qué invariante. Los primeros gates
-  (tokens, typechecks) pasaron; quedó corriendo el de tests con coverage, madge (ciclos) y el
-  presupuesto de tamaño por servicio.
+1. **Sacar el servicio `db` del compose**, su volumen, y el `depends_on:` del `api`. Sin lo último la
+   API no arranca: espera a un contenedor que ya no existe.
+2. **Bajar la CA y montarla:**
+   ```bash
+   curl -o rds-ca.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+   ```
+   ```yaml
+   volumes:
+     - ./rds-ca.pem:/etc/ssl/rds-ca.pem:ro
+   environment:
+     DATABASE_SSL_CA: /etc/ssl/rds-ca.pem
+   ```
+3. **En la RDS, con el usuario maestro:** `CREATE EXTENSION pgcrypto; CREATE EXTENSION postgis;` y el
+   rol de servicio `cowinance_app` (`NOSUPERUSER NOBYPASSRLS`).
+4. **`.env`:** `NODE_ENV=production`, las dos URLs (servicio y admin), `DATABASE_SSL_CA`,
+   `SEED_DEMO=false`.
 
-**La máquina estaba con carga 66-91** por procesos acumulados de una sesión muy larga, y varias
-corridas quedaron colgadas. Es plausible que el fallo del gate sea un efecto de eso —un timeout— y
-no una regresión real, pero **no está comprobado**. Primer paso al retomar:
+**Ojo:** RDS PostgreSQL reciente trae `rds.force_ssl = 1` por defecto. Si es el caso, sin TLS la
+conexión se rechaza de entrada. Verificar con `SHOW rds.force_ssl;`.
 
+Confirmación de que quedó bien:
 ```bash
-pkill -9 -f vitest; pkill -9 -f "nest start"   # limpiar lo que haya quedado
-node scripts/audit-arch.mjs 2>&1 | tee /tmp/arch.log
+docker compose -f docker-compose.prod.yml logs api | grep -iE "Base:|TLS"
+npm run verify:pg
 ```
+Tienen que aparecer `Base: PostgreSQL real (DATABASE_URL)` y `TLS con verificación de certificado`.
 
-Si el fallo es real, los candidatos por orden de probabilidad son el gate de **ciclos de dependencia
-(madge)** —`driver.ts` pasó a importar `db-ssl.ts` y `Logger` de `@nestjs/common`— y el de
-**presupuesto de tamaño**. Si el gate pasa, commitear tal cual.
-
-### Cómo usarlo, una vez commiteado
-```bash
-DATABASE_SSL_CA=/ruta/al/global-bundle.pem   # o el PEM completo pegado en la variable
-```
-Con la CA puesta, el arranque loguea `TLS con verificación de certificado`. Si la base es un host
-remoto y no se pide TLS, avisa.
+### Nota sobre el gate que había quedado en rojo
+Era **carga de la máquina, no una regresión**: corrían dos suites completas en paralelo (~20 workers)
+y el gate de tests con coverage no terminaba. Con la máquina libre, los nueve gates en verde —
+1266 tests, 0 ciclos, mayor servicio 1123 sobre un techo de 1150. Si vuelve a pasar: no correr dos
+suites a la vez.
