@@ -61,12 +61,20 @@ export function RationsManager({ rations, items }: { rations: Ration[]; items: I
     }
   }
 
+  /**
+   * Se elige la ración y se cargan sus ingredientes A LA VEZ, cuando el detalle ya llegó.
+   *
+   * Antes `setSelected` iba primero: el editor aparecía interactivo mientras la composición todavía
+   * viajaba, y la respuesta tardía PISABA lo que el usuario hubiera agregado en el medio. Con una
+   * red rápida no se notaba; con una lenta —o con un salto más en el camino— el operario agregaba
+   * dos ingredientes y los veía desaparecer sin explicación.
+   */
   async function selectRation(r: Ration) {
-    setSelected(r);
     setError('');
     try {
       const detail = await call('GET', `/nutrition/rations/${r.id}`);
       setIngs((detail?.ingredients ?? []).map((i: any) => ({ inventory_item_id: i.inventory_item_id, pct: String(i.pct) })));
+      setSelected(r);
     } catch (e: any) {
       setError(e.message);
     }

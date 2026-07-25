@@ -85,12 +85,17 @@ export function BudgetsView({ budgets, accounts, costCenters }: { budgets: Budge
     }
   }
 
+  /**
+   * Se elige el presupuesto y se cargan sus líneas A LA VEZ, cuando el detalle ya llegó. Antes
+   * `setSelected` iba primero y la respuesta tardía pisaba las líneas que el usuario hubiera
+   * agregado mientras tanto (mismo caso que el editor de raciones).
+   */
   async function selectBudget(b: Budget) {
-    setSelected(b);
     setError('');
     try {
       const detail = await call('GET', `/finance/budgets/${b.id}`);
       setLines((detail?.lines ?? []).map((l: any) => ({ account_id: l.account_id, cost_center_id: l.cost_center_id ?? '', month: String(l.month), amount: String(l.amount) })));
+      setSelected(b);
       setVs(await call('GET', `/finance/budgets/${b.id}/vs-actual`));
     } catch (e: any) {
       setError(e.message);
