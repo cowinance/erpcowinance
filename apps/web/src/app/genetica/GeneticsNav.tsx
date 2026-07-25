@@ -7,6 +7,7 @@ const TABS: [string, string][] = [
   ['/genetica', 'Semen'],
   ['/genetica/embriones', 'Embriones'],
   ['/genetica/evaluaciones', 'Evaluaciones'],
+  ['/genetica/termos', 'Termos'],
 ];
 
 /** Navegación local del módulo Genética (G-3). Sigue el patrón de CommerceNav/FinanceNav. */

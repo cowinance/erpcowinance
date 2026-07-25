@@ -176,6 +176,8 @@ export const RLS_TABLES = [
   'soil_analyses',
   'shearing_records',
   'storage_tanks',
+  'cryo_canisters',
+  'cryo_goblets',
   'compliance_reports',
   'contracts',
   'audit_logs',

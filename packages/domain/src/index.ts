@@ -36,3 +36,5 @@ export * from './costing';
 export * from './weather';
 // CRM — pipeline comercial y vigencia de contratos (F3).
 export * from './crm';
+// Genética — ubicación criogénica: termo → canasta → gobelete (GT-1).
+export * from './genetics';
