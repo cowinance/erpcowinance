@@ -8,6 +8,15 @@ test('verificación de email: éxito, reuso inválido, y el banner desaparece', 
   await registerAndAutoLogin(page, u);
   await expect(page.getByText('Verificá tu email')).toBeVisible();
 
+  // Antes de verificar, el banner tiene que RESPONDER. Los dos botones siempre hicieron lo suyo
+  // —revalidar y reenviar— pero callaban el resultado: «Ya verifiqué» sobre una cuenta sin
+  // verificar dejaba la pantalla idéntica a la de antes de tocarlo, o sea indistinguible de un
+  // botón roto. Este server e2e corre con EMAIL_PROVIDER=log, así que además tiene que avisar que
+  // el correo no sale: sin eso se espera para siempre un enlace que nadie va a enviar.
+  await expect(page.getByText(/no está configurado para enviar correo/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Ya verifiqué' }).click();
+  await expect(page.getByText(/Todavía figura sin verificar/).first()).toBeVisible();
+
   // Sólo el email de verificación de ESTE usuario (por destinatario + propósito).
   const token = await waitForActionToken(u.email, 'verify', since);
 

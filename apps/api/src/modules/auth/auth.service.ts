@@ -137,6 +137,13 @@ export class AuthService {
       email: ctx.email,
       role: ctx.role,
       email_verified: !!user?.email_verified_at,
+      // ¿Este servidor puede ENVIAR correo? Con el adaptador `log` el mensaje se imprime y nunca
+      // sale, así que el usuario espera para siempre un enlace que no existe y los botones de
+      // «reenviar» parecen rotos cuando en realidad hicieron su trabajo.
+      //
+      // No es información sensible —es configuración del servidor, no de una cuenta— y sin ella el
+      // producto no tiene forma de explicar el único síntoma que el usuario ve: «no me llega nada».
+      email_delivery: (process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'log') === 'log' ? 'log' : 'enabled',
       organization: org,
     };
   }

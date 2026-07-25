@@ -6,7 +6,7 @@ import { API_URL, authHeaders } from '@/lib/api';
 import { postPublic } from '@/lib/auth';
 import { Button } from '@/components/Button';
 
-type Phase = 'idle' | 'checking' | 'resending' | 'resent' | 'error';
+type Phase = 'idle' | 'checking' | 'unverified' | 'resending' | 'resent' | 'error';
 
 /**
  * Banner suave de email pendiente (P1.3.5). Verificación soft (ADR-0011): informa,
@@ -14,34 +14,57 @@ type Phase = 'idle' | 'checking' | 'resending' | 'resent' | 'error';
  * revalida contra /auth/me al recuperar foco, al volver a visible y con "Ya
  * verifiqué". Sin polling, sin decodificar el token, sin store global. Aislado como
  * Client Component para no volver cliente todo el dashboard.
+ *
+ * Los dos botones SIEMPRE hicieron lo suyo —revalidar y reenviar— pero no lo decían:
+ * «Ya verifiqué» sobre una cuenta sin verificar volvía a `idle`, o sea a la pantalla
+ * idéntica a la de antes de tocarlo, y «Reenviar» confirmaba un envío que en un
+ * servidor sin SMTP nunca sale. Un botón que responde lo mismo que si no existiera se
+ * lee como roto. Por eso ahora hay un estado explícito para «sigue sin verificar» y un
+ * aviso cuando el servidor no está configurado para mandar correo: sin eso, el usuario
+ * espera indefinidamente un email que nadie va a enviar.
  */
-export function VerificationBanner({ initialVerified, email }: { initialVerified: boolean; email?: string }) {
+export function VerificationBanner({
+  initialVerified,
+  email,
+  emailDelivery,
+}: {
+  initialVerified: boolean;
+  email?: string;
+  /** 'log' = este servidor NO envía correo (imprime el mensaje). Viene de /auth/me. */
+  emailDelivery?: 'log' | 'enabled';
+}) {
   const [verified, setVerified] = useState(initialVerified);
   const [phase, setPhase] = useState<Phase>('idle');
   const inFlight = useRef(false); // dedupe focus + visibilitychange seguidos
+  const puedeEnviar = emailDelivery !== 'log';
 
-  const revalidate = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setPhase('checking');
-    try {
-      const res = await fetch(`${API_URL}/auth/me`, { headers: authHeaders(), cache: 'no-store' });
-      if (res.ok) {
-        const me = await res.json().catch(() => null);
-        if (me?.email_verified) {
-          setVerified(true);
-          return;
+  const revalidate = useCallback(
+    async (manual = false) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      if (manual) setPhase('checking');
+      try {
+        const res = await fetch(`${API_URL}/auth/me`, { headers: authHeaders(), cache: 'no-store' });
+        if (res.ok) {
+          const me = await res.json().catch(() => null);
+          if (me?.email_verified) {
+            setVerified(true);
+            return;
+          }
         }
+        // Sin verificar aún, o 401: no inventamos un segundo refresh — el flujo de
+        // auth existente (middleware/redirect) actúa en la próxima navegación. Si el
+        // chequeo lo pidió la persona, se lo decimos; si fue el foco de la ventana, no
+        // se interrumpe con un aviso que no pidió.
+        setPhase(manual ? 'unverified' : 'idle');
+      } catch {
+        setPhase('error'); // error de red recuperable: no rompe el dashboard
+      } finally {
+        inFlight.current = false;
       }
-      // Sin verificar aún, o 401: no inventamos un segundo refresh — el flujo de
-      // auth existente (middleware/redirect) actúa en la próxima navegación.
-      setPhase('idle');
-    } catch {
-      setPhase('error'); // error de red recuperable: no rompe el dashboard
-    } finally {
-      inFlight.current = false;
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (verified) return;
@@ -72,11 +95,29 @@ export function VerificationBanner({ initialVerified, email }: { initialVerified
       <div className="min-w-0 flex-1 text-body">
         <span className="font-medium">Verificá tu email.</span>{' '}
         <span className="text-ink-3">
-          Te enviamos un enlace{email ? ` a ${email}` : ''}. Podés seguir usando Cowinance mientras tanto.
+          {puedeEnviar
+            ? `Te enviamos un enlace${email ? ` a ${email}` : ''}. Podés seguir usando Cowinance mientras tanto.`
+            : 'Podés seguir usando Cowinance: la verificación no bloquea nada.'}
         </span>
+        {!puedeEnviar && (
+          <span role="alert" className="mt-1 block text-label text-danger">
+            Este servidor no está configurado para enviar correo, así que el enlace no va a llegar por
+            más que lo reenvíes. Configurá <code>EMAIL_PROVIDER=smtp</code> (con <code>SMTP_HOST</code>,{' '}
+            <code>SMTP_FROM</code>) y <code>APP_BASE_URL</code> con tu dominio, y reiniciá la API.
+          </span>
+        )}
+        {phase === 'unverified' && (
+          <span role="status" className="mt-1 block text-label text-ink-2">
+            {puedeEnviar
+              ? 'Todavía figura sin verificar. Abrí el enlace del correo y volvé a tocar «Ya verifiqué».'
+              : 'Todavía figura sin verificar, y no puede verificarse hasta que el servidor pueda enviar el correo.'}
+          </span>
+        )}
         {phase === 'resent' && (
           <span role="status" className="mt-1 block text-label text-ink-2">
-            Te enviamos un nuevo enlace de verificación. Revisá tu correo.
+            {puedeEnviar
+              ? 'Te enviamos un nuevo enlace de verificación. Revisá tu correo.'
+              : 'Se generó un enlace nuevo, pero el servidor no lo envía: quedó en el log de la API.'}
           </span>
         )}
         {phase === 'error' && (
@@ -93,7 +134,7 @@ export function VerificationBanner({ initialVerified, email }: { initialVerified
         >
           {phase === 'resending' ? 'Enviando…' : 'Reenviar email'}
         </button>
-        <Button size="sm" onClick={revalidate} loading={phase === 'checking'}>
+        <Button size="sm" onClick={() => revalidate(true)} loading={phase === 'checking'}>
           {phase === 'checking' ? 'Verificando…' : 'Ya verifiqué'}
         </Button>
       </div>

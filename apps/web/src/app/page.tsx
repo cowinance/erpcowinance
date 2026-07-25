@@ -96,7 +96,11 @@ export default async function Dashboard() {
 
   return (
     <div>
-      <VerificationBanner initialVerified={!!me?.email_verified} email={me?.email} />
+      <VerificationBanner
+        initialVerified={!!me?.email_verified}
+        email={me?.email}
+        emailDelivery={me?.email_delivery}
+      />
 
       {neverPopulated ? (
         <EmptyFarmState greetingName={me?.name} farmName={farms?.[0]?.name} />

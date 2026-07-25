@@ -165,6 +165,23 @@ desarrollo el arranque avisa exactamente qué queda roto:
 |---|---|---|
 | `STORAGE_DRIVER` | `local` | Las fotos y documentos van al disco del contenedor: se pierden en el próximo deploy y no los ve otra instancia. Con `s3` (AWS, Cloudflare R2, MinIO, Backblaze B2) viven fuera del proceso. |
 | `EMAIL_PROVIDER` | `log` | El correo se **imprime**: la verificación de email y el reset de contraseña no le llegan al usuario. Con `smtp` se envía de verdad, contra cualquier proveedor. |
+| `APP_BASE_URL` | `http://localhost:3000` | El correo sale, pero el **enlace** apunta a localhost: no funciona en el teléfono de quien lo recibe. Es el más difícil de diagnosticar, porque el mail llegó. |
+
+**«No me llega el email de verificación».** Casi siempre es una de esas dos. Con `EMAIL_PROVIDER=log`
+el mensaje queda en el log de la API (`docker compose logs api`) y nunca sale; el dashboard lo dice
+explícitamente en el banner. Configurar:
+
+```bash
+EMAIL_PROVIDER=smtp
+SMTP_HOST=smtp.tu-proveedor.com
+SMTP_FROM="Cowinance <no-reply@tu-dominio.com>"
+SMTP_USER=...            # si el proveedor pide autenticación
+SMTP_PASS=...
+APP_BASE_URL=https://tu-dominio.com
+```
+
+y reiniciar la API. La verificación **no bloquea** el uso (ADR-0011): mientras tanto se puede
+trabajar normalmente, solo queda el banner.
 
 Lo que este compose **no** resuelve (ver [la auditoría](docs/audits/auditoria-2026-07-24.md)):
 una sola instancia de API — el rate limit cuenta en memoria.
