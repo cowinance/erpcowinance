@@ -258,11 +258,29 @@ mínimas**. Es lo que hace que la RLS se ejerza de verdad — con un superusuari
 | `JWT_SECRET` | API | Clave HMAC de los JWT (access, refresh, tokens de archivo) | dev: clave pública de desarrollo. **Producción: obligatoria** — el proceso NO arranca sin ella, ni con la de desarrollo, ni con menos de 32 caracteres (`openssl rand -base64 48`) |
 | `CORS_ORIGINS` | API | Orígenes permitidos, separados por comas | dev: refleja el origen. Producción sin lista: **CORS deshabilitado** (móvil y render server-side siguen funcionando: no son navegadores con origen) |
 | `TRUST_PROXY` | API | ¿Hay balanceador delante? `true` (1 salto) o cantidad de saltos | `false`. Necesario para que el rate limit vea la IP real; sin proxy, confiar dejaría que el cliente elija su IP |
+| `LOG_FORMAT` | API | Formato de los logs: `json` (indexable: `request_id`, `tenant_id`, `level`) o `pretty` | `json` en producción, `pretty` en el resto |
+| `METRICS_TOKEN` | API | Bearer que protege `GET /v1/metrics` | sin definir. **En producción, sin token el endpoint no existe** (404, no 401: un 401 confirmaría que está ahí). Fuera de producción, abierto |
 | `FORCE_HTTPS` | API | Enviar `Strict-Transport-Security` | `false`. Activarlo sobre HTTP plano deja el host inaccesible en los navegadores que ya lo vieron |
 
 Plantilla completa con comentarios: [`.env.example`](.env.example).
 
 > Ningún token de acción se documenta ni se registra: viajan solo en el email y se guardan hasheados (ADR-0011).
+
+### Observabilidad
+
+Cada request lleva un `request_id`: se toma de la cabecera `X-Request-Id` si el cliente o el
+balanceador ya mandó una —así una traza cruza el borde web → proxy → API en vez de cortarse en cada
+salto— y siempre vuelve en la respuesta. Ese id, más el `tenant_id` y el `user_id`, viajan en cada
+línea de log.
+
+En producción los logs salen en **JSON, una línea por evento**, incluido un log de acceso por
+request (`método`, ruta, estado, duración). Los 5xx salen en `error` y los 4xx en `warn`, para que
+un recolector pueda alertar sobre fallas del servidor sin ahogarse en los 401 normales de un
+cliente sin token.
+
+`GET /v1/metrics` expone métricas en formato Prometheus: requests, errores 5xx, respuestas por
+código de estado, histograma de latencia y memoria del proceso. La etiqueta de ruta es el **patrón**
+(`/v1/animals/:id`), nunca la URL: con ids, una finca de 10.000 animales generaría 10.000 series.
 
 ### Sondas de plataforma
 

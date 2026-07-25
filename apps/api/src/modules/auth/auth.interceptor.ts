@@ -4,6 +4,7 @@ import { Observable, from, lastValueFrom } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
 import { DbService } from '../../db/db.service';
 import { requestContext } from '../../common/request-context';
+import { tagActor } from '../../common/observability';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { AccessPayload, JWT_ISSUER, JWT_SECRET } from './auth.service';
 
@@ -42,6 +43,10 @@ export class AuthInterceptor implements NestInterceptor {
     }
     if (payload.typ !== 'access')
       throw new UnauthorizedException({ code: 'auth.invalid_token', title: 'Se esperaba un access token' });
+
+    // El log de acceso se emite cuando la respuesta termina, con la transacción ya cerrada: si no
+    // se copia el actor al contexto de observabilidad ahora, esa línea saldría sin tenant.
+    tagActor(payload.ten, payload.sub);
 
     return from(
       this.db.tx(async (q) => {

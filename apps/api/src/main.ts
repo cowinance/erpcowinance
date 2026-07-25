@@ -4,9 +4,14 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { DomainExceptionFilter } from './common/domain-exception.filter';
 import { resolveCorsOrigin, resolveTrustProxy, securityHeaders } from './common/http-hardening';
+import { requestObservability } from './common/observability';
+import { resolveLogger } from './common/structured-logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // El logger se fija en la creación para que TAMBIÉN el arranque (rutas mapeadas, migraciones,
+  // adaptadores elegidos) salga en el mismo formato: si media app loguea JSON y la otra media
+  // texto, el recolector se pierde justo en el tramo que más se mira cuando algo no levanta.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: resolveLogger() });
   app.setGlobalPrefix('v1');
 
   // Detrás de un balanceador hay que confiar en X-Forwarded-For, o el rate limit por IP se
@@ -15,6 +20,10 @@ async function bootstrap() {
   const trustProxy = resolveTrustProxy();
   if (trustProxy !== false) app.set('trust proxy', trustProxy);
 
+  // PRIMERO en la cadena: todo lo que venga después —rate limit, auth, handler, filtros— corre
+  // dentro del contexto de la request y hereda su `request_id`. Y como es middleware, el log de
+  // acceso sale también cuando el interceptor de auth corta con un 401.
+  app.use(requestObservability());
   app.use(securityHeaders());
   app.enableCors({ origin: resolveCorsOrigin() });
   app.useGlobalFilters(new DomainExceptionFilter());

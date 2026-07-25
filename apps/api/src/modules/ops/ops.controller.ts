@@ -1,6 +1,8 @@
-import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Headers, HttpException, HttpStatus, NotFoundException, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { DbService } from '../../db/db.service';
 import { Public } from '../auth/public.decorator';
+import { metrics } from '../../common/metrics';
 
 /**
  * Sondas de plataforma. Todo orquestador (Kubernetes, ECS, Railway, Fly, Render) necesita dos
@@ -37,5 +39,32 @@ export class OpsController {
       );
     }
     return { status: 'ready' };
+  }
+
+  /**
+   * Métricas en formato Prometheus.
+   *
+   * Exponerlas dice cosas sobre la operación (rutas, volumen, latencias) que no tienen por qué ser
+   * públicas. La regla es fail-closed: en producción, si no hay `METRICS_TOKEN`, el endpoint **no
+   * existe** (404, no 401: un 401 confirmaría que está ahí). Fuera de producción queda abierto,
+   * porque ahí el destinatario es quien está desarrollando.
+   */
+  @Public()
+  @Get('metrics')
+  metrics(@Headers('authorization') authorization: string | undefined, @Res() res: Response) {
+    const token = process.env.METRICS_TOKEN?.trim();
+    const esProduccion = process.env.NODE_ENV === 'production';
+    if (esProduccion && !token) throw new NotFoundException();
+    if (token && authorization !== `Bearer ${token}`) throw new NotFoundException();
+
+    const mem = process.memoryUsage();
+    res.set({ 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.send(
+      metrics.render({
+        uptimeS: Math.round(process.uptime()),
+        heapUsedBytes: mem.heapUsed,
+        rssBytes: mem.rss,
+      }),
+    );
   }
 }
