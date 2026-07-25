@@ -45,6 +45,13 @@ const COVERAGE_SCOPE = ['/packages/domain/src/', '/packages/sync-core/src/'];
 const JSCPD_SCOPE = 'apps/api/src packages/domain/src packages/sync-core/src';
 const LARGEST_DIR = 'apps/api/src';
 
+/**
+ * Techo de líneas por servicio (gate). Trinquete: bajarlo es una decisión explícita, subirlo
+ * debería costar una discusión. Historial: 1417 (herd.service.ts, sin techo) → 1150 al extraer
+ * LotsService.
+ */
+const MAX_SERVICE_LINES = 1150;
+
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
 const red = (s) => `\x1b[31m${s}\x1b[0m`;
 const dim = (s) => `\x1b[2m${s}\x1b[0m`;
@@ -109,6 +116,38 @@ try {
 }
 gate('cero ciclos de dependencia (madge)', madge.ok && cycles === 0, cycles >= 0 ? `${cycles} ciclos` : 'madge error');
 
+// Gate 4: presupuesto de tamaño por servicio.
+//
+// POR QUÉ ES UN GATE Y NO UN INDICADOR: como indicador, `herd.service.ts` creció hasta 1417 líneas
+// —cuatro veces el servicio más grande de cuando se fijó la baseline— sin que nada lo frenara. Un
+// número que solo se informa no cambia decisiones.
+//
+// El techo es un TRINQUETE, no un objetivo: está apenas por encima del peor caso actual, así que
+// impide crecer pero no exige refactorizar hoy. Bajarlo es trabajo deliberado, y cada vez que se
+// baje queda registrado acá.
+function tsFiles(dir) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...tsFiles(p));
+    else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) out.push(p);
+  }
+  return out;
+}
+const allSizes = tsFiles(LARGEST_DIR)
+  .map((f) => ({ f, n: readFileSync(f, 'utf8').split('\n').length }))
+  .sort((a, b) => b.n - a.n);
+const overBudget = allSizes.filter((s) => s.f.includes('.service.ts') && s.n > MAX_SERVICE_LINES);
+gate(
+  `ningún servicio supera ${MAX_SERVICE_LINES} líneas`,
+  overBudget.length === 0,
+  overBudget.length === 0
+    ? `mayor: ${allSizes.find((s) => s.f.includes('.service.ts'))?.n ?? 0}`
+    : overBudget.map((s) => `${s.f.replace(LARGEST_DIR + '/', '')} (${s.n})`).join(', '),
+);
+if (overBudget.length > 0)
+  console.log(dim('    partilo por caso de uso; ver LotsService, extraído de HerdService por esta misma razón.'));
+
 // ───────────────────────── QUALITY INDICATORS ─────────────────────────
 console.log(bold('\n══ QUALITY INDICATORS ') + dim('(informan — nunca bloquean; delta vs baseline)'));
 
@@ -147,20 +186,8 @@ if (jscpd.ok) {
   console.log(`  duplicación: ${dim('jscpd error')}`);
 }
 
-// Indicador 3: watch de God-object — archivos fuente más grandes.
-function tsFiles(dir) {
-  const out = [];
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...tsFiles(p));
-    else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) out.push(p);
-  }
-  return out;
-}
-const sizes = tsFiles(LARGEST_DIR)
-  .map((f) => ({ f, n: readFileSync(f, 'utf8').split('\n').length }))
-  .sort((a, b) => b.n - a.n)
-  .slice(0, 5);
+// Indicador 3: watch de God-object — archivos fuente más grandes (el techo ya es un gate arriba).
+const sizes = allSizes.slice(0, 5);
 console.log(`  archivos fuente más grandes (${LARGEST_DIR}):`);
 for (const { f, n } of sizes) console.log(dim(`    ${String(n).padStart(4)}  ${f.replace(LARGEST_DIR + '/', '')}`));
 const largestService = sizes.find((s) => s.f.includes('.service.ts'))?.n ?? 0;

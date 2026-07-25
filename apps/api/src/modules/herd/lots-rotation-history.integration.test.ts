@@ -9,6 +9,7 @@ import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { MovementService } from '../land/movement.service';
 import { LandService } from '../land/land.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -20,6 +21,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('Lotes — rotación de potrero, guarda de archivado e historial', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let land: LandService;
   let originalCwd: string;
   let tmp: string;
@@ -38,13 +40,14 @@ describe('Lotes — rotación de potrero, guarda de archivado e historial', () =
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     land = new LandService(db, new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
     const pads = await db.query<{ id: string }>(`SELECT id FROM paddocks WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY name LIMIT 2`, [db.tenant]);
     padA = pads[0].id;
     padB = pads[1].id;
-    lot = (await herd.createLot({ name: 'Rotación L' }) as any).id;
+    lot = (await lotsSvc.createLot({ name: 'Rotación L' }) as any).id;
     await db.query(`UPDATE lots SET current_paddock_id=$2 WHERE id=$1`, [lot, padA]);
     for (let i = 0; i < 2; i++) {
       const id = (await db.query<{ id: string }>(
@@ -72,13 +75,13 @@ describe('Lotes — rotación de potrero, guarda de archivado e historial', () =
   });
 
   it('no permite mover animales a un lote archivado', async () => {
-    const archived = (await herd.createLot({ name: 'Archivado' }) as any).id;
-    await herd.deleteLot(archived); // vacío → se archiva
+    const archived = (await lotsSvc.createLot({ name: 'Archivado' }) as any).id;
+    await lotsSvc.deleteLot(archived); // vacío → se archiva
     await expect(land.moveAnimals({ animal_ids: [animals[0]], lot_id: archived }, randomUUID())).rejects.toMatchObject({ status: 409 });
   });
 
   it('el historial del lote refleja la rotación (from/to potrero, cantidad)', async () => {
-    const hist: any[] = await herd.lotHistory(lot);
+    const hist: any[] = await lotsSvc.lotHistory(lot);
     const rot = hist.find((h) => h.kind === 'rotacion');
     expect(rot).toBeDefined();
     expect(rot.animals).toBe(2);

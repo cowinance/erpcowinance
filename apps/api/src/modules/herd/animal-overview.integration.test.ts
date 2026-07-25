@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { BillingService } from '../billing/billing.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -15,6 +16,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('HerdService.animalOverview — ficha 360 (E3)', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let originalCwd: string;
   let tmp: string;
   let farmId: string;
@@ -30,6 +32,7 @@ describe('HerdService.animalOverview — ficha 360 (E3)', () => {
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
     catF = (await db.query<{ id: string }>(`SELECT id FROM animal_categories WHERE code='vaca' LIMIT 1`))[0].id;
@@ -53,7 +56,7 @@ describe('HerdService.animalOverview — ficha 360 (E3)', () => {
     // Un parto (producción como madre).
     await db.query(`INSERT INTO calvings (tenant_id, dam_id, calving_date) VALUES ($1,$2, CURRENT_DATE - 60)`, [db.tenant, animalId]);
     // Un movimiento de ingreso a un lote.
-    const lot = ((await herd.createLot({ name: 'Ov L' })) as any).id;
+    const lot = ((await lotsSvc.createLot({ name: 'Ov L' })) as any).id;
     await db.query(
       `INSERT INTO animal_movements (tenant_id, animal_id, movement_id, moved_at, to_lot_id, reason) VALUES ($1,$2,gen_random_uuid(), now() - INTERVAL '10 days', $3, 'ingreso')`,
       [db.tenant, animalId, lot],

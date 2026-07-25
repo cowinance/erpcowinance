@@ -59,39 +59,51 @@ export class DbService implements OnModuleInit {
       this.db = new PGliteDriver(new PGlite(dataDir));
     }
     await this.db.ready();
-    const has = await this.db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public' AND table_name='organizations'`,
-    );
-    const schemaSql = this.loadSchemaSql();
-    if (has.rows[0].n === 0) {
-      this.logger.log('Base vacía: cargando esquema canónico (140 tablas)…');
-      await this.db.exec(schemaSql);
-      this.logger.log('Esquema cargado.');
-    }
-    // El esquema canónico es la versión 0000: se registra exista o no (una base creada antes de
-    // que hubiera migraciones versionadas también lo tiene aplicado, solo que sin anotarlo).
-    await recordBaseline(this.db, checksumOf(schemaSql));
-    await runMigrations(this.db, loadMigrations(resolveDbPath('migrations')), (m) => this.logger.log(m));
 
-    // El resto de las policies dispersas del DDL (`tenant_isolation_<tabla>` sobre
-    // app.current_tenant) ya NO se borran acá una por una: `rlsMigration()` las elimina junto con
-    // la creación de la correcta, para TODA tabla de RLS_TABLES. Antes esto eran ~33 líneas que
-    // había que acordarse de sumar al activar cada módulo — y olvidarse dejaba la tabla en
-    // deny-all silencioso.
-    await this.db.exec(rlsMigration());
+    // Todo el DDL de arranque va bajo un LOCK: dos instancias que arrancan a la vez —lo normal en
+    // un despliegue rodante— cargarían el esquema las dos y la segunda muere con «duplicate key
+    // value violates unique constraint pg_type_typname_nsp_index». Se comprobó levantando dos
+    // procesos contra la misma base. La que llega segunda espera acá, y cuando entra ya encuentra
+    // el esquema puesto y las migraciones aplicadas: no hace nada.
+    await this.withBootLock(async () => {
+      const has = await this.db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public' AND table_name='organizations'`,
+      );
+      const schemaSql = this.loadSchemaSql();
+      if (has.rows[0].n === 0) {
+        this.logger.log('Base vacía: cargando esquema canónico (140 tablas)…');
+        await this.db.exec(schemaSql);
+        this.logger.log('Esquema cargado.');
+      }
+      // El esquema canónico es la versión 0000: se registra exista o no (una base creada antes de
+      // que hubiera migraciones versionadas también lo tiene aplicado, solo que sin anotarlo).
+      await recordBaseline(this.db, checksumOf(schemaSql));
+      await runMigrations(this.db, loadMigrations(resolveDbPath('migrations')), (m) => this.logger.log(m));
 
-    // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
-    // se registra self-service (P1.1) depende de que el rol `owner` exista.
-    await this.runInTx((h) => bootstrapCatalogs(h), 'Cargando catálogos base…');
+      // El resto de las policies dispersas del DDL (`tenant_isolation_<tabla>` sobre
+      // app.current_tenant) ya NO se borran acá una por una: `rlsMigration()` las elimina junto con
+      // la creación de la correcta, para TODA tabla de RLS_TABLES. Antes esto eran ~33 líneas que
+      // había que acordarse de sumar al activar cada módulo — y olvidarse dejaba la tabla en
+      // deny-all silencioso.
+      await this.db.exec(rlsMigration());
 
-    // Datos demo: solo bajo SEED_DEMO (ON en dev, OFF en prod) y si la base no
-    // tiene organizaciones todavía. Sin demo, el sistema arranca vacío y espera
-    // el primer registro real.
-    const orgs = await this.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM organizations`);
-    if (orgs.rows[0].n === 0 && DbService.seedDemoEnabled()) {
-      await this.runInTx((h) => seedDemo(h), 'Sembrando datos demo…');
-      this.logger.log('Seed demo completado.');
-    }
+      // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
+      // se registra self-service (P1.1) depende de que el rol `owner` exista. Va DENTRO del lock:
+      // dos instancias insertando los mismos catálogos a la vez chocarían igual.
+      await this.runInTx((h) => bootstrapCatalogs(h), 'Cargando catálogos base…');
+
+      // Datos demo: solo bajo SEED_DEMO (ON en dev, OFF en prod) y si la base no tiene
+      // organizaciones todavía. Sin demo, el sistema arranca vacío y espera el primer registro
+      // real.
+      //
+      // La COMPROBACIÓN va dentro del lock junto con el seed: si estuviera afuera, dos instancias
+      // podrían ver la base vacía a la vez y sembrar las dos (choca por `users_email_key`).
+      const orgs = await this.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM organizations`);
+      if (orgs.rows[0].n === 0 && DbService.seedDemoEnabled()) {
+        await this.runInTx((h) => seedDemo(h), 'Sembrando datos demo…');
+        this.logger.log('Seed demo completado.');
+      }
+    });
 
     // Contexto por defecto para código fuera de request (boot, jobs). Con
     // SEED_DEMO off y sin registros aún, la base está vacía: no hay contexto por
@@ -127,6 +139,34 @@ export class DbService implements OnModuleInit {
     this.userId = user.rows[0].id;
     this.logger.log(`Contexto dev: tenant=${this.tenantId} farm=${this.farmId} · RLS forzada en ${RLS_TABLES.length} tablas`);
   }
+
+  /**
+   * Corre `fn` con exclusión mutua entre instancias.
+   *
+   * `pg_advisory_lock` es un lock de SESIÓN: hay que tomarlo y soltarlo sobre la MISMA conexión,
+   * de ahí el `bootHandle()` en vez de una query suelta del pool. No tiene timeout a propósito —
+   * esperar a que la otra instancia termine de migrar es exactamente lo que queremos; abandonar
+   * dejaría a esta instancia sirviendo sobre un esquema a medio aplicar.
+   *
+   * En PGlite no hace falta: es un proceso único con una sola conexión.
+   */
+  private async withBootLock<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.db.kind !== 'postgres') return fn();
+    const h = await this.db.bootHandle();
+    try {
+      await h.query('SELECT pg_advisory_lock($1)', [DbService.BOOT_LOCK_KEY]);
+      try {
+        return await fn();
+      } finally {
+        await h.query('SELECT pg_advisory_unlock($1)', [DbService.BOOT_LOCK_KEY]);
+      }
+    } finally {
+      h.release();
+    }
+  }
+
+  /** Clave arbitraria pero FIJA: todas las instancias tienen que pedir el mismo lock. */
+  private static readonly BOOT_LOCK_KEY = 727_262_001;
 
   /** ¿Sembrar datos demo? ON en dev por defecto, OFF en producción. Override con SEED_DEMO. */
   private static seedDemoEnabled(): boolean {

@@ -1,12 +1,13 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { ACCESS_COOKIE, API_URL } from './api';
+import { DIRECT_API_URL } from './api';
+import { ACCESS_COOKIE } from './session';
 
 /** Fetch autenticado desde Server Components; sin sesión o token vencido → /login. */
 export async function api<T = any>(path: string): Promise<T> {
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) redirect('/login');
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${DIRECT_API_URL}${path}`, {
     cache: 'no-store',
     headers: { Authorization: `Bearer ${token}` },
   });

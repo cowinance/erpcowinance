@@ -3,7 +3,8 @@ import { Inter } from 'next/font/google';
 import { cookies } from 'next/headers';
 import './globals.css';
 import { Sidebar } from '@/components/Sidebar';
-import { ACCESS_COOKIE, API_URL } from '@/lib/api';
+import { API_URL } from '@/lib/api';
+import { ACCESS_COOKIE } from '@/lib/session';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 

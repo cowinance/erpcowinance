@@ -9,6 +9,7 @@ import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { MovementService } from '../land/movement.service';
 import { LandService } from '../land/land.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -20,6 +21,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('Lotes — mover animales reusa recordMovement y se refleja en el detalle', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let land: LandService;
   let originalCwd: string;
   let tmp: string;
@@ -35,11 +37,12 @@ describe('Lotes — mover animales reusa recordMovement y se refleja en el detal
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     land = new LandService(db, new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     const farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     const speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
-    lotA = (await herd.createLot({ name: 'Mover A' }) as any).id;
-    lotB = (await herd.createLot({ name: 'Mover B' }) as any).id;
+    lotA = (await lotsSvc.createLot({ name: 'Mover A' }) as any).id;
+    lotB = (await lotsSvc.createLot({ name: 'Mover B' }) as any).id;
     for (let i = 0; i < 3; i++) {
       const id = (await db.query<{ id: string }>(
         `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, current_lot_id) VALUES ($1,$2,$3,'F','active',$4) RETURNING id`,
@@ -55,14 +58,14 @@ describe('Lotes — mover animales reusa recordMovement y se refleja en el detal
   });
 
   it('parte con los 3 animales en el lote A', async () => {
-    expect((await herd.getLot(lotA) as any).head).toBe(3);
-    expect((await herd.getLot(lotB) as any).head).toBe(0);
+    expect((await lotsSvc.getLot(lotA) as any).head).toBe(3);
+    expect((await lotsSvc.getLot(lotB) as any).head).toBe(0);
   });
 
   it('mover 2 animales de A a B se refleja en ambos detalles', async () => {
     await land.moveAnimals({ animal_ids: animals.slice(0, 2), lot_id: lotB }, randomUUID());
-    expect((await herd.getLot(lotA) as any).head).toBe(1);
-    expect((await herd.getLot(lotB) as any).head).toBe(2);
+    expect((await lotsSvc.getLot(lotA) as any).head).toBe(1);
+    expect((await lotsSvc.getLot(lotB) as any).head).toBe(2);
     // El movimiento quedó registrado (regla única), no fue un UPDATE directo.
     const mv = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM animal_movements WHERE tenant_id=$1 AND to_lot_id=$2`, [db.tenant, lotB]);
     expect(mv[0].n).toBeGreaterThanOrEqual(2);
@@ -70,7 +73,7 @@ describe('Lotes — mover animales reusa recordMovement y se refleja en el detal
 
   it('quitar del lote (lot_id null) baja las cabezas', async () => {
     await land.moveAnimals({ animal_ids: [animals[2]], lot_id: null }, randomUUID());
-    expect((await herd.getLot(lotA) as any).head).toBe(0);
+    expect((await lotsSvc.getLot(lotA) as any).head).toBe(0);
     const [a] = await db.query<{ lot: string | null }>(`SELECT current_lot_id AS lot FROM animals WHERE id=$1`, [animals[2]]);
     expect(a.lot).toBeNull();
   });

@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { BillingService } from '../billing/billing.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -16,6 +17,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('HerdService.listAnimals — filtros avanzados + orden (E1)', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let originalCwd: string;
   let tmp: string;
   let lot: string;
@@ -29,9 +31,10 @@ describe('HerdService.listAnimals — filtros avanzados + orden (E1)', () => {
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     const farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     const speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
-    lot = ((await herd.createLot({ name: 'Adv L' })) as any).id;
+    lot = ((await lotsSvc.createLot({ name: 'Adv L' })) as any).id;
 
     const mk = async (key: string, opts: { sex?: string; kg?: number; origin?: string; withLot?: boolean }) => {
       const id = (

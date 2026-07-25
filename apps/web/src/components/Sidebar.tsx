@@ -40,7 +40,7 @@ import {
   Zap,
   LogOut,
 } from 'lucide-react';
-import { ACCESS_COOKIE, API_URL, REFRESH_COOKIE } from '@/lib/api';
+import { clearSession } from '@/lib/auth';
 
 const SECTIONS: { title: string | null; items: { href: string; label: string; icon: any }[] }[] = [
   {
@@ -243,15 +243,11 @@ export function Sidebar({
           ),
         )}
         <button
-          onClick={() => {
-            const refresh = document.cookie.match(new RegExp(`(?:^|; )${REFRESH_COOKIE}=([^;]*)`))?.[1];
-            fetch(`${API_URL}/auth/logout`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refresh_token: refresh ? decodeURIComponent(refresh) : undefined }),
-            }).catch(() => {});
-            document.cookie = `${ACCESS_COOKIE}=; path=/; max-age=0`;
-            document.cookie = `${REFRESH_COOKIE}=; path=/; max-age=0`;
+          onClick={async () => {
+            // Un solo lugar cierra sesión (`clearSession`): borra las cookies Y revoca el refresh
+            // en el backend. Antes esto se hacía acá a mano leyendo `document.cookie`, que con
+            // cookies HttpOnly ya no es posible — ni deseable.
+            await clearSession();
             window.location.href = '/login';
           }}
           className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-body text-ink-2 hover:bg-sunken hover:text-ink"

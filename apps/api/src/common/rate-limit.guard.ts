@@ -1,6 +1,8 @@
 import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { RateLimitRule, SlidingWindowRateLimiter } from './rate-limit';
+import type { RateLimitRule } from './rate-limit';
+import { DbService } from '../db/db.service';
+import { resolveRateLimitStore, type RateLimitStore } from './rate-limit-store';
 
 export const RATE_LIMIT_KEY = 'cowinance:rate-limit';
 
@@ -9,46 +11,69 @@ export const RATE_LIMIT_KEY = 'cowinance:rate-limit';
  * endpoints públicos de credenciales, no a la API entera (una request autenticada ya está
  * acotada por el plan y por la sesión).
  */
-export const RateLimit = (rule: RateLimitRule) => SetMetadata(RATE_LIMIT_KEY, rule);
+export const RateLimit = (rules: RateLimitRules) => SetMetadata(RATE_LIMIT_KEY, rules);
 
-/** Ventana estándar para credenciales: 10 intentos cada 5 minutos. */
-export const CREDENTIAL_RULE: RateLimitRule = { limit: 10, windowMs: 5 * 60_000 };
+/**
+ * Un límite por DIMENSIÓN, no uno solo para las dos.
+ *
+ * Las dos dimensiones frenan ataques distintos y toleran cosas distintas:
+ *
+ *  · **email** — el diccionario contra UNA cuenta. Acá el límite tiene que ser estricto: nadie
+ *    tipea mal su contraseña diez veces en cinco minutos.
+ *  · **IP** — el *password spraying*: una contraseña común probada contra muchas cuentas. Acá el
+ *    límite tiene que ser AMPLIO, porque una IP no es una persona: una finca con veinte empleados
+ *    detrás de un mismo NAT entra toda por la misma. Con un límite estricto por IP, el que se
+ *    queda afuera es el vigésimo empleado, no el atacante.
+ *
+ * Que fuera un único límite para ambas era un error: la suite e2e completa —que registra e ingresa
+ * decenas de usuarios desde una sola IP— lo destapó fallando en 14 escenarios.
+ */
+export interface RateLimitRules {
+  ip: RateLimitRule;
+  email: RateLimitRule;
+}
 
-/** Envío de emails (verificación, reset): más restrictivo — cada intento manda un correo. */
-export const EMAIL_RULE: RateLimitRule = { limit: 5, windowMs: 15 * 60_000 };
+/** Credenciales (login, refresh, registro, reset con token). */
+export const CREDENTIAL_RULES: RateLimitRules = {
+  ip: { limit: 60, windowMs: 5 * 60_000 },
+  email: { limit: 10, windowMs: 5 * 60_000 },
+};
+
+/** Endpoints que ENVÍAN un correo: cada intento le llega a una persona real. */
+export const EMAIL_SEND_RULES: RateLimitRules = {
+  ip: { limit: 30, windowMs: 15 * 60_000 },
+  email: { limit: 5, windowMs: 15 * 60_000 },
+};
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
-  private readonly limiter = new SlidingWindowRateLimiter();
-  private lastPrune = 0;
+  private readonly store: RateLimitStore;
 
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    db: DbService,
+  ) {
+    this.store = resolveRateLimitStore(db);
+  }
 
-  canActivate(context: ExecutionContext): boolean {
-    const rule = this.reflector.getAllAndOverride<RateLimitRule>(RATE_LIMIT_KEY, [
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const rules = this.reflector.getAllAndOverride<RateLimitRules>(RATE_LIMIT_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!rule) return true;
+    if (!rules) return true;
 
     const req = context.switchToHttp().getRequest();
     const now = Date.now();
-    if (now - this.lastPrune > rule.windowMs) {
-      this.limiter.prune(now, rule.windowMs);
-      this.lastPrune = now;
-    }
 
-    // DOS dimensiones, ambas obligatorias:
-    //  · por IP     → frena el diccionario clásico contra una cuenta desde un origen.
-    //  · por email  → frena el "password spraying": una contraseña común probada contra muchas
-    //                 cuentas desde muchas IPs, que la limitación por IP sola no ve.
+    // Las dos dimensiones se evalúan siempre, cada una con SU límite (ver `RateLimitRules`).
     const route = `${req.method}:${req.route?.path ?? req.url}`;
-    const keys = [`${route}|ip:${clientIp(req)}`];
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : null;
-    if (email) keys.push(`${route}|email:${email}`);
+    const controles: [string, RateLimitRule][] = [[`${route}|ip:${clientIp(req)}`, rules.ip]];
+    if (email) controles.push([`${route}|email:${email}`, rules.email]);
 
-    for (const key of keys) {
-      const decision = this.limiter.hit(key, rule, now);
+    for (const [key, rule] of controles) {
+      const decision = await this.store.hit(key, rule, now);
       if (!decision.allowed) {
         const res = context.switchToHttp().getResponse();
         res?.set?.('Retry-After', String(decision.retryAfterSeconds));

@@ -91,13 +91,28 @@ origen: siguen funcionando). En desarrollo se sigue reflejando, para no pelear c
 `X-Permitted-Cross-Domain-Policies`, se quita `X-Powered-By`, y HSTS **solo** con `FORCE_HTTPS=true`
 (activarlo sobre HTTP plano deja el host inaccesible en los navegadores que ya lo vieron). 3 tests.
 
-#### H-6 · MEDIO — Tokens en cookies legibles por JavaScript · **PENDIENTE** → paso 2.3
+#### H-6 · MEDIO — Tokens en cookies legibles por JavaScript · **CORREGIDO** (paso 2.3)
 
-`apps/web/src/lib/auth.ts` escribe `cw_access` y `cw_refresh` con `document.cookie`: son
-`SameSite=Lax` pero **no `HttpOnly`** (no pueden serlo: las escribe el cliente). Cualquier XSS en
-la web se lleva la sesión, y el refresh dura 7 días. El arreglo correcto es que el login pase por
-un *route handler* de Next que fije las cookies del lado del servidor con `HttpOnly`; es un
-refactor del borde de autenticación de la web, no un parche.
+`apps/web/src/lib/auth.ts` escribía `cw_access` y `cw_refresh` con `document.cookie`: `SameSite=Lax`
+pero **no `HttpOnly`** (no podían serlo: las escribía el cliente). Cualquier XSS se llevaba la
+sesión, y el refresh dura 7 días.
+
+*Corrección:* el login pasa por un route handler de Next (`/api/auth/login`) que llama a la API del
+lado del servidor y fija las cookies con `HttpOnly`; el navegador nunca ve un token. Como el
+JavaScript de la página ya no puede armar el `Authorization`, se agregó un proxy
+(`app/api/cw/[...path]`) que pone la cabecera del lado del servidor: **los ~200 llamados repartidos
+por la app no se tocaron**, porque `API_URL` resuelve sola a `/api/cw` en el navegador y a la API
+directa en el servidor. `hasSession()` pasó a mirar una marca `cw_session` que no lleva nada
+sensible: su único valor es `1`.
+
+Efecto colateral: el navegador ya no habla con la API, así que **la web dejó de necesitar CORS**.
+
+**Bug encontrado al hacerlo: la web no renovaba el token en ningún lado.** El access dura 15
+minutos, así que la sesión se caía a mitad del trabajo. Ahora se renueva en los dos caminos: el
+proxy lo hace ante un 401 (con las renovaciones concurrentes compartiendo una sola promesa — el
+backend revoca la sesión entera si detecta reuso del refresh, así que cinco requests en paralelo
+habrían echado al usuario) y el middleware al navegar, porque los Server Components no pueden
+escribir cookies.
 
 #### H-7 · INFORMATIVO — 3 avisos altos de npm sin versión corregida disponible
 
@@ -237,6 +252,20 @@ el tipo de código que falla en producción contra un proveedor concreto y no en
 procesador no arranca. Necesita un *dev build* del móvil (Expo Go no recibe push) y credenciales
 de EAS.
 
+#### H-15 · ALTO — Dos instancias arrancando a la vez se pisaban · **CORREGIDO** (paso 2)
+
+Encontrado al verificar el rate limit compartido, levantando dos procesos contra la misma base —
+que es exactamente lo que hace un despliegue rodante. Las dos veían la base vacía y **cargaban el
+esquema las dos**: la segunda moría con `duplicate key value violates unique constraint
+"pg_type_typname_nsp_index"`. Con el seed demo activo, el mismo choque en `users_email_key`.
+
+*Corrección:* todo el arranque —esquema, migraciones, políticas RLS, catálogos y seed— corre bajo
+un `pg_advisory_lock`. La instancia que llega segunda espera y, cuando entra, ya encuentra todo
+aplicado: no hace nada. La comprobación de "¿hay que sembrar?" va **dentro** del lock; afuera, las
+dos podían verla vacía a la vez. No hay timeout a propósito: esperar a que la otra termine de
+migrar es justo lo que se quiere — abandonar dejaría a esta instancia sirviendo sobre un esquema a
+medio aplicar.
+
 #### H-14 · MEDIO — RLS no ejercitada en desarrollo
 
 Ya conocido y mitigado: PGlite conecta como superusuario y **saltea** la RLS, así que las policies
@@ -316,14 +345,33 @@ software esté completo.
 
 ### Paso 2 — Endurecimiento
 
-1. **Observabilidad**: logs estructurados con `request_id` + tenant, métricas y trazas. Hoy el
-   diagnóstico en producción sería leer texto suelto.
+1. ~~**Observabilidad.**~~ **HECHO** — `request_id` por request (tomado de `X-Request-Id` si ya
+   viene, así la traza cruza web → proxy → API), logs JSON con `request_id`/`tenant_id`/`user_id`,
+   log de acceso y métricas Prometheus en `/v1/metrics` con la etiqueta de ruta por PATRÓN, no por
+   URL. *El log de acceso va como middleware y no como interceptor:* un interceptor global no llega
+   a correr cuando el de auth lanza antes, y los 401 —las requests que más importa ver— quedaban
+   sin registrar.
 2. **Ejercitar la RLS en el pipeline de despliegue**, no solo en CI: la garantía de aislamiento es
-   la promesa central de un SaaS multi-tenant.
-3. **Cookies `HttpOnly`** vía route handler de Next. Cierra **H-6**.
-4. **Rate limit compartido** (Redis) cuando haya más de una instancia. Cierra el límite conocido de **H-2**.
-5. **Presupuesto de tamaño por servicio**: partir `herd.service.ts` (1417 líneas) por caso de uso.
-   Elegir el umbral y ponerlo en `audit:arch` como gate, no como indicador.
+   la promesa central de un SaaS multi-tenant. *(pendiente)*
+3. ~~**Cookies `HttpOnly`.**~~ **HECHO** — ver H-6.
+4. ~~**Rate limit compartido.**~~ **HECHO** — el contador vive en PostgreSQL, no en Redis: la base
+   ya está, y sumar un servicio con su despliegue, su backup y su modo de falla para contar
+   intentos de login sería pagar mucho por poco. **Verificado con dos instancias contra la misma
+   base: 10 intentos en total, no 10 por instancia.** Si la base no responde, degrada al contador
+   en memoria — fail-open a propósito, porque con la base caída `/auth/login` ya no funciona y
+   rechazar ahí solo dejaría el login bloqueado después de que vuelva.
+
+   *De paso, el e2e completo destapó que la regla estaba mal calibrada:* un único límite para las
+   dos dimensiones hacía fallar 14 escenarios. Ahora cada dimensión tiene el suyo — estricto por
+   **email** (nadie tipea mal su contraseña diez veces en cinco minutos) y amplio por **IP**,
+   porque una IP no es una persona: una finca con veinte empleados detrás del mismo NAT entra toda
+   por la misma, y con un límite estricto el que queda afuera es el vigésimo empleado.
+5. ~~**Presupuesto de tamaño por servicio.**~~ **HECHO** — `LotsService` extraído de `HerdService`
+   (294 líneas; la costura ya estaba: nada de eso tocaba `AnimalWriteService` ni `Billing`), y
+   `audit:arch` tiene ahora un **gate** de 1150 líneas por servicio. Como indicador, `herd.service`
+   había crecido a 1417 sin que nada lo frenara: un número que solo se informa no cambia
+   decisiones. El techo es un trinquete —impide crecer, no exige refactorizar hoy—; bajarlo queda
+   como trabajo deliberado.
 
 ### Paso 3 — Cerrar Fase 2 funcional (3 módulos)
 
@@ -375,8 +423,15 @@ software esté completo.
 | `.github/workflows/release.yml` | paso 1.5 · build → humo sobre el stack real → publicación en GHCR |
 | `deploy/backup/{backup,restore}.sh`, `scripts/verify-backup.mjs` | paso 1.6 · respaldo, restore y el ensayo que los prueba |
 | `.github/workflows/ci.yml` | paso 1.6 · `verify:backup` como job |
+| `common/observability.ts`, `metrics.ts`, `structured-logger.ts` (+3 tests) | paso 2.1 · request_id, log de acceso, métricas, logs JSON |
+| `apps/web/src/lib/session.ts`, `app/api/auth/*`, `app/api/cw/[...path]` | paso 2.3 · cookies HttpOnly + proxy + renovación del token |
+| `apps/web/src/middleware.ts` | paso 2.3 · renueva al navegar (los Server Components no pueden escribir cookies) |
+| `common/rate-limit-store.ts` (+test), `packages/db/migrations/0009_rate_limit.sql` | paso 2.4 · contador compartido en PostgreSQL |
+| `modules/herd/lots.service.ts` | paso 2.5 · 294 líneas fuera de `HerdService` |
+| `scripts/audit-arch.mjs` | paso 2.5 · el tamaño por servicio pasa de indicador a **gate** |
+| `apps/api/src/db/db.service.ts` | H-15 · arranque bajo `pg_advisory_lock` |
 | `docker-compose.prod.yml` | paso 1.5 · `API_IMAGE`/`WEB_IMAGE` para desplegar sin reconstruir |
 
-**Verificación tras los cambios: 980 tests verdes, typecheck limpio (5 proyectos + web), build de
+**Verificación tras los cambios: 1016 tests verdes, typecheck limpio (5 proyectos + web), build de
 producción OK, 0 ciclos, y el stack de contenedores levantado de punta a punta contra
 PostgreSQL 17 + PostGIS con la RLS enforceada.**

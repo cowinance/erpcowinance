@@ -36,7 +36,7 @@ export default function ResetPasswordPage() {
     setState('sending');
     const res = await postPublic('/reset-password', { token: tokenRef.current, new_password: password });
     if (res.ok) {
-      clearSession(); // el backend revocó todas las sesiones; limpiamos la local
+      await clearSession(); // el backend revocó todas las sesiones; limpiamos la local
       return setState('success');
     }
     if (res.kind === 'network') {

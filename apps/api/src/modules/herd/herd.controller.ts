@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import { AnimalStatusService } from './animal-status.service';
 
@@ -6,6 +7,7 @@ import { AnimalStatusService } from './animal-status.service';
 export class HerdController {
   constructor(
     private readonly herd: HerdService,
+    private readonly lotsService: LotsService,
     private readonly status: AnimalStatusService,
   ) {}
 
@@ -136,37 +138,37 @@ export class HerdController {
 
   @Post('lots')
   createLot(@Body() body: any) {
-    return this.herd.createLot(body);
+    return this.lotsService.createLot(body);
   }
 
   @Get('lots')
   lots(@Query('include_archived') includeArchived?: string) {
-    return this.herd.lots(includeArchived === 'true');
+    return this.lotsService.lots(includeArchived === 'true');
   }
 
   @Get('lots/:id')
   getLot(@Param('id') id: string) {
-    return this.herd.getLot(id);
+    return this.lotsService.getLot(id);
   }
 
   @Get('lots/:id/history')
   lotHistory(@Param('id') id: string) {
-    return this.herd.lotHistory(id);
+    return this.lotsService.lotHistory(id);
   }
 
   @Get('lots/:id/metrics')
   lotMetrics(@Param('id') id: string, @Query('target') target?: string) {
-    return this.herd.lotMetrics(id, target ? Number(target) : undefined);
+    return this.lotsService.lotMetrics(id, target ? Number(target) : undefined);
   }
 
   @Put('lots/:id')
   updateLot(@Param('id') id: string, @Body() body: any) {
-    return this.herd.updateLot(id, body);
+    return this.lotsService.updateLot(id, body);
   }
 
   @Delete('lots/:id')
   deleteLot(@Param('id') id: string) {
-    return this.herd.deleteLot(id);
+    return this.lotsService.deleteLot(id);
   }
 
   @Get('catalogs/categories')

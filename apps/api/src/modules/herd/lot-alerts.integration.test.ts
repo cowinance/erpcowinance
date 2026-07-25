@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { BillingService } from '../billing/billing.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -15,6 +16,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('HerdService — alertas operativas y estado del lote', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let originalCwd: string;
   let tmp: string;
   let farmId: string;
@@ -22,7 +24,7 @@ describe('HerdService — alertas operativas y estado del lote', () => {
   let paddockId: string;
   let cat: Record<string, string> = {};
 
-  const mkLot = async (name: string) => (await herd.createLot({ name }) as any).id;
+  const mkLot = async (name: string) => (await lotsSvc.createLot({ name }) as any).id;
   const mkAnimal = async (lot: string, catCode: string, tag?: string, weighDaysAgo?: number) => {
     const id = (await db.query<{ id: string }>(
       `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, status, current_lot_id) VALUES ($1,$2,$3,$4,'F','active',$5) RETURNING id`,
@@ -44,6 +46,7 @@ describe('HerdService — alertas operativas y estado del lote', () => {
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
     paddockId = (await db.query<{ id: string }>(`SELECT id FROM paddocks WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
@@ -60,7 +63,7 @@ describe('HerdService — alertas operativas y estado del lote', () => {
     await mkAnimal(lot, 'vaca'); // sin tag, sin pesaje
     await mkAnimal(lot, 'toro', 'T-1', 200); // pesaje viejo (>90d)
     await mkAnimal(lot, 'ternero', 'C-1', 5); // ok
-    const d: any = await herd.getLot(lot);
+    const d: any = await lotsSvc.getLot(lot);
     expect(d.status).toBe('alert');
     const codes = d.alerts.map((a: any) => a.code);
     expect(codes).toContain('no_paddock');
@@ -71,24 +74,24 @@ describe('HerdService — alertas operativas y estado del lote', () => {
 
   it('lote vacío → estado empty y alerta de vacío', async () => {
     const lot = await mkLot('Vacío L');
-    const d: any = await herd.getLot(lot);
+    const d: any = await lotsSvc.getLot(lot);
     expect(d.status).toBe('empty');
     expect(d.alerts.map((a: any) => a.code)).toContain('empty');
   });
 
   it('lote sano (potrero + id + pesaje reciente, categoría única) → active sin alertas', async () => {
     const lot = await mkLot('Sano L');
-    await herd.updateLot(lot, { is_active: true }); // asegura activo
+    await lotsSvc.updateLot(lot, { is_active: true }); // asegura activo
     await db.query(`UPDATE lots SET current_paddock_id=$2 WHERE id=$1`, [lot, paddockId]);
     await mkAnimal(lot, 'vaca', 'S-1', 3);
     await mkAnimal(lot, 'vaca', 'S-2', 4);
-    const d: any = await herd.getLot(lot);
+    const d: any = await lotsSvc.getLot(lot);
     expect(d.status).toBe('active');
     expect(d.alerts).toHaveLength(0);
   });
 
   it('la lista expone status y alert_count por lote', async () => {
-    const list: any[] = await herd.lots();
+    const list: any[] = await lotsSvc.lots();
     expect(list.every((l) => 'status' in l && 'alert_count' in l)).toBe(true);
     expect(list.some((l) => l.status === 'alert' && l.alert_count > 0)).toBe(true);
   });

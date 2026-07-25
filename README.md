@@ -282,6 +282,18 @@ cliente sin token.
 código de estado, histograma de latencia y memoria del proceso. La etiqueta de ruta es el **patrón**
 (`/v1/animals/:id`), nunca la URL: con ids, una finca de 10.000 animales generaría 10.000 series.
 
+### Sesión en la web
+
+Los tokens viven en cookies **`HttpOnly`**: las escribe el servidor (`/api/auth/login`) y ningún
+script las puede leer. Un XSS puede hacer requests mientras la pestaña está abierta, pero no se
+lleva la sesión.
+
+Como el JavaScript de la página ya no puede armar el `Authorization`, los `fetch` del navegador van
+contra el propio origen y un proxy ([`app/api/cw/[...path]`](apps/web/src/app/api/cw)) pone la
+cabecera del lado del servidor. Dos consecuencias: la web dejó de necesitar CORS, y **el token
+ahora se renueva solo** — el proxy lo hace en los `fetch` y el middleware al navegar. Antes no se
+renovaba en ningún lado: a los 15 minutos de trabajo, la sesión se caía.
+
 ### Sondas de plataforma
 
 | Endpoint | Qué responde | Para qué |
@@ -292,10 +304,18 @@ código de estado, histograma de latencia y memoria del proceso. La etiqueta de 
 ### Límite de intentos
 
 Los endpoints públicos de credenciales (`/auth/login`, `/auth/refresh`, `register`, `verify-email`,
-`resend-verification`, `forgot-password`, `reset-password`) están limitados **por IP y por email a la
-vez** — la segunda dimensión frena el *password spraying*, que el límite por IP no ve. Credenciales:
-10 intentos / 5 min; endpoints que envían email: 5 / 15 min. El contador vive en el proceso: con
-varias instancias hay que moverlo a un almacén compartido (ver `docs/audits/auditoria-2026-07-24.md`, H-2).
+`resend-verification`, `forgot-password`, `reset-password`) se limitan en **dos dimensiones, cada una
+con su propio techo**:
+
+| Dimensión | Qué frena | Credenciales | Envío de email |
+|---|---|---|---|
+| **email** | El diccionario contra una cuenta. Nadie tipea mal su contraseña diez veces en cinco minutos. | 10 / 5 min | 5 / 15 min |
+| **IP** | El *password spraying*: una contraseña común contra muchas cuentas. Amplio a propósito — una IP no es una persona: una finca con veinte empleados detrás del mismo NAT entra toda por la misma. | 60 / 5 min | 30 / 15 min |
+
+El contador vive en PostgreSQL cuando hay `DATABASE_URL` (`RATE_LIMIT_STORE` lo fuerza): con varias
+instancias, contarlo en memoria multiplicaría el límite efectivo por la cantidad de instancias. Si
+la base no responde, se degrada al contador en memoria — rechazar ahí no protegería nada, porque el
+login ya estaría caído de todos modos.
 
 ### Tokens de diseño (fuente única — ADR-0013)
 

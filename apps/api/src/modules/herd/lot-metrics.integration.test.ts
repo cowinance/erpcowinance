@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { BillingService } from '../billing/billing.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -14,6 +15,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('HerdService.lotMetrics — métricas por propósito', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let originalCwd: string;
   let tmp: string;
   let farmId: string;
@@ -21,7 +23,7 @@ describe('HerdService.lotMetrics — métricas por propósito', () => {
   let cat: Record<string, string> = {};
 
   const mkLot = async (name: string, purpose: string) => {
-    const id = (await herd.createLot({ name, purpose }) as any).id;
+    const id = (await lotsSvc.createLot({ name, purpose }) as any).id;
     return id;
   };
   const mkAnimal = async (lot: string, sex: string, catCode?: string, birthMonthsAgo?: number) =>
@@ -39,6 +41,7 @@ describe('HerdService.lotMetrics — métricas por propósito', () => {
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
     for (const code of ['vaca', 'toro', 'vaquillona', 'ternero']) {
@@ -58,7 +61,7 @@ describe('HerdService.lotMetrics — métricas por propósito', () => {
     await mkAnimal(lot, 'M', 'toro');
     await mkAnimal(lot, 'M', 'ternero');
     await db.query(`INSERT INTO pregnancies (tenant_id, animal_id, diagnosis_date, status) VALUES ($1,$2,CURRENT_DATE,'open')`, [db.tenant, v1]);
-    const res: any = await herd.lotMetrics(lot);
+    const res: any = await lotsSvc.lotMetrics(lot);
     expect(res.purpose).toBe('breeding');
     expect(res.metrics).toMatchObject({ vientres: 2, toros: 1, prenadas: 1, vacias: 1, crias_al_pie: 1 });
   });
@@ -69,7 +72,7 @@ describe('HerdService.lotMetrics — métricas por propósito', () => {
     const a2 = await mkAnimal(lot, 'F', undefined, 10);
     await weigh(a1, '2030-01-01', 200); await weigh(a1, '2030-03-02', 260); // +60 en 60 días
     await weigh(a2, '2030-01-01', 220); await weigh(a2, '2030-03-02', 280);
-    const res: any = await herd.lotMetrics(lot);
+    const res: any = await lotsSvc.lotMetrics(lot);
     expect(res.purpose).toBe('weaning');
     expect(res.metrics.head).toBe(2);
     expect(res.metrics.peso_inicial).toBe(210); // (200+220)/2
@@ -85,7 +88,7 @@ describe('HerdService.lotMetrics — métricas por propósito', () => {
     await weigh(a1, '2030-01-01', 300); await weigh(a1, '2030-02-20', 360); // +60
     await weigh(a2, '2030-01-01', 320); await weigh(a2, '2030-02-20', 370); // +50 → total 110
     await db.query(`INSERT INTO feed_deliveries (tenant_id, lot_id, delivered_at, quantity_kg, total_cost) VALUES ($1,$2,'2030-02-01',$3,$4)`, [db.tenant, lot, 880, 440]);
-    const res: any = await herd.lotMetrics(lot);
+    const res: any = await lotsSvc.lotMetrics(lot);
     expect(res.purpose).toBe('fattening');
     expect(res.metrics.kg_gained).toBe(110);
     expect(res.metrics.conversion).toBe(8); // 880/110
@@ -95,11 +98,11 @@ describe('HerdService.lotMetrics — métricas por propósito', () => {
   it('devuelve la forma correcta para hospital y cuarentena sin error', async () => {
     const h = await mkLot('Hosp M', 'hospital');
     await mkAnimal(h, 'M');
-    const rh: any = await herd.lotMetrics(h);
+    const rh: any = await lotsSvc.lotMetrics(h);
     expect(rh.purpose).toBe('hospital');
     expect(rh.metrics).toHaveProperty('tratamientos_vigentes');
     const q = await mkLot('Cuar M', 'quarantine');
-    const rq: any = await herd.lotMetrics(q);
+    const rq: any = await lotsSvc.lotMetrics(q);
     expect(rq.purpose).toBe('quarantine');
     expect(rq.metrics).toHaveProperty('fecha_liberacion');
   });

@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { BillingService } from '../billing/billing.service';
+import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import type { AnimalWriteService } from './animal-write.service';
 
@@ -15,6 +16,7 @@ import type { AnimalWriteService } from './animal-write.service';
 describe('HerdService — lotes (CRUD + composición)', () => {
   let db: DbService;
   let herd: HerdService;
+  let lotsSvc: LotsService;
   let originalCwd: string;
   let tmp: string;
   let farmId: string;
@@ -40,6 +42,7 @@ describe('HerdService — lotes (CRUD + composición)', () => {
     db = new DbService();
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    lotsSvc = new LotsService(db);
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
     vacaCat = (await db.query<{ id: string }>(`SELECT id FROM animal_categories WHERE code='vaca' LIMIT 1`))[0].id;
@@ -53,19 +56,19 @@ describe('HerdService — lotes (CRUD + composición)', () => {
   });
 
   it('crea con validación de dominio; rechaza nombre vacío / propósito inválido', async () => {
-    const lot: any = await herd.createLot({ name: 'Rodeo Test', purpose: 'breeding' });
+    const lot: any = await lotsSvc.createLot({ name: 'Rodeo Test', purpose: 'breeding' });
     expect(lot.name).toBe('Rodeo Test');
     expect(lot.purpose).toBe('breeding');
-    await expect(herd.createLot({ name: '  ' })).rejects.toMatchObject({ status: 400 });
-    await expect(herd.createLot({ name: 'X', purpose: 'cria' })).rejects.toMatchObject({ status: 400 });
+    await expect(lotsSvc.createLot({ name: '  ' })).rejects.toMatchObject({ status: 400 });
+    await expect(lotsSvc.createLot({ name: 'X', purpose: 'cria' })).rejects.toMatchObject({ status: 400 });
   });
 
   it('detalle: composición por categoría/sexo y peso promedio', async () => {
-    const lot: any = await herd.createLot({ name: 'Rodeo Detalle' });
+    const lot: any = await lotsSvc.createLot({ name: 'Rodeo Detalle' });
     await mkAnimal('F', vacaCat, lot.id, 400);
     await mkAnimal('F', vacaCat, lot.id, 500);
     await mkAnimal('M', toroCat, lot.id, 800);
-    const detail: any = await herd.getLot(lot.id);
+    const detail: any = await lotsSvc.getLot(lot.id);
     expect(detail.head).toBe(3);
     expect(detail.avg_weight_kg).toBe(567); // (400+500+800)/3 = 566.67 → 567
     expect(detail.by_sex.find((s: any) => s.sex === 'F').n).toBe(2);
@@ -74,38 +77,38 @@ describe('HerdService — lotes (CRUD + composición)', () => {
   });
 
   it('edita nombre, propósito y estado (el potrero NO se edita como campo: es rotación)', async () => {
-    const lot: any = await herd.createLot({ name: 'Rodeo Editar' });
-    const upd: any = await herd.updateLot(lot.id, { name: 'Rodeo Editado', purpose: 'fattening', is_active: false });
+    const lot: any = await lotsSvc.createLot({ name: 'Rodeo Editar' });
+    const upd: any = await lotsSvc.updateLot(lot.id, { name: 'Rodeo Editado', purpose: 'fattening', is_active: false });
     expect(upd.name).toBe('Rodeo Editado');
     expect(upd.purpose).toBe('fattening');
     expect(upd.is_active).toBe(false);
     // Regla #4: cambiar el potrero es una rotación (land.moveLot), no una edición de campo.
     // updateLot ignora current_paddock_id; sin otros cambios queda sin nada para actualizar → 400.
-    await expect(herd.updateLot(lot.id, { current_paddock_id: paddockId })).rejects.toMatchObject({ status: 400 });
+    await expect(lotsSvc.updateLot(lot.id, { current_paddock_id: paddockId })).rejects.toMatchObject({ status: 400 });
   });
 
   it('archiva un lote vacío pero bloquea uno con animales', async () => {
-    const lot: any = await herd.createLot({ name: 'Rodeo Ocupado' });
+    const lot: any = await lotsSvc.createLot({ name: 'Rodeo Ocupado' });
     const animal = await mkAnimal('F', vacaCat, lot.id, 420);
-    await expect(herd.deleteLot(lot.id)).rejects.toMatchObject({ status: 409 });
+    await expect(lotsSvc.deleteLot(lot.id)).rejects.toMatchObject({ status: 409 });
     await db.query(`UPDATE animals SET current_lot_id=NULL WHERE id=$1`, [animal]);
-    await expect(herd.deleteLot(lot.id)).resolves.toMatchObject({ deleted: true });
-    const list: any[] = await herd.lots();
+    await expect(lotsSvc.deleteLot(lot.id)).resolves.toMatchObject({ deleted: true });
+    const list: any[] = await lotsSvc.lots();
     expect(list.some((x) => x.id === lot.id)).toBe(false);
   });
 
   it('lista: expone avg_weight_kg y oculta archivados salvo include_archived', async () => {
-    const lot: any = await herd.createLot({ name: 'Rodeo Peso' });
+    const lot: any = await lotsSvc.createLot({ name: 'Rodeo Peso' });
     await mkAnimal('F', vacaCat, lot.id, 400);
     await mkAnimal('M', toroCat, lot.id, 600);
-    const active: any[] = await herd.lots();
+    const active: any[] = await lotsSvc.lots();
     const row = active.find((x) => x.id === lot.id);
     expect(Number(row.avg_weight_kg)).toBe(500); // (400+600)/2
     // archivar y confirmar que sólo aparece con include_archived
     await db.query(`UPDATE animals SET current_lot_id=NULL WHERE current_lot_id=$1`, [lot.id]);
-    await herd.deleteLot(lot.id);
-    expect((await herd.lots()).some((x) => x.id === lot.id)).toBe(false);
-    const withArchived: any[] = await herd.lots(true);
+    await lotsSvc.deleteLot(lot.id);
+    expect((await lotsSvc.lots()).some((x) => x.id === lot.id)).toBe(false);
+    const withArchived: any[] = await lotsSvc.lots(true);
     const archived = withArchived.find((x) => x.id === lot.id);
     expect(archived).toBeTruthy();
     expect(archived.is_active).toBe(false);
