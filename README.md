@@ -154,11 +154,13 @@ Tres decisiones que no son de forma:
 - **El esquema se aplica solo, y una vez.** Al arrancar, la API carga el DDL canónico si la base
   está vacía y después aplica las migraciones pendientes de
   [`packages/db/migrations/`](packages/db/migrations/), registrándolas en `schema_migrations`.
-- **`NEXT_PUBLIC_API_URL` se hornea en la imagen de la web.** Next la inlinea en el bundle del
-  navegador durante el build: es un `--build-arg`, no una variable de runtime. Una imagen por
-  entorno.
+- **`NEXT_PUBLIC_API_URL` se hornea en la imagen de la web.** Next la inlinea en el bundle durante
+  el build: es un `--build-arg`, no una variable de runtime. Una imagen por entorno. Reconstruir sin
+  pasarla deja la URL en el default de desarrollo, y por eso la web **comprueba al arrancar que
+  llega a la API y se apaga si no** (`apps/web/src/instrumentation.ts`): el fallo aparecía recién
+  cuando alguien intentaba registrarse.
 
-Para un despliegue de verdad hay que configurar además dos adaptadores; con los defaults de
+Para un despliegue de verdad hay que configurar además estos valores; con los defaults de
 desarrollo el arranque avisa exactamente qué queda roto:
 
 | Variable | Default | Qué pasa si se deja así en producción |
@@ -166,6 +168,7 @@ desarrollo el arranque avisa exactamente qué queda roto:
 | `STORAGE_DRIVER` | `local` | Las fotos y documentos van al disco del contenedor: se pierden en el próximo deploy y no los ve otra instancia. Con `s3` (AWS, Cloudflare R2, MinIO, Backblaze B2) viven fuera del proceso. |
 | `EMAIL_PROVIDER` | `log` | El correo se **imprime**: la verificación de email y el reset de contraseña no le llegan al usuario. Con `smtp` se envía de verdad, contra cualquier proveedor. |
 | `APP_BASE_URL` | `http://localhost:3000` | El correo sale, pero el **enlace** apunta a localhost: no funciona en el teléfono de quien lo recibe. Es el más difícil de diagnosticar, porque el mail llegó. |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3001/v1` | La web no llega a la API. **Se INLINEA al construir la imagen**, no se lee en runtime: reconstruir sin pasarla la deja apuntando a localhost. Desde el contenedor web el host es el nombre del servicio (`api`), no `localhost`. Con este default la web **no arranca** (guardia de arranque). |
 
 **«No me llega el email de verificación».** Casi siempre es una de esas dos. Con `EMAIL_PROVIDER=log`
 el mensaje queda en el log de la API (`docker compose logs api`) y nunca sale; el dashboard lo dice
