@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService, Q } from '../../db/db.service';
+import { resolveFiscalId, resolveTaxpayerCondition } from '../../common/fiscal-identity';
 
 const PARTNER_TYPES = ['customer', 'supplier', 'both'];
 const SUPPLIER_CATEGORIES = ['feed', 'veterinary', 'genetics', 'machinery', 'fuel', 'services', 'other'];
@@ -14,19 +15,34 @@ const CUSTOMER_SEGMENTS = ['slaughterhouse', 'dairy', 'auction', 'breeder', 'ret
 export class CommerceService {
   constructor(private readonly db: DbService) {}
 
-  private companyCache = new Map<string, { id: string; currency: string }>();
-  /** Company única del tenant (cadena org→company→farm del registro) + su moneda funcional. */
-  private async defaultCompany(): Promise<{ id: string; currency: string }> {
+  private companyCache = new Map<string, { id: string; currency: string; country: string }>();
+  /** Company única del tenant (cadena org→company→farm del registro) + su moneda funcional y país. */
+  private async defaultCompany(): Promise<{ id: string; currency: string; country: string }> {
     const t = this.db.tenant;
     const cached = this.companyCache.get(t);
     if (cached) return cached;
-    const c = await this.db.one<{ id: string; currency: string }>(
-      `SELECT id, functional_currency AS currency FROM companies WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`,
+    const c = await this.db.one<{ id: string; currency: string; country: string }>(
+      `SELECT id, functional_currency AS currency, country_code AS country FROM companies WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`,
       [t],
     );
     if (!c) throw new BadRequestException({ code: 'commerce.no_company', title: 'El tenant no tiene una empresa configurada' });
     this.companyCache.set(t, c);
     return c;
+  }
+
+  /**
+   * Traduce el choque del índice único de RIF a un 409 que se pueda mostrar. La unicidad es de BASE
+   * y no de código a propósito (dos altas simultáneas del mismo cliente pasarían las dos por un
+   * chequeo previo), así que el error llega como violación de índice y hay que interpretarlo acá.
+   */
+  private rethrowDuplicateFiscalId(e: unknown): never {
+    const msg = String((e as any)?.message ?? '');
+    if (msg.includes('ux_business_partners_tenant_tax_id_norm'))
+      throw new ConflictException({
+        code: 'commerce.duplicate_tax_id',
+        title: 'Ya existe un socio con ese RIF: un mismo contribuyente no puede estar cargado dos veces',
+      });
+    throw e;
   }
 
   // ── Socios ───────────────────────────────────────────────────────────────
@@ -40,7 +56,7 @@ export class CommerceService {
       filter = ` AND (p.type = $${params.length} OR p.type = 'both')`;
     }
     return this.db.query(
-      `SELECT p.id, p.type, p.name, p.tax_id, p.email, p.phone, p.credit_limit::float AS credit_limit, p.is_active,
+      `SELECT p.id, p.type, p.name, p.tax_id, p.taxpayer_condition, p.email, p.phone, p.credit_limit::float AS credit_limit, p.is_active,
               s.category AS supplier_category, s.payment_terms_days AS supplier_terms,
               c.segment AS customer_segment, c.payment_terms_days AS customer_terms, c.price_list_id
        FROM business_partners p
@@ -54,7 +70,8 @@ export class CommerceService {
 
   async getPartner(id: string) {
     const partner = await this.db.one(
-      `SELECT p.id, p.type, p.name, p.tax_id, p.email, p.phone, p.address, p.credit_limit::float AS credit_limit, p.is_active,
+      `SELECT p.id, p.type, p.name, p.legal_name, p.tax_id, p.tax_id_normalized, p.taxpayer_condition, p.email, p.phone, p.address, p.fiscal_address,
+              p.credit_limit::float AS credit_limit, p.is_active,
               s.category AS supplier_category, s.payment_terms_days AS supplier_terms,
               c.segment AS customer_segment, c.payment_terms_days AS customer_terms, c.price_list_id
        FROM business_partners p
@@ -77,18 +94,30 @@ export class CommerceService {
     const type = body?.type;
     if (!PARTNER_TYPES.includes(type)) throw new BadRequestException({ code: 'commerce.invalid_type', title: `type inválido (${PARTNER_TYPES.join('|')})` });
     this.validateSatellites(type, body);
-    const { id: companyId } = await this.defaultCompany();
+    const { id: companyId, country } = await this.defaultCompany();
     const t = this.db.tenant;
 
-    return this.db.tx(async (q) => {
-      const partner = await q.one<{ id: string }>(
-        `INSERT INTO business_partners (tenant_id, company_id, type, name, tax_id, email, phone, address, credit_limit, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [t, companyId, type, name, body.tax_id ?? null, body.email ?? null, body.phone ?? null, body.address ?? null, body.credit_limit ?? null, this.db.user],
-      );
-      await this.syncSatellites(q, partner!.id, type, body);
-      return { id: partner!.id, type, name };
-    });
+    // Identidad fiscal (G4-1): el RIF se valida contra el país del tenant y se guarda normalizado.
+    const fiscal = resolveFiscalId(country, body.tax_id);
+    const condition = resolveTaxpayerCondition(body.taxpayer_condition);
+
+    try {
+      return await this.db.tx(async (q) => {
+        const partner = await q.one<{ id: string }>(
+          `INSERT INTO business_partners (tenant_id, company_id, type, name, legal_name, tax_id, tax_id_normalized, taxpayer_condition,
+                                          email, phone, address, fiscal_address, credit_limit, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+          [
+            t, companyId, type, name, body.legal_name ?? null, fiscal.tax_id, fiscal.tax_id_normalized, condition,
+            body.email ?? null, body.phone ?? null, body.address ?? null, body.fiscal_address ?? null, body.credit_limit ?? null, this.db.user,
+          ],
+        );
+        await this.syncSatellites(q, partner!.id, type, body);
+        return { id: partner!.id, type, name };
+      });
+    } catch (e) {
+      this.rethrowDuplicateFiscalId(e);
+    }
   }
 
   async updatePartner(id: string, body: any) {
@@ -111,19 +140,33 @@ export class CommerceService {
       setField('name', name);
     }
     if (body?.type !== undefined) setField('type', type);
-    for (const f of ['tax_id', 'email', 'phone', 'address', 'credit_limit'] as const) {
+    for (const f of ['email', 'phone', 'address', 'credit_limit', 'legal_name', 'fiscal_address'] as const) {
       if (body?.[f] !== undefined) setField(f, body[f] ?? null);
     }
+    // El RIF se toca de a DOS columnas —lo que se muestra y la clave de identidad— y siempre juntas:
+    // dejar una vieja y la otra nueva sería tener dos verdades del mismo dato. Editarlo es además
+    // cómo se normaliza lo cargado antes de G4-1, sin un UPDATE masivo a ciegas.
+    if (body?.tax_id !== undefined) {
+      const { country } = await this.defaultCompany();
+      const fiscal = resolveFiscalId(country, body.tax_id);
+      setField('tax_id', fiscal.tax_id);
+      setField('tax_id_normalized', fiscal.tax_id_normalized);
+    }
+    if (body?.taxpayer_condition !== undefined) setField('taxpayer_condition', resolveTaxpayerCondition(body.taxpayer_condition));
     if (typeof body?.is_active === 'boolean') setField('is_active', body.is_active);
 
-    return this.db.tx(async (q) => {
-      if (sets.length) {
-        params.push(id, t);
-        await q.query(`UPDATE business_partners SET ${sets.join(', ')}, updated_at = now() WHERE id = $${params.length - 1} AND tenant_id = $${params.length}`, params);
-      }
-      await this.syncSatellites(q, id, type, body);
-      return { id, type };
-    });
+    try {
+      return await this.db.tx(async (q) => {
+        if (sets.length) {
+          params.push(id, t);
+          await q.query(`UPDATE business_partners SET ${sets.join(', ')}, updated_at = now() WHERE id = $${params.length - 1} AND tenant_id = $${params.length}`, params);
+        }
+        await this.syncSatellites(q, id, type, body);
+        return { id, type };
+      });
+    } catch (e) {
+      this.rethrowDuplicateFiscalId(e);
+    }
   }
 
   async deletePartner(id: string) {

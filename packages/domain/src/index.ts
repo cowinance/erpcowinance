@@ -38,3 +38,5 @@ export * from './weather';
 export * from './crm';
 // Genética — ubicación criogénica: termo → canasta → gobelete (GT-1).
 export * from './genetics';
+// Fiscal — identidad tributaria venezolana: RIF y condición del contribuyente (G4-1).
+export * from './tax';
