@@ -6,6 +6,8 @@ import { DbService } from '../../db/db.service';
 import { WeatherService } from '../alerts/../weather/weather.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { NotificationService } from '../notifications/notification.service';
+import { NitrogenService } from '../genetics/nitrogen.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 /**
  * Tareas E6 — integración con el motor de alertas/notificaciones. Una tarea VENCIDA produce una
@@ -29,7 +31,7 @@ describe('Tareas · notificaciones (E6)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db));
+    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
     notifications = new NotificationService(db, alerts);
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;

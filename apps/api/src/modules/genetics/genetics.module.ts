@@ -4,23 +4,27 @@ import { EmbryosController } from './embryos.controller';
 import { EvaluationsController } from './evaluations.controller';
 import { CryoStorageController } from './cryo-storage.controller';
 import { StrawsController } from './straws.controller';
+import { NitrogenController } from './nitrogen.controller';
 import { SemenService } from './semen.service';
 import { EmbryosService } from './embryos.service';
 import { EvaluationsService } from './evaluations.service';
 import { CryoStorageService } from './cryo-storage.service';
 import { StrawsService } from './straws.service';
+import { NitrogenService } from './nitrogen.service';
+import { InventoryModule } from '../inventory/inventory.module';
 
 /**
  * Genética: partidas de semen (G-1) + embriones + evaluaciones (G-2b) + ubicación criogénica
- * (GT-1) + pajuelas con identidad (GT-2).
+ * (GT-1) + pajuelas con identidad (GT-2) + nitrógeno del termo (GT-4).
  *
  * Desde GT-2 la regla única del stock vive en `StrawsService`: la ÚNICA mutación posible es una
  * transición de estado de una unidad, y el saldo se cuenta. `applyStrawsDelta` sobrevive con la
  * misma firma —reproducción y la web la usan— pero por dentro crea o consume unidades.
  */
 @Module({
-  controllers: [GeneticsController, EmbryosController, EvaluationsController, CryoStorageController, StrawsController],
-  providers: [SemenService, EmbryosService, EvaluationsService, CryoStorageService, StrawsService],
-  exports: [SemenService, EmbryosService, CryoStorageService, StrawsService],
+  imports: [InventoryModule],
+  controllers: [GeneticsController, EmbryosController, EvaluationsController, CryoStorageController, StrawsController, NitrogenController],
+  providers: [SemenService, EmbryosService, EvaluationsService, CryoStorageService, StrawsService, NitrogenService],
+  exports: [SemenService, EmbryosService, CryoStorageService, StrawsService, NitrogenService],
 })
 export class GeneticsModule {}

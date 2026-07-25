@@ -180,6 +180,8 @@ export const RLS_TABLES = [
   'cryo_goblets',
   'cryo_straws',
   'repro_service_plans',
+  'cryo_nitrogen_readings',
+  'cryo_nitrogen_refills',
   'compliance_reports',
   'contracts',
   'audit_logs',

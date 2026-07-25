@@ -15,6 +15,8 @@ import { ServicePlanService } from '../repro/service-plan.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { StrawsService } from '../genetics/straws.service';
+import { NitrogenService } from '../genetics/nitrogen.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 /**
  * Inicio E1 — endpoint agregado `/dashboard/home`. Verifica que COMPONE los servicios reales
@@ -40,7 +42,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     await db.onModuleInit();
     tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)));
-    const alerts = new AlertsService(db, repro as any, new WeatherService(db));
+    const alerts = new AlertsService(db, repro as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
     const health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
     home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;

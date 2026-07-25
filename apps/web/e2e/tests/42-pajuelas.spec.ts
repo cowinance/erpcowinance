@@ -34,6 +34,27 @@ test('termo, pajuelas ubicadas y saldo derivado de las unidades', async ({ page 
   await page.getByLabel('Número de gobelete').fill('5');
   await page.getByRole('button', { name: 'Agregar', exact: true }).click();
 
+  // 1b. El nitrógeno (GT-4): lo primero que hay que mirar de un termo, porque si se seca lo de
+  //     adentro no importa. Con una sola medición NO se puede proyectar, y la pantalla lo dice en
+  //     vez de quedarse en blanco —que se leería como «está todo bien», que es justo lo que no se
+  //     sabe—.
+  await expect(page.getByText(/Todavía no se cargó ninguna medición/)).toBeVisible();
+
+  const hoy = new Date();
+  const haceDias = (n: number) => new Date(hoy.getTime() - n * 86_400_000).toISOString().slice(0, 10);
+  for (const [fecha, cm] of [[haceDias(20), '60'], [haceDias(10), '22']] as const) {
+    await page.getByLabel('Fecha de la medición').fill(fecha);
+    await page.getByLabel('Nivel en centímetros').fill(cm);
+    await page.getByRole('button', { name: 'Guardar', exact: true }).first().click();
+    // Se espera a que la medición aparezca en el historial, no a que la red se calme: el formulario
+    // se vacía al guardar, así que escribir la siguiente antes de tiempo la borra el propio `onOk`.
+    await expect(page.getByText(`${fecha}: ${cm} cm`)).toBeVisible({ timeout: 20_000 });
+  }
+  // 38 cm en 10 días = 3,8 cm/día; quedan 22 → menos de una semana. Con 14 días de proveedor, eso
+  // ya es urgencia: el umbral es sobre el tiempo de reposición, no sobre el nivel.
+  await expect(page.getByText('Urgente')).toBeVisible();
+  await expect(page.getByText(/se pierde todo lo que hay adentro/)).toBeVisible();
+
   // 2. La compra: 20 pajuelas que todavía nadie cargó en el termo.
   await page.goto('/genetica');
   await page.getByLabel('Código de partida').fill('SANSAO-GYR');

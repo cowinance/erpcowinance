@@ -7,6 +7,8 @@ import { DbService } from '../../db/db.service';
 import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { NotificationService } from './notification.service';
+import { NitrogenService } from '../genetics/nitrogen.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 /**
  * Integración del motor de notificaciones (P7-1) sobre PGlite aislado (seed demo → hay
@@ -29,7 +31,7 @@ describe('NotificationService · integración', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    notifications = new NotificationService(db, new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db)));
+    notifications = new NotificationService(db, new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db))));
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
   }, 120_000);
 

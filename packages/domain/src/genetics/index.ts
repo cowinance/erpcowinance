@@ -41,3 +41,14 @@ export {
   summarizeCampaignOutcome,
 } from './campaign-outcome';
 export type { CampaignOutcome, DiagnosisResult, SireConception } from './campaign-outcome';
+
+export {
+  DEFAULT_REFILL_LEAD_DAYS,
+  InvalidNitrogenError,
+  NITROGEN_STATUSES,
+  computeNitrogenState,
+  nitrogenAlertMessage,
+  validateReading,
+  validateRefill,
+} from './nitrogen';
+export type { NitrogenReading, NitrogenState, NitrogenStatus, RefillInput } from './nitrogen';

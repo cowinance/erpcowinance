@@ -5,6 +5,8 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { WeatherService } from './weather.service';
+import { NitrogenService } from '../genetics/nitrogen.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 /**
  * D4 · E2 — el clima entra al motor de alertas existente (A5).
@@ -32,7 +34,7 @@ describe('alertas de clima (D4 · E2)', () => {
     await db.onModuleInit();
     await db.defaultFarm();
     weather = new WeatherService(db);
-    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, weather);
+    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, weather, new NitrogenService(db, new InventoryService(db)));
     const st: any = await weather.createStation({ name: 'Casco', serial_number: 'EST-A' });
     stationId = st.id;
   }, 120_000);

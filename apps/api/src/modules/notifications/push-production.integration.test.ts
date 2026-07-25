@@ -6,6 +6,8 @@ import { DbService } from '../../db/db.service';
 import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { NotificationService } from './notification.service';
+import { NitrogenService } from '../genetics/nitrogen.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 /**
  * Integración de la PRODUCCIÓN del ledger push (P7-3.a): dispatch crea la notificación lógica
@@ -28,7 +30,7 @@ describe('NotificationService · producción push (P7-3.a)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    notifications = new NotificationService(db, new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db)));
+    notifications = new NotificationService(db, new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db))));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
   }, 120_000);

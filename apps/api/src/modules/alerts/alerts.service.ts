@@ -3,6 +3,8 @@ import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain
 import { DbService } from '../../db/db.service';
 import { ReproService } from '../repro/repro.service';
 import { WeatherService } from '../weather/weather.service';
+import { nitrogenAlertMessage } from '@cowinance/domain';
+import { NitrogenService } from '../genetics/nitrogen.service';
 
 /**
  * Motor de alertas (doc Catálogo A5). Reglas declarativas condición→severidad
@@ -47,6 +49,10 @@ const RULES: RuleDef[] = [
   // se DERIVA de si hay tambo cargado, no se configura.
   { code: 'heat_stress', name: 'Estrés calórico', category: 'iot', severity: 'warning' },
   { code: 'frost', name: 'Helada', category: 'iot', severity: 'warning' },
+  // Nitrógeno (GT-4). El parámetro es el PLAZO DEL PROVEEDOR, no un nivel: lo que decide si esto es
+  // un aviso o una urgencia no es cuánto queda en el termo sino si todavía se llega a pedir. El
+  // valor por termo manda sobre este default, porque el proveedor puede ser distinto por finca.
+  { code: 'nitrogen_low', name: 'Nitrógeno por agotarse', category: 'iot', severity: 'critical', defaultDays: 14, paramLabel: 'Días que tarda el proveedor' },
 ];
 
 /** Nivel de estrés en el idioma del producto: la alerta la lee una persona, no un sistema. */
@@ -97,6 +103,7 @@ export class AlertsService {
     private readonly db: DbService,
     private readonly repro: ReproService,
     private readonly weather: WeatherService,
+    private readonly nitrogen: NitrogenService,
   ) {}
 
   /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente.
@@ -616,6 +623,32 @@ export class AlertsService {
             due_at: clima.date,
           });
         }
+      }
+    }
+
+    /**
+     * Nitrógeno (GT-4). Es la alerta de mayor consecuencia económica de todo el producto: un termo
+     * que se seca destruye años de genética, en silencio.
+     *
+     * Se avisa sobre los DÍAS QUE QUEDAN y no sobre el nivel, y `critical` es literalmente «pedir
+     * hoy ya está al límite». Un termo sin mediciones NO genera alerta: no se sabe nada de él, y
+     * una alerta «sin datos» todos los días entrenaría a ignorar justo la que no hay que ignorar.
+     * Eso queda visible en la pantalla del termo, que es donde se puede hacer algo al respecto.
+     */
+    if (cfg.get('nitrogen_low')!.active) {
+      const leadPorDefecto = cfg.get('nitrogen_low')!.days;
+      for (const termo of await this.nitrogen.statusAll()) {
+        if (termo.state.status !== 'warning' && termo.state.status !== 'critical') continue;
+        out.push({
+          code: 'nitrogen_low',
+          category: 'iot',
+          severity: termo.state.status === 'critical' ? 'critical' : 'warning',
+          title: `Termo ${termo.tank_code ?? '—'}: quedan ${termo.state.days_remaining} días de nitrógeno`,
+          message: termo.message ?? nitrogenAlertMessage(termo.state, termo.tank_code ?? '—', termo.lead_days ?? leadPorDefecto),
+          related_type: 'storage_tank',
+          related_id: termo.tank_id,
+          due_at: termo.state.projected_empty_date,
+        });
       }
     }
 
