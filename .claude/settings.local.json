@@ -498,7 +498,10 @@
       "Bash(curl -s -o /dev/null -w \"login http=%{http_code}\\\\n\" http://localhost:63171/login)",
       "Bash(curl -s http://localhost:63171/login)",
       "Bash(grep -inE \"^\\\\+.*\\(password|secret|api[_-]?key|token\\)\\\\s*[:=]\\\\s*['\\\\\"][^'\\\\\"]{8,}\")",
-      "Bash(grep -viE \"example|placeholder|process\\\\.env|\\\\$\\\\{|test|humo|verificacion|<|описание\")"
+      "Bash(grep -viE \"example|placeholder|process\\\\.env|\\\\$\\\\{|test|humo|verificacion|<|описание\")",
+      "Bash(xcodebuild -version)",
+      "Bash(xcrun simctl *)",
+      "Bash(node -p \"JSON.stringify\\(require\\('./apps/mobile/package.json'\\).scripts,null,2\\)\")"
     ]
   }
 }
