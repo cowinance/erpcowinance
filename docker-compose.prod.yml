@@ -61,6 +61,10 @@ services:
       # tenant se reduce al `WHERE tenant_id` de cada query.
       DATABASE_URL: postgres://${APP_DB_USER:-cowinance_app}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB:-cowinance}
       DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-cowinance}
+      # Contra una base GESTIONADA (RDS, Cloud SQL, Neon) la CA del proveedor no está en el almacén
+      # de confianza de Node: sin esto, `sslmode=require` falla y el atajo `no-verify` cifra sin
+      # verificar con quién se habla. Ruta a un archivo o el PEM completo. Vacía = base local.
+      DATABASE_SSL_CA: ${DATABASE_SSL_CA:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       # Hay un proxy/compose delante: sin esto el rate limit vería una sola IP para todos.

@@ -1,5 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
+import { Logger } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
+import { dbSslFromEnv, warnsAboutPlaintext } from './db-ssl';
 
 /**
  * Driver SQL — la app habla con la base a través de esta interfaz, no con PGlite directamente.
@@ -70,8 +72,20 @@ export class PostgresDriver implements SqlDriver {
   private readonly adminPool: Pool;
 
   constructor(url: string, adminUrl?: string) {
-    this.pool = new Pool({ connectionString: url, max: 10 });
-    this.adminPool = adminUrl ? new Pool({ connectionString: adminUrl, max: 2 }) : this.pool;
+    // TLS explícito (DATABASE_SSL_CA) por encima de lo que diga la cadena: contra una base
+    // gestionada, `sslmode=require` se interpreta como verificación estricta y falla porque falta la
+    // CA del proveedor. Ver `db-ssl.ts`.
+    const ssl = dbSslFromEnv();
+    const logger = new Logger('PostgresDriver');
+    if (ssl) logger.log('TLS con verificación de certificado (DATABASE_SSL_CA)');
+    else if (warnsAboutPlaintext(url, ssl))
+      logger.warn(
+        'La base es un host REMOTO y la conexión no pide TLS: la contraseña y los datos de las fincas ' +
+          'viajan en claro. Pasá la CA del proveedor en DATABASE_SSL_CA.',
+      );
+
+    this.pool = new Pool({ connectionString: url, max: 10, ...(ssl ? { ssl } : {}) });
+    this.adminPool = adminUrl ? new Pool({ connectionString: adminUrl, max: 2, ...(ssl ? { ssl } : {}) }) : this.pool;
   }
 
   async ready() {

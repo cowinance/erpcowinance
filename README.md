@@ -154,6 +154,10 @@ Tres decisiones que no son de forma:
   creado por [`deploy/postgres-init`](deploy/postgres-init/)) y **migra** con el rol
   administrativo. Con un superusuario, PostgreSQL le saltea la RLS y el aislamiento por tenant
   queda reducido a que ninguna query se olvide nunca del `WHERE tenant_id`.
+- **Base gestionada (RDS, Cloud SQL, Neon): pasar la CA.** El certificado del proveedor lo firma una
+  CA que no está en el almacén de Node, así que `?sslmode=require` falla y el atajo `no-verify` cifra
+  **sin verificar con quién habla**. Con `DATABASE_SSL_CA` —ruta o el PEM pegado— la verificación es
+  real. Si la base es remota y no se pide TLS, el arranque avisa.
 - **El esquema se aplica solo, y una vez.** Al arrancar, la API carga el DDL canónico si la base
   está vacía y después aplica las migraciones pendientes de
   [`packages/db/migrations/`](packages/db/migrations/), registrándolas en `schema_migrations`.
