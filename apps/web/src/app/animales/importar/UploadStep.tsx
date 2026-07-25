@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { UploadCloud } from 'lucide-react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { Field, fieldDescribedBy } from '@/components/Field';
 
@@ -81,7 +81,7 @@ export function UploadStep({ onUploaded }: { onUploaded: (batch: ImportBatch) =>
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         const code = body?.message?.code ?? body?.code;
-        const title = body?.message?.title ?? body?.title;
+        const title = apiErrorTitle(body, '');
         throw new Error((code && ERROR_COPY[code]) || title || `Error ${res.status}`);
       }
       onUploaded(body as ImportBatch);

@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { CalendarClock, Check, ChevronRight, Loader2, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/Button';
@@ -61,7 +61,7 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
       await load();
       router.refresh();
     } else {
-      setMsg(j?.message?.title ?? 'No se pudo aplicar el plan');
+      setMsg(apiErrorTitle(j, 'No se pudo aplicar el plan'));
     }
   }
 

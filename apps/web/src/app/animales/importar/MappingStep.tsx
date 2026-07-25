@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Select } from '@/components/Select';
@@ -91,7 +91,7 @@ export function MappingStep({
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         const code = body?.message?.code ?? body?.code;
-        const title = body?.message?.title ?? body?.title;
+        const title = apiErrorTitle(body, '');
         throw new Error((code && PUT_ERROR_COPY[code]) || title || `Error ${res.status}`);
       }
       // body es ImportBatchDto (sin headers): preservamos los headers del batch en curso

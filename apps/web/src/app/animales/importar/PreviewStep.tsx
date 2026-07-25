@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { KpiCard } from '@/components/ui';
 import type { ImportBatch } from './UploadStep';
@@ -62,7 +62,7 @@ export function PreviewStep({
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
           const code = body?.message?.code ?? body?.code;
-          const title = body?.message?.title ?? body?.title;
+          const title = apiErrorTitle(body, '');
           throw new Error((code && PREVIEW_ERROR_COPY[code]) || title || `Error ${res.status}`);
         }
         if (alive) setPreview(body as Preview);

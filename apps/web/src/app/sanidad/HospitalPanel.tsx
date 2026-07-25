@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { AnimalPicker, PickedAnimal } from '@/components/capture';
 import { HeartPulse, Loader2, Plus } from 'lucide-react';
@@ -67,7 +67,7 @@ export function HospitalPanel({ lots = [] }: { lots?: any[] }) {
       setAnimal(null);
       await load();
       router.refresh();
-    } else setMsg(j?.message?.title ?? 'No se pudo internar');
+    } else setMsg(apiErrorTitle(j, 'No se pudo internar'));
   }
 
   async function discharge(id: string, destLotId?: string) {

@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronDown } from 'lucide-react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 
 const OPTIONS: { status: string; label: string; verb: string }[] = [
@@ -38,7 +38,7 @@ export function LifecycleAction({ animalId, active }: { animalId: string; active
         body: JSON.stringify({ status: pick.status, reason: reason || undefined }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       router.refresh();
       setPick(null);
     } catch (e: any) {

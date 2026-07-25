@@ -12,7 +12,7 @@
  * El modo Pesaje vive en page.tsx (con validateWeighing). Idempotency-Key en los guardados.
  */
 import { useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 
 export interface MangaAnimal {
   id: string;
@@ -66,7 +66,7 @@ export function MangaCapture({
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       return json;
     } catch (e: any) {
       onError((e.message ?? 'ERROR AL GUARDAR').toUpperCase());

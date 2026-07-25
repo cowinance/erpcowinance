@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
@@ -63,7 +63,7 @@ export function MoveDialog({
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       onDone?.(json.moved ?? 0);
       router.refresh();
       onClose();

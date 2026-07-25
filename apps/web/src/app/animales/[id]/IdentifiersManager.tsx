@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BadgeCheck, Plus, Star, X } from 'lucide-react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -37,7 +37,7 @@ export function IdentifiersManager({ animalId, identifiers }: { animalId: string
         body: body ? JSON.stringify(body) : undefined,
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       setValue('');
       setAdding(false);
       router.refresh();

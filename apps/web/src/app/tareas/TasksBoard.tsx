@@ -7,7 +7,7 @@
  * Asignar/Cancelar) que reusan los endpoints del TaskService. No offline (eso es del móvil).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Card, CardTitle } from '@/components/ui';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -151,7 +151,7 @@ export function TasksBoard() {
       });
       if (!res.ok) {
         const b = await res.json().catch(() => null);
-        alert(b?.message?.title ?? b?.title ?? 'Error');
+        alert(apiErrorTitle(b, 'Error'));
         return;
       }
       await load();
@@ -174,7 +174,7 @@ export function TasksBoard() {
         if (r.skipped) alert(`${r.applied} aplicadas · ${r.skipped} salteadas (estado no válido).`);
         setSelected(new Set());
         await load();
-      } else alert(r?.message?.title ?? 'Error');
+      } else alert(apiErrorTitle(r, 'Error'));
     } finally {
       setBusy(null);
     }
@@ -317,7 +317,7 @@ function RecurrencesManager({ assignees, onClose, onChanged }: { assignees: Assi
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ title: title.trim(), interval_days: Number(interval), anchor, type, priority }),
       });
-      if (!res.ok) { const b = await res.json().catch(() => null); alert(b?.message?.title ?? 'Error'); return; }
+      if (!res.ok) { const b = await res.json().catch(() => null); alert(apiErrorTitle(b, 'Error')); return; }
       setTitle('');
       await load();
       onChanged();
@@ -498,7 +498,7 @@ function CreateTask({ assignees, onCreated }: { assignees: Assignee[]; onCreated
         headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ title: title.trim(), due_date: due || null, priority, type }),
       });
-      if (!res.ok) { const b = await res.json().catch(() => null); alert(b?.message?.title ?? 'Error'); return; }
+      if (!res.ok) { const b = await res.json().catch(() => null); alert(apiErrorTitle(b, 'Error')); return; }
       const { id } = await res.json();
       if (assignedTo && id) {
         await fetch(`${API_URL}/tasks/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ assigned_to: assignedTo }) });
@@ -560,7 +560,7 @@ function TaskDetail({ id, assignees, onClose, onChanged }: { id: string; assigne
     setBusy(true);
     try {
       const res = await fetch(`${API_URL}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(), 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body ?? {}) });
-      if (!res.ok) { const b = await res.json().catch(() => null); alert(b?.message?.title ?? 'Error'); return; }
+      if (!res.ok) { const b = await res.json().catch(() => null); alert(apiErrorTitle(b, 'Error')); return; }
       await load();
       onChanged();
     } finally {

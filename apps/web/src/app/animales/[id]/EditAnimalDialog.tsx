@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil } from 'lucide-react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { AnimalPicker, type PickedAnimal } from '@/components/capture';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
@@ -86,7 +86,7 @@ function EditAnimalDialog({ animal, categories, breeds, onClose }: { animal: any
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       // La raza tiene su propia regla (PUT /animals/:id/breeds) — solo si cambió.
       if (breedsChanged()) {
         const br = await fetch(`${API_URL}/animals/${animal.id}/breeds`, {
@@ -95,7 +95,7 @@ function EditAnimalDialog({ animal, categories, breeds, onClose }: { animal: any
           body: JSON.stringify({ breeds: selectedBreeds.map((id) => ({ breed_id: id })) }),
         });
         const bj = await br.json().catch(() => ({}));
-        if (!br.ok) throw new Error(bj?.message?.title ?? bj?.title ?? `Error ${br.status}`);
+        if (!br.ok) throw new Error(apiErrorTitle(bj, `Error ${br.status}`));
       }
       router.refresh();
       onClose();

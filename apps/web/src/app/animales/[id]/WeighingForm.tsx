@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
@@ -31,7 +31,7 @@ export function WeighingForm({ animalId }: { animalId: string }) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.message?.title ?? body?.title ?? `Error ${res.status}`);
+        throw new Error(apiErrorTitle(body, `Error ${res.status}`));
       }
       setState('saved');
       setKg('');

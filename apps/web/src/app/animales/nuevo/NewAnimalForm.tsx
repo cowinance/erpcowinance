@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { AnimalPicker, type PickedAnimal } from '@/components/capture';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
@@ -55,7 +55,7 @@ export function NewAnimalForm({ categories, lots, breeds }: { categories: any[];
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.message?.title ?? body?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(body, `Error ${res.status}`));
       router.push(`/animales/${body.id}`);
     } catch (err: any) {
       setError(err.message);

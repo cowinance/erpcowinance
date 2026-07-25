@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { mangaCardAlerts, validateWeighing } from '@cowinance/domain';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { MangaCapture, type MangaMode } from './MangaCapture';
 
@@ -37,6 +37,7 @@ interface Animal {
   expected_due_date?: string | null;
   has_withdrawal?: boolean;
   meat_withdrawal_until?: string | null;
+  milk_withdrawal_until?: string | null;
   open_cases?: number;
   case_severity?: string | null;
 }
@@ -105,9 +106,11 @@ function fmtClock(t: number): string {
 function cardAlerts(a: Animal) {
   return mangaCardAlerts({
     meatWithdrawalUntil: a.meat_withdrawal_until,
-    // `has_withdrawal` es true también cuando solo hay retiro de LECHE, que no trae fecha en el
-    // DTO: se pasa la de carne como marca para que la alerta igual aparezca.
-    milkWithdrawalUntil: a.has_withdrawal && !a.meat_withdrawal_until ? new Date().toISOString() : null,
+    // Antes el DTO no traía la fecha de leche y se pasaba la de HOY como marca, solo para que la
+    // alerta apareciera. Eso mostraba «leche hasta <hoy>» cuando el retiro podía terminar cinco
+    // días después: una fecha equivocada es peor que ninguna, porque el operario la lee y manda la
+    // vaca al ordeñe. Ahora `herd.lookup` devuelve la real.
+    milkWithdrawalUntil: a.milk_withdrawal_until,
     openCases: a.open_cases,
     caseSeverity: a.case_severity,
     sex: a.sex,
@@ -262,7 +265,7 @@ export default function MangaPage() {
       });
       if (!res.ok) {
         const b = await res.json().catch(() => null);
-        return fail(b?.message?.title ?? 'ERROR AL GUARDAR');
+        return fail(apiErrorTitle(b, 'ERROR AL GUARDAR'));
       }
       const j = await res.json().catch(() => ({}));
       soundSaved();

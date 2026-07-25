@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { AnimalPicker, PickedAnimal } from '@/components/capture';
 import { Activity, ChevronRight, Loader2, Plus } from 'lucide-react';
@@ -85,7 +85,7 @@ export function ClinicalCasesPanel({ diagnoses = [], lots = [] }: { diagnoses?: 
       setMsg('');
       await load();
       router.refresh();
-    } else setMsg(j?.message?.title ?? 'No se pudo abrir el caso');
+    } else setMsg(apiErrorTitle(j, 'No se pudo abrir el caso'));
   }
 
   async function act(url: string, body: any) {
@@ -102,7 +102,7 @@ export function ClinicalCasesPanel({ diagnoses = [], lots = [] }: { diagnoses?: 
       await openDetail(detail.id);
       await load();
       router.refresh();
-    } else setMsg(j?.message?.title ?? 'No se pudo aplicar la acción');
+    } else setMsg(apiErrorTitle(j, 'No se pudo aplicar la acción'));
   }
 
   return (
@@ -269,7 +269,7 @@ export function ClinicalCasesPanel({ diagnoses = [], lots = [] }: { diagnoses?: 
                     const j = await res.json().catch(() => null);
                     setBusy(false); setAdmitOpen(false);
                     if (res.ok) { await openDetail(detail.id); router.refresh(); }
-                    else setMsg(j?.message?.title ?? 'No se pudo internar');
+                    else setMsg(apiErrorTitle(j, 'No se pudo internar'));
                   }}>Internar</Button>
                   <button onClick={() => setAdmitOpen(false)} className="text-caption text-ink-3 hover:underline">cancelar</button>
                 </div>

@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders, fileUrl, PhotoRef } from '@/lib/api';
+import { API_URL, authHeaders, fileUrl, PhotoRef, apiErrorTitle } from '@/lib/api';
 import { formatBytes, prepareImageForUpload } from '@/lib/image';
 import { ImagePlus, Star, Trash2, Loader2 } from 'lucide-react';
 
@@ -58,7 +58,7 @@ export function PhotoGallery({ animalId }: { animalId: string }) {
         const b = await res.json().catch(() => null);
         // La API devuelve `{code, title}`: leer `message.title` daba siempre undefined y el usuario
         // veía el texto genérico en vez del motivo.
-        throw new Error(b?.title ?? b?.message?.title ?? 'No se pudo subir la imagen');
+        throw new Error(apiErrorTitle(b, 'No se pudo subir la imagen'));
       }
       if (img.resized) setNote(`Foto optimizada: ${formatBytes(img.originalBytes)} → ${formatBytes(img.bytes)}`);
       await load();

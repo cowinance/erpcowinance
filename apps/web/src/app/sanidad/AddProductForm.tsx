@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
@@ -79,7 +79,7 @@ export function AddProductForm({
       const body = await res.json();
       // La API devuelve `{code, title}` en el cuerpo; leer `body.message.title` daba siempre
       // undefined y el usuario veía el texto genérico en vez del motivo real.
-      if (!res.ok) throw new Error(body?.title ?? body?.message?.title ?? 'No se pudo crear el medicamento');
+      if (!res.ok) throw new Error(apiErrorTitle(body, 'No se pudo crear el medicamento'));
       onCreated(body);
     } catch (err: any) {
       setError(err.message);

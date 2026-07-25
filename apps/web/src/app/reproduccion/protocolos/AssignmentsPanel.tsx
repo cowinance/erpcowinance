@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Card, CardTitle } from '@/components/ui';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -77,7 +77,7 @@ export function AssignmentsPanel({ protocols, lots, assignments, categories = []
       });
       if (!res.ok) {
         const j = await res.json().catch(() => null);
-        throw new Error(j?.title ?? j?.message?.title ?? `Error ${res.status}`);
+        throw new Error(j?.title ?? apiErrorTitle(j, `Error ${res.status}`));
       }
       const j = await res.json();
       setFeedback(`Asignación creada — ${j?.animals ?? 0} vientres, ${j?.tasks_created ?? 0} tareas${j?.skipped_in_protocol ? ` (${j.skipped_in_protocol} ya estaban)` : ''}.`);
@@ -112,7 +112,7 @@ export function AssignmentsPanel({ protocols, lots, assignments, categories = []
       const p = await fetch(`${API_URL}/reproduction/protocol-assignments/${id}/progress`, { headers: authHeaders() }).then((r) => r.json()).catch(() => null);
       setProgress(p);
       router.refresh();
-    } else setError(j?.message?.title ?? 'No se pudo completar el paso.');
+    } else setError(apiErrorTitle(j, 'No se pudo completar el paso.'));
   }
 
   async function cancel(id: string) {

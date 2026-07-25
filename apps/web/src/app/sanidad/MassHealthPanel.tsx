@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Loader2, Syringe, Stethoscope } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -77,7 +77,7 @@ export function MassHealthPanel({ products = [], lots = [], categories = [] }: {
     if (res.ok) {
       setResult(j);
       router.refresh();
-    } else setError(j?.message?.title ?? 'No se pudo aplicar');
+    } else setError(apiErrorTitle(j, 'No se pudo aplicar'));
   }
 
   const canApply = !!productId && (scope !== 'lot' || !!lotId) && (scope !== 'category' || !!categoryCode);

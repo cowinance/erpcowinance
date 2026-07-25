@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import type { ImportBatch } from './UploadStep';
 import type { PreviewCounts } from './PreviewStep';
@@ -39,7 +39,7 @@ export function ConfirmStep({
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         const code = body?.message?.code ?? body?.code;
-        const title = body?.message?.title ?? body?.title;
+        const title = apiErrorTitle(body, '');
         throw new Error((code && COMMIT_ERROR_COPY[code]) || title || `Error ${res.status}`);
       }
       onCommitted();

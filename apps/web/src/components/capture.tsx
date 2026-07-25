@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -115,7 +115,7 @@ export function useSubmit() {
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       setState('saved');
       setMessage(okMessage(json));
       setTimeout(() => setState('idle'), 4000);

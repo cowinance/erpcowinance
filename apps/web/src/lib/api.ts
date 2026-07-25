@@ -40,3 +40,26 @@ export function fileUrl(ref?: PhotoRef | null): string | null {
   if (!ref?.file_id) return null;
   return `${API_URL}/files/${ref.file_id}/content?t=${ref.token}`;
 }
+
+/**
+ * Motivo de un error de la API, para mostrárselo al usuario.
+ *
+ * La API responde `{code, title}` en el cuerpo. Muchas pantallas leían `body.message.title` —que
+ * existe en los errores genéricos de Nest, no en los del dominio— y esa propiedad da SIEMPRE
+ * `undefined`: el usuario terminaba viendo «Error» en vez de «el peso está fuera de rango» o «el
+ * animal tiene retiro activo». La API sabía exactamente qué pasaba y la pantalla lo tiraba.
+ *
+ * Duele más donde más apura: en la manga, con guantes, «ERROR AL GUARDAR» no dice qué corregir.
+ *
+ * Va como helper y no como parche en cada pantalla para que la próxima no vuelva a elegir mal la
+ * propiedad. `message` se sigue leyendo al final, por si alguna ruta devuelve el formato de Nest.
+ */
+export function apiErrorTitle(body: unknown, fallback: string): string {
+  const b = body as { title?: unknown; message?: unknown } | null | undefined;
+  if (typeof b?.title === 'string' && b.title) return b.title;
+  const m = b?.message;
+  if (typeof m === 'string' && m) return m;
+  const mt = (m as { title?: unknown } | undefined)?.title;
+  if (typeof mt === 'string' && mt) return mt;
+  return fallback;
+}

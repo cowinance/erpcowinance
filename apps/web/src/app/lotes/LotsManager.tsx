@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { API_URL, authHeaders } from '@/lib/api';
+import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Card, CardTitle, EmptyState } from '@/components/ui';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -128,7 +128,7 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
       if (method === 'POST' && (path.startsWith('/movements') || path.includes('/rotate'))) headers['Idempotency-Key'] = crypto.randomUUID();
       const res = await fetch(`${API_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
       const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.title ?? json?.message?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       return json;
     } catch (e: any) { setError(e.message ?? 'Error'); return null; }
     finally { setBusy(false); }

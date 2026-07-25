@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeftRight, Ban, Download, Printer, Tags } from 'lucide-react';
-import { API_URL, authHeaders, fileUrl } from '@/lib/api';
+import { API_URL, authHeaders, fileUrl, apiErrorTitle } from '@/lib/api';
 import { EmptyState, StatusBadge } from '@/components/ui';
 import { ageFrom, formatKg, relativeTime, STATUS_LABELS } from '@/lib/format';
 import { Button } from '@/components/Button';
@@ -167,7 +167,7 @@ function CategoryDialog({ animalIds, categories, onClose, onDone }: { animalIds:
         body: JSON.stringify({ animal_ids: animalIds, category_code: code }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       setResult(json);
     } catch (e: any) {
       setError(e.message);
@@ -216,7 +216,7 @@ function StatusDialog({ animalIds, toStatus, title, verb, onClose, onDone }: { a
         body: JSON.stringify({ animal_ids: animalIds, status: toStatus, reason: reason || undefined }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message?.title ?? json?.title ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorTitle(json, `Error ${res.status}`));
       setResult(json);
     } catch (e: any) {
       setError(e.message);

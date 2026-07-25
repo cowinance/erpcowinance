@@ -331,6 +331,11 @@ export class HerdService {
               preg.expected_due_date::text AS expected_due_date,
               (wd.meat_until IS NOT NULL OR wd.milk_until IS NOT NULL) AS has_withdrawal,
               wd.meat_until::text AS meat_withdrawal_until,
+              -- La fecha de LECHE se calculaba acá arriba y se tiraba: la tarjeta decía «tiene
+              -- retiro» y solo mostraba la de carne. En un tambo eso es grave — una vaca en retiro
+              -- de leche que va al ordeñe contamina el TANQUE ENTERO, no su tacho. El móvil ya la
+              -- tenía; la web se quedaba sin ella.
+              wd.milk_until::text AS milk_withdrawal_until,
               cc.open_cases::int AS open_cases, cc.max_severity AS case_severity
        FROM animal_identifiers i
        JOIN animals a ON a.id = i.animal_id AND a.deleted_at IS NULL

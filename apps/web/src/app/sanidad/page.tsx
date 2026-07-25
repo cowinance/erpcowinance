@@ -94,6 +94,9 @@ export default async function SanidadPage() {
                     <th>Producto</th>
                     <th>Aplicado</th>
                     <th className="text-right">Carne hasta</th>
+                    {/* La fecha de leche venía en la respuesta y la tabla no la mostraba. Sin ella,
+                        una vaca en retiro de leche parece libre y su leche contamina el tanque. */}
+                    <th className="text-right">Leche hasta</th>
                     <th className="pr-1 text-right">Días restantes</th>
                   </tr>
                 </thead>
@@ -108,6 +111,7 @@ export default async function SanidadPage() {
                       <td className="text-ink-2">{w.product ?? '—'}</td>
                       <td className="text-ink-2">{formatDate(w.applied_at)}</td>
                       <td className="tnum text-right">{formatDate(w.meat_withdrawal_until)}</td>
+                      <td className="tnum text-right">{w.milk_withdrawal_until ? formatDate(w.milk_withdrawal_until) : '—'}</td>
                       <td className="pr-1 text-right">
                         <span className="inline-flex items-center gap-1 font-medium text-warning">
                           <Clock size={12} /> {w.days_left}
