@@ -112,6 +112,9 @@ Valen más que los módulos: son las que hay que respetar al seguir.
 
 ---
 
+> **Antes que nada, leer la §8:** quedó trabajo sin commitear y con el gate de arquitectura sin
+> resolver.
+
 ## 5. LO ÚNICO ABIERTO: la configuración del servidor del productor
 
 El despliegue en `app.cowinance.com` **funciona**, pero quedaron dudas sin cerrar. Esto es lo
@@ -120,6 +123,15 @@ primero que hay que retomar.
 ### Resuelto y verificado en producción
 - El menú ya no aparece en `/register`, `/login` ni `/forgot-password` (0 `<aside>`).
 - El catálogo de países carga (200) y «Crear cuenta» está habilitado.
+
+### La base: el productor creó una RDS en AWS (25 jul, final de la sesión)
+Confirmó que **no hay datos importantes que migrar**, así que se puede apuntar directo. Le quedaron
+dados los pasos: extensiones `pgcrypto` y `postgis` con el usuario maestro, rol `cowinance_app`
+(`NOSUPERUSER NOBYPASSRLS`), bajar la CA de RDS y armar el `.env` con `NODE_ENV=production`, las dos
+URLs y `DATABASE_SSL_CA` (ver §8). Sacar el servicio `db` del compose y su `depends_on`.
+
+**Sin responder:** dónde corre la API ahora (¿se movió a AWS o sigue en el servidor de siempre?) y si
+el security group de la RDS deja entrar desde ahí.
 
 ### Sin confirmar — preguntar antes de seguir
 El productor dijo que **tuvo que arrancarlo «en modo prueba»**. Si eso significa que `NODE_ENV` no
@@ -182,3 +194,53 @@ El proyecto está **indexado en el grafo de código** (`codebase-memory-mcp`, pr
 
 La **memoria de proyecto** (`~/.claude/projects/…/memory/`) tiene una ficha por vertical con las
 decisiones que no se deducen del código. Empezar por `MEMORY.md`.
+
+---
+
+## 8. Adenda — trabajo SIN COMMITEAR al cerrar la sesión
+
+**Hay cambios en el árbol de trabajo que NO están commiteados y cuyo gate de arquitectura NO se
+verificó del todo.** Retomar por acá.
+
+### Qué es
+Soporte de **TLS verificado contra la base**, para poder apuntar a una PostgreSQL gestionada. El
+productor creó una **RDS en AWS** al final de la sesión y esto era el bloqueo: `pg` 8.22 interpreta
+`?sslmode=require` como `verify-full`, y la CA de RDS no está en el almacén de confianza de Node, así
+que la conexión falla. El único atajo era `?sslmode=no-verify`, que **cifra sin verificar con quién
+habla**: la contraseña de la base viaja hacia quien se haya puesto en el medio.
+
+Archivos:
+
+| Archivo | Estado |
+|---|---|
+| `apps/api/src/db/db-ssl.ts` | **nuevo** — `dbSslFromEnv` (ruta o PEM pegado) + `warnsAboutPlaintext` |
+| `apps/api/src/db/db-ssl.test.ts` | **nuevo** — 10 tests, en verde |
+| `apps/api/src/db/driver.ts` | modificado — el pool recibe `ssl` cuando hay CA |
+| `docker-compose.prod.yml`, `.env.example`, `README.md` | documentan `DATABASE_SSL_CA` |
+
+### Estado de verificación
+- `npx tsc -p apps/api` → **OK**
+- `npx vitest run` → **1266 tests en verde** (185 archivos, +10 de esta adenda)
+- `npm run audit:arch` → **FALLÓ**, y no se llegó a identificar qué invariante. Los primeros gates
+  (tokens, typechecks) pasaron; quedó corriendo el de tests con coverage, madge (ciclos) y el
+  presupuesto de tamaño por servicio.
+
+**La máquina estaba con carga 66-91** por procesos acumulados de una sesión muy larga, y varias
+corridas quedaron colgadas. Es plausible que el fallo del gate sea un efecto de eso —un timeout— y
+no una regresión real, pero **no está comprobado**. Primer paso al retomar:
+
+```bash
+pkill -9 -f vitest; pkill -9 -f "nest start"   # limpiar lo que haya quedado
+node scripts/audit-arch.mjs 2>&1 | tee /tmp/arch.log
+```
+
+Si el fallo es real, los candidatos por orden de probabilidad son el gate de **ciclos de dependencia
+(madge)** —`driver.ts` pasó a importar `db-ssl.ts` y `Logger` de `@nestjs/common`— y el de
+**presupuesto de tamaño**. Si el gate pasa, commitear tal cual.
+
+### Cómo usarlo, una vez commiteado
+```bash
+DATABASE_SSL_CA=/ruta/al/global-bundle.pem   # o el PEM completo pegado en la variable
+```
+Con la CA puesta, el arranque loguea `TLS con verificación de certificado`. Si la base es un host
+remoto y no se pide TLS, avisa.
