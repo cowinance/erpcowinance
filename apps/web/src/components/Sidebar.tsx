@@ -168,6 +168,7 @@ export function Sidebar({
   criticalAlerts = 0,
   unreadNotifications = 0,
   moduleFlags = {},
+  variant = 'fixed',
 }: {
   orgName?: string;
   farmName?: string;
@@ -177,6 +178,15 @@ export function Sidebar({
   unreadNotifications?: number;
   /** Estado de las banderas de módulo (key→enabled). Un módulo con bandera apagada se oculta. */
   moduleFlags?: Record<string, boolean>;
+  /**
+   * `fixed` = columna de escritorio (oculta bajo lg). `drawer` = el MISMO menú dentro del cajón
+   * móvil, visible a cualquier ancho porque lo muestra u oculta el cajón que lo contiene.
+   *
+   * Se reutiliza este componente en vez de escribir una navegación móvil aparte: son 30 secciones
+   * con sus banderas de módulo y sus badges, y dos listas separadas se desincronizan al primer
+   * módulo nuevo que alguien agregue en una sola.
+   */
+  variant?: 'fixed' | 'drawer';
 }) {
   const visible = (href: string) => {
     const flag = MODULE_FLAG[href];
@@ -191,7 +201,13 @@ export function Sidebar({
     .join('')
     .toUpperCase();
   return (
-    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sunken px-3 pt-4 pb-3 max-lg:hidden">
+    <aside
+      className={
+        variant === 'drawer'
+          ? 'flex h-full w-full flex-col overflow-y-auto bg-sunken px-3 pt-4 pb-3'
+          : 'sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sunken px-3 pt-4 pb-3 max-lg:hidden'
+      }
+    >
       {/* Cabecera de contexto: Organización → Finca */}
       <button className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-brand-soft">
         <div className="flex size-7 items-center justify-center rounded-md bg-brand text-label font-semibold text-white">

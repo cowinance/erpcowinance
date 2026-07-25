@@ -90,9 +90,16 @@ export function VerificationBanner({
   if (verified) return null;
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border-l-[3px] border-warning bg-sunken px-4 py-3">
+    // En móvil se apila. Antes era una sola fila con `flex-wrap`, y no alcanzaba: los botones son
+    // `shrink-0` (~270 px entre los dos) y el texto tiene `min-w-0`, así que en vez de empujarlos a
+    // la línea de abajo el texto se APLASTABA hasta ~40 px y salía una palabra por línea, ocupando
+    // la pantalla entera del teléfono. `flex-wrap` no lo evita: solo baja un elemento cuando no
+    // puede encogerse más, y este podía.
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border-l-[3px] border-warning bg-sunken px-4 py-3 max-sm:flex-col max-sm:items-start">
       <Mail size={16} className="shrink-0 text-warning" strokeWidth={1.75} />
-      <div className="min-w-0 flex-1 text-body">
+      {/* `break-words`: los tokens de configuración (EMAIL_PROVIDER=smtp) no tienen dónde cortar y
+          desbordan el ancho del teléfono. */}
+      <div className="min-w-0 flex-1 text-body break-words">
         <span className="font-medium">Verificá tu email.</span>{' '}
         <span className="text-ink-3">
           {puedeEnviar

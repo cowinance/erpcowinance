@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { cookies, headers } from 'next/headers';
 import './globals.css';
 import { Sidebar } from '@/components/Sidebar';
+import { MobileNav } from '@/components/MobileNav';
 import { API_URL } from '@/lib/api';
 import { ACCESS_COOKIE } from '@/lib/session';
 import { PATHNAME_HEADER, isPublicRoute } from '@/lib/routes';
@@ -80,9 +81,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             moduleFlags={session?.moduleFlags ?? {}}
           />
           <main className="min-w-0 flex-1">
-            <div className="mx-auto max-w-[1440px] px-8 py-6">{children}</div>
+            {/* pb en móvil: la barra inferior es `fixed`, así que sin este espacio taparía el
+                último elemento de cada pantalla — justo el botón de guardar en los formularios
+                largos. Desaparece en lg, donde la barra no existe. */}
+            <div className="mx-auto max-w-[1440px] px-8 py-6 max-lg:px-4 max-lg:pb-24">{children}</div>
           </main>
         </div>
+        <MobileNav
+          orgName={session?.orgName}
+          farmName={session?.farmName}
+          userName={session?.userName}
+          openAlerts={session?.openAlerts ?? 0}
+          criticalAlerts={session?.criticalAlerts ?? 0}
+          unreadNotifications={session?.unreadNotifications ?? 0}
+          moduleFlags={session?.moduleFlags ?? {}}
+        />
       </body>
     </html>
   );
