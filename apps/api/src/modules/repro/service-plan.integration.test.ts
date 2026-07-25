@@ -8,6 +8,9 @@ import { SemenService } from '../genetics/semen.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import { StrawsService } from '../genetics/straws.service';
 import { ServicePlanService } from './service-plan.service';
+import { ReproService } from './repro.service';
+import { WeaningService } from './weaning.service';
+import { TaskService } from '../tasks/task.service';
 
 /**
  * Plan de servicio por animal (GT-3).
@@ -26,14 +29,21 @@ describe('plan de servicio — reserva, liberación y lista de retiro', () => {
   let tmp: string;
   let originalCwd: string;
 
+  let repro: ReproService;
   let assignmentId: string;
   let animales: string[] = [];
   let lote: any;
   let gobA: string;
   let gobB: string;
 
-  /** Campaña mínima: una asignación de protocolo con N vientres. */
-  const armarCampaña = async (n: number) => {
+  /**
+   * Campaña mínima: una asignación de protocolo con N vientres.
+   *
+   * Se excluyen las que ya tienen una preñez abierta —el seed demo trae varias— porque
+   * diagnosticarlas preñadas de nuevo es justamente lo que el servicio rechaza. `offset` permite
+   * que dos campañas del mismo archivo no compitan por los mismos vientres.
+   */
+  const armarCampaña = async (n: number, offset = 0) => {
     const protocolo = await db.one<any>(
       `INSERT INTO repro_protocols (tenant_id, name, species_id, steps)
        VALUES ($1,'IATF test',(SELECT id FROM species LIMIT 1),'[]'::jsonb) RETURNING id`,
@@ -45,8 +55,12 @@ describe('plan de servicio — reserva, liberación y lista de retiro', () => {
       [db.tenant, protocolo!.id, n, db.user],
     );
     const vientres = await db.query<{ id: string }>(
-      `SELECT id FROM animals WHERE tenant_id=$1 AND sex='F' AND deleted_at IS NULL LIMIT $2`,
-      [db.tenant, n],
+      `SELECT a.id FROM animals a
+       WHERE a.tenant_id=$1 AND a.sex='F' AND a.deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM pregnancies p WHERE p.animal_id=a.id AND p.status='open' AND p.deleted_at IS NULL)
+       ORDER BY a.created_at, a.id
+       LIMIT $2 OFFSET $3`,
+      [db.tenant, n, offset],
     );
     for (const v of vientres)
       await db.query(
@@ -69,6 +83,10 @@ describe('plan de servicio — reserva, liberación y lista de retiro', () => {
     semen = new SemenService(db, straws);
     embryos = new EmbryosService(db, straws);
     plans = new ServicePlanService(db, straws);
+    // El diagnóstico agenda tareas (recontrol / nuevo servicio); acá se stubean porque lo que se
+    // prueba es el cierre de la campaña, no la agenda —que ya tiene sus propios tests—.
+    const tareas = { createTask: async () => ({ id: 'stub' }) } as unknown as TaskService;
+    repro = new ReproService(db, {} as WeaningService, tareas, semen, embryos, straws, plans);
 
     const t: any = await cryo.createTank({ code: '207' });
     const c1: any = await cryo.createCanister(t.id, { code: '1', color: 'azul' });
@@ -204,6 +222,51 @@ describe('plan de servicio — reserva, liberación y lista de retiro', () => {
     expect(despues.straws_available).toBe(antes.straws_available + 1);
     const unidad = (await straws.listFor({ semen_batch_id: lote.id })).find((u: any) => u.id === plan.straw_id);
     expect(unidad.status).toBe('stored');
+  });
+
+  /**
+   * GT-3b: la IATF no termina al inseminar sino a los ~28 días. Lo que se comprueba acá es que el
+   * resultado sea DERIVADO —no hay columna que lo guarde— y que la tasa se calcule sobre lo
+   * diagnosticado y no sobre lo servido.
+   */
+  it('el cierre de la campaña sale de los diagnósticos, sin guardar nada', async () => {
+    const { assignmentId: camp, animales: vientres } = await armarCampaña(2, 3);
+    const unidades = (await straws.listFor({ semen_batch_id: lote.id })).filter((u: any) => u.status === 'stored');
+    for (const [i, v] of vientres.entries()) {
+      await plans.setEligibility(camp, v, 'eligible');
+      await plans.plan(camp, { animal_id: v, method: 'ai', semen_batch_id: lote.id, straw_id: unidades[i].id });
+    }
+
+    // La jornada: se sirve a las dos.
+    for (const v of vientres) {
+      const evento: any = await repro.service(v, { method: 'ai', semen_batch_id: lote.id, force: true });
+      await plans.markServed(camp, v, evento.id, evento.straw_ids?.[0] ?? null);
+    }
+
+    // Antes de ecografiar: la tasa es NULA, no cero. Cero diría «ninguna quedó preñada», que es una
+    // afirmación distinta de «todavía no sé».
+    let r: any = await plans.outcome(camp);
+    expect(r.outcome).toMatchObject({ served: 2, pending_diagnosis: 2, conception_rate: null, closed: false });
+
+    // Una preñada, una vacía.
+    await repro.diagnose({ animal_id: vientres[0], result: 'pregnant' });
+    r = await plans.outcome(camp);
+    // 1 de 1 diagnosticada = 100 %, no 1 de 2 servidas = 50 %.
+    expect(r.outcome).toMatchObject({ pregnant: 1, pending_diagnosis: 1, conception_rate: 100, closed: false });
+
+    await repro.diagnose({ animal_id: vientres[1], result: 'empty' });
+    r = await plans.outcome(camp);
+    expect(r.outcome).toMatchObject({ pregnant: 1, empty: 1, pending_diagnosis: 0, conception_rate: 50, closed: true });
+  });
+
+  /** El lazo de vuelta a genética: qué toro funcionó es lo que decide qué semen se vuelve a comprar. */
+  it('la tasa por toro suma los servicios de todas las campañas', async () => {
+    const porToro: any[] = await plans.conceptionBySire();
+    const sansao = porToro.find((t) => t.sire_label === 'SANSAO' || t.sire_label?.includes('SANSAO'));
+    expect(sansao).toBeTruthy();
+    expect(sansao.pregnant).toBeGreaterThanOrEqual(1);
+    // Con tan pocos servicios la tasa existe pero NO es comparable, y el dato lo dice.
+    expect(sansao.reliable).toBe(false);
   });
 
   it('no se puede planificar un animal que no está en la campaña', async () => {

@@ -33,3 +33,11 @@ export {
   validatePlanEntry,
 } from './service-plan';
 export type { CampaignSummary, Eligibility, PickingLine, PlanEntryInput, PlanMethod, PlanStatus } from './service-plan';
+
+export {
+  DIAGNOSIS_RESULTS,
+  MIN_SERVICES_FOR_RATE,
+  conceptionBySire,
+  summarizeCampaignOutcome,
+} from './campaign-outcome';
+export type { CampaignOutcome, DiagnosisResult, SireConception } from './campaign-outcome';

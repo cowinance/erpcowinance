@@ -78,4 +78,32 @@ test('la campaña reserva la pajuela por vientre y la suelta al descartarlo', as
 
   const liberada = await (await page.request.get(`${API_URL}/genetics/semen/${lote.id}`, { headers: auth })).json();
   expect(liberada).toMatchObject({ straws_available: 2, straws_reserved: 0 });
+
+  /**
+   * GT-3b: la campaña no termina al inseminar. Se sirve a PLAN-2 y se comprueba que el resultado
+   * aparezca recién con el diagnóstico — y que hasta entonces la preñez se muestre como «—» y no
+   * como 0 %, que diría algo distinto y falso sobre el toro.
+   */
+  await page.getByLabel('Origen para PLAN-2').selectOption({ index: 1 });
+  await page.getByLabel('Pajuela para PLAN-2').selectOption({ index: 1 });
+  await page.getByRole('row', { name: /PLAN-2/ }).getByRole('button', { name: 'Asignar' }).click();
+  await expect(page.getByRole('row', { name: /PLAN-2/ }).getByRole('button', { name: 'Sacar del plan' })).toBeVisible({
+    timeout: 20_000,
+  });
+
+  const animales = await (await page.request.get(`${API_URL}/animals?status=active`, { headers: auth })).json();
+  const plan2 = (animales.data ?? animales).find((a: any) => a.tag === 'PLAN-2');
+  await page.request.post(`${API_URL}/reproduction/protocol-assignments/${(await (await page.request.get(`${API_URL}/reproduction/protocol-assignments`, { headers: auth })).json()).find((a: any) => a.status === 'active').id}/steps/0/complete`, {
+    headers: auth,
+    data: {},
+  });
+
+  await page.reload();
+  await expect(page.getByText('Resultado de la campaña')).toBeVisible();
+  // Servida pero sin ecografiar: la preñez todavía no se puede afirmar.
+  await expect(page.getByRole('row', { name: /^Sansão/ }).getByText('—')).toBeVisible();
+
+  await page.request.post(`${API_URL}/pregnancy-diagnoses`, { headers: auth, data: { animal_id: plan2.id, result: 'pregnant' } });
+  await page.reload();
+  await expect(page.getByRole('row', { name: /^Sansão/ }).getByText('100%')).toBeVisible();
 });

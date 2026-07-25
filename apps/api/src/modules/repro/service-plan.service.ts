@@ -2,10 +2,13 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import {
   InvalidServicePlanError,
   buildPickingList,
+  conceptionBySire,
   cryoLocationLabel,
   shouldReleaseReservation,
   summarizeCampaign,
+  summarizeCampaignOutcome,
   validatePlanEntry,
+  type DiagnosisResult,
   type Eligibility,
 } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
@@ -256,6 +259,104 @@ export class ServicePlanService {
       [assignmentId, animalId, this.db.tenant, breedingEventId, strawId],
     );
     return r[0] ?? null;
+  }
+
+  // ───────────────────── Cierre de la campaña (GT-3b) ─────────────────────
+
+  /**
+   * El diagnóstico de cada vientre servido, DERIVADO. No hay columna que lo guarde, y es
+   * deliberado: el diagnóstico ya vive en `pregnancies` y en el timeline del animal, que es donde
+   * lo escriben todos los canales. Copiarlo acá daría dos fuentes del mismo hecho.
+   *
+   * - Preñada: existe una preñez atada al MISMO servicio que ejecutó el plan. Atarla al servicio y
+   *   no al animal es lo que impide contarle a esta campaña una preñez de un servicio posterior.
+   * - Vacía / dudosa: el diagnóstico más reciente del animal POSTERIOR al servicio.
+   */
+  private diagnosisSubquery() {
+    return `
+      LEFT JOIN LATERAL (
+        SELECT 'pregnant'::text AS result
+        FROM pregnancies pg
+        WHERE pg.breeding_event_id = p.breeding_event_id AND pg.tenant_id = p.tenant_id AND pg.deleted_at IS NULL
+        LIMIT 1
+      ) preg ON true
+      LEFT JOIN LATERAL (
+        SELECT CASE WHEN ev.event_type = 'pregnancy_negative' THEN 'empty' ELSE 'doubtful' END AS result
+        FROM animal_events ev
+        WHERE ev.animal_id = p.animal_id AND ev.tenant_id = p.tenant_id
+          AND ev.event_type IN ('pregnancy_negative','pregnancy_doubtful')
+          -- Se compara por DÍA y no por instante: el diagnóstico se registra con fecha (queda a
+          -- medianoche), así que contra la hora exacta del servicio uno del mismo día caería antes
+          -- y no se contaría. La jornada y la ecografía nunca son el mismo día en la práctica, pero
+          -- en una prueba —o en una carga retroactiva— sí, y ahí el resultado se perdía.
+          AND ev.occurred_at::date >= p.served_at::date
+        ORDER BY ev.occurred_at DESC LIMIT 1
+      ) neg ON true`;
+  }
+
+  /**
+   * Resultado de la campaña: la IATF no termina al inseminar sino a los ~28 días, cuando se sabe
+   * quiénes quedaron preñadas. Sin este cierre nunca se averigua si la campaña funcionó — ni, sobre
+   * todo, QUÉ TORO funcionó, que es el número que decide qué semen se vuelve a comprar.
+   */
+  async outcome(assignmentId: string) {
+    await this.requireAssignment(assignmentId);
+    const rows = await this.db.query<any>(
+      `SELECT p.animal_id, p.status, p.breeding_event_id, p.served_at,
+              tag.value AS animal_tag,
+              COALESCE(preg.result, neg.result) AS diagnosis,
+              COALESCE(sire.value, b.sire_name_external, b.batch_code) AS sire_label,
+              COALESCE(b.sire_id::text, p.semen_batch_id::text, p.embryo_id::text) AS sire_key
+       FROM repro_service_plans p
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = p.animal_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) tag ON true
+       LEFT JOIN semen_batches b ON b.id = p.semen_batch_id AND b.deleted_at IS NULL
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = b.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) sire ON true
+       ${this.diagnosisSubquery()}
+       WHERE p.assignment_id = $1 AND p.tenant_id = $2 AND p.deleted_at IS NULL
+       ORDER BY tag.value NULLS LAST`,
+      [assignmentId, this.db.tenant],
+    );
+
+    const servidos = rows.map((r) => ({ served: r.status === 'served', diagnosis: (r.diagnosis ?? null) as DiagnosisResult | null }));
+    return {
+      assignment_id: assignmentId,
+      outcome: summarizeCampaignOutcome(servidos),
+      by_sire: conceptionBySire(
+        rows
+          .filter((r) => r.status === 'served')
+          .map((r) => ({ sire_key: r.sire_key ?? 'sin-toro', sire_label: r.sire_label ?? 'sin identificar', diagnosis: r.diagnosis ?? null })),
+      ),
+      animals: rows.map((r) => ({
+        animal_id: r.animal_id,
+        animal_tag: r.animal_tag,
+        served: r.status === 'served',
+        sire_label: r.sire_label,
+        diagnosis: r.diagnosis ?? null,
+      })),
+    };
+  }
+
+  /**
+   * Tasa de concepción por toro sobre TODAS las campañas.
+   *
+   * Acá se cierra el lazo que abrió el termo: pajuela → vaca → preñez → tasa por toro → qué semen
+   * se vuelve a comprar. Es lo único que convierte al termo de depósito en instrumento de medición.
+   */
+  async conceptionBySire() {
+    const rows = await this.db.query<any>(
+      `SELECT COALESCE(preg.result, neg.result) AS diagnosis,
+              COALESCE(sire.value, b.sire_name_external, b.batch_code) AS sire_label,
+              COALESCE(b.sire_id::text, p.semen_batch_id::text) AS sire_key
+       FROM repro_service_plans p
+       JOIN semen_batches b ON b.id = p.semen_batch_id AND b.deleted_at IS NULL
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = b.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) sire ON true
+       ${this.diagnosisSubquery()}
+       WHERE p.tenant_id = $1 AND p.deleted_at IS NULL AND p.status = 'served'`,
+      [this.db.tenant],
+    );
+    return conceptionBySire(
+      rows.map((r) => ({ sire_key: r.sire_key ?? 'sin-toro', sire_label: r.sire_label ?? 'sin identificar', diagnosis: r.diagnosis ?? null })),
+    );
   }
 
   /** El plan vigente de un vientre: lo que la jornada tiene que ejecutar. */

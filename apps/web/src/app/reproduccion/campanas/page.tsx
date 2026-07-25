@@ -31,9 +31,10 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
 
   // El origen y sus pajuelas LIBRES: es lo que se puede reservar hoy. Las reservadas no aparecen
   // porque ya tienen dueña, y ofrecerlas sería ofrecer algo que va a rebotar con un 409.
-  const [campaign, picking, batches, embryos] = await Promise.all([
+  const [campaign, picking, outcome, batches, embryos] = await Promise.all([
     apiSafe<any>(`/reproduction/campaigns/${elegida}`),
     apiSafe<any>(`/reproduction/campaigns/${elegida}/picking-list`),
+    apiSafe<any>(`/reproduction/campaigns/${elegida}/outcome`),
     apiSafe<any[]>('/genetics/semen'),
     apiSafe<any[]>('/genetics/embryos'),
   ]);
@@ -69,7 +70,8 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
       <div>
         <h1 className="text-xl font-semibold">Campañas de servicio</h1>
         <p className="mt-0.5 text-body text-ink-3">
-          Qué se le pone a cada vientre y de qué pajuela sale. En la jornada no se elige: se confirma.
+          Qué se le pone a cada vientre y de qué pajuela sale. La campaña no termina al inseminar: termina cuando se
+          confirma la preñez.
         </p>
       </div>
 
@@ -96,6 +98,9 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
           rows={campaign.animals}
           origins={origins}
           picking={picking?.lines ?? []}
+          outcome={outcome?.outcome ?? { served: 0, pregnant: 0, empty: 0, doubtful: 0, pending_diagnosis: 0, conception_rate: null, closed: false }}
+          bySire={outcome?.by_sire ?? []}
+          outcomeRows={outcome?.animals ?? []}
         />
       )}
     </div>

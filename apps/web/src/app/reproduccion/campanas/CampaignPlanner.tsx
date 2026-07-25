@@ -33,6 +33,32 @@ interface Origin {
   label: string;
   straws: { id: string; label: string }[];
 }
+interface Outcome {
+  served: number;
+  pregnant: number;
+  empty: number;
+  doubtful: number;
+  pending_diagnosis: number;
+  conception_rate: number | null;
+  closed: boolean;
+}
+interface SireRate {
+  sire_key: string;
+  sire_label: string;
+  services: number;
+  pregnant: number;
+  empty: number;
+  pending: number;
+  conception_rate: number | null;
+  reliable: boolean;
+}
+interface OutcomeRow {
+  animal_id: string;
+  animal_tag: string | null;
+  served: boolean;
+  sire_label: string | null;
+  diagnosis: 'pregnant' | 'empty' | 'doubtful' | null;
+}
 interface PickingLine {
   tank_code: string | null;
   canister_code: string | null;
@@ -60,12 +86,18 @@ export function CampaignPlanner({
   rows,
   origins,
   picking,
+  outcome,
+  bySire,
+  outcomeRows,
 }: {
   assignmentId: string;
   summary: Summary;
   rows: Row[];
   origins: Origin[];
   picking: PickingLine[];
+  outcome: Outcome;
+  bySire: SireRate[];
+  outcomeRows: OutcomeRow[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -299,6 +331,97 @@ export function CampaignPlanner({
           </ul>
         )}
       </Card>
+
+      {outcome.served > 0 && (
+        <Card>
+          <CardTitle>
+            <span>Resultado de la campaña</span>
+            <span className="text-caption font-normal text-ink-3">
+              {outcome.closed ? 'Cerrada' : `${outcome.pending_diagnosis + outcome.doubtful} sin confirmar`}
+            </span>
+          </CardTitle>
+
+          <div className="grid grid-cols-5 gap-3 max-md:grid-cols-3">
+            {[
+              ['Servidas', outcome.served, ''],
+              ['Preñadas', outcome.pregnant, 'text-success'],
+              ['Vacías', outcome.empty, ''],
+              ['Dudosas', outcome.doubtful, outcome.doubtful > 0 ? 'text-warning' : ''],
+              [
+                'Preñez',
+                outcome.conception_rate === null ? '—' : `${outcome.conception_rate}%`,
+                outcome.conception_rate === null ? 'text-ink-3' : '',
+              ],
+            ].map(([label, valor, tono]) => (
+              <div key={label as string}>
+                <div className="text-caption text-ink-3">{label}</div>
+                <div className={`tnum text-xl font-semibold ${tono}`}>{valor as string | number}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* La tasa se calcula sobre lo DIAGNOSTICADO, no sobre lo servido: dividir por las
+              servidas daría un porcentaje que arranca en cero y sube a medida que se ecografía, y
+              alguien sacaría conclusiones sobre un toro que todavía no tuvo oportunidad de fallar. */}
+          <p className="mt-2 text-caption text-ink-3">
+            {outcome.conception_rate === null
+              ? 'La preñez aparece cuando haya al menos un diagnóstico cargado.'
+              : `Sobre ${outcome.pregnant + outcome.empty} diagnosticadas de ${outcome.served} servidas.`}
+          </p>
+
+          {bySire.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-label font-medium">Por toro</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-body">
+                  <thead className="text-left text-caption text-ink-3">
+                    <tr className="border-b border-subtle">
+                      <th className="py-1.5">Toro</th>
+                      <th className="py-1.5 text-right">Servicios</th>
+                      <th className="py-1.5 text-right">Preñadas</th>
+                      <th className="py-1.5 text-right">Preñez</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-subtle">
+                    {bySire.map((t) => (
+                      <tr key={t.sire_key}>
+                        <td className="py-1.5">{t.sire_label}</td>
+                        <td className="tnum py-1.5 text-right">{t.services}</td>
+                        <td className="tnum py-1.5 text-right">{t.pregnant}</td>
+                        <td className="tnum py-1.5 text-right">
+                          {t.conception_rate === null ? '—' : `${t.conception_rate}%`}
+                          {/* Con pocos servicios, dos tasas se diferencian en UN animal: el dato se
+                              muestra igual, pero marcado, para no invitar a comparar lo incomparable. */}
+                          {t.conception_rate !== null && !t.reliable && (
+                            <span className="ml-1 text-caption font-normal text-ink-3" title="Pocos servicios para comparar">
+                              (pocos datos)
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {outcome.pending_diagnosis > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-label font-medium">Falta ecografiar</div>
+              <ul className="flex flex-wrap gap-1.5">
+                {outcomeRows
+                  .filter((r) => r.served && r.diagnosis === null)
+                  .map((r) => (
+                    <li key={r.animal_id} className="rounded-md bg-sunken px-2 py-1 text-caption">
+                      {r.animal_tag ?? r.animal_id.slice(0, 8)}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

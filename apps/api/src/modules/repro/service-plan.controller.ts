@@ -13,6 +13,15 @@ import { ServicePlanService } from './service-plan.service';
 export class ServicePlanController {
   constructor(private readonly plans: ServicePlanService) {}
 
+  /**
+   * Tasa de concepción por toro sobre todas las campañas. Va antes de `:id` porque una ruta
+   * estática después de una paramétrica nunca se alcanza — ya nos pasó.
+   */
+  @Get('conception-by-sire')
+  conceptionBySire() {
+    return this.plans.conceptionBySire();
+  }
+
   @Get(':id')
   campaign(@Param('id') id: string) {
     return this.plans.campaign(id);
@@ -28,6 +37,12 @@ export class ServicePlanController {
   @Put(':id/animals/:animalId/eligibility')
   setEligibility(@Param('id') id: string, @Param('animalId') animalId: string, @Body() body: any) {
     return this.plans.setEligibility(id, animalId, body?.eligibility as Eligibility, body?.notes);
+  }
+
+  /** Cierre de la campaña: quiénes quedaron preñadas y con qué toro (GT-3b). */
+  @Get(':id/outcome')
+  outcome(@Param('id') id: string) {
+    return this.plans.outcome(id);
   }
 
   @Post(':id/plan')
