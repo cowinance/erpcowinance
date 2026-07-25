@@ -4,14 +4,45 @@ Plataforma ERP para ganadería, agricultura y administración de fincas. La espe
 
 ## Estado
 
-**Fase 0-1 del roadmap** (alcance funcional de Fase 1 completo en web):
-- **Hato**: dashboard, lista maestra, ficha 360° con línea de tiempo y genealogía (madre/padre/crías), captura de pesajes, lookup por caravana.
-- **Sanidad**: vacunaciones, tratamientos con cálculo automático de retiros (carne/leche) según el producto, diagnósticos, mortalidad con baja del animal; KPIs (cobertura, retiros activos, mortalidad).
-- **Reproducción**: ciclo completo celo → servicio (IA/monta) → diagnóstico (crea la preñez con fecha probable de parto desde el servicio + 283 d) → parto (alta de crías con genealogía) → destete; KPIs y próximos partos.
-- **Modo manga** (`/manga`): captura masiva de campo en alto contraste AAA — caravana → peso → condición corporal, con feedback auditivo y contador de progreso.
-- **Potreros y Mapa** (`/mapa`): mapa 2D esquemático con polígonos coloreados por ocupación/carga, panel contextual por potrero y movimiento de lotes entre potreros (registrado en la línea de tiempo de cada animal).
-- **Reportes** (`/reportes`): inventario del hato **a fecha reconstruido por el ciclo de vida** de cada animal (el número cambia según la fecha, prueba del event-sourcing), altas/bajas del período, producción (GDP por lote) y reproducción; todos exportables a CSV.
-- **Motor de sincronización offline v0**: changesets con relojes híbridos (HLC), LWW por campo, conflictos semánticos y duplicados con cola de revisión, dedupe exactly-once por (device, seq), panel de flota.
+**35 de los 45 módulos del catálogo entregados**, y **Fase 2 del roadmap está a uno de cerrar**:
+G4 · facturación electrónica. Los otros nueve pendientes son de Fase 3-4 (BI, IA, gemelo digital,
+marketplace, IoT, drones, blockchain, academia, integraciones).
+
+> El catálogo (`docs/Cowinance_Catalogo_Modulos.docx`) dice «40 módulos» en su portada pero enumera
+> 45 fichas. Acá se cuenta contra las fichas, que es lo verificable.
+
+| Suite | Módulos entregados |
+|---|---|
+| **A · Núcleo** | administración y facturación SaaS · identidad y roles · configuración y catálogos · sincronización offline · notificaciones y alertas · documentos |
+| **B · Ganadería** | hato · reproducción y genética · sanidad · producción y pesajes · nutrición · trazabilidad |
+| **C · Sistemas productivos** | tambo · engorde/feedlot · cría y recría |
+| **D · Agricultura y tierra** | cultivos · pastoreo · mapas y GPS · clima y agrometeorología |
+| **E · Cadena de suministro** | inventarios · maquinaria · mantenimiento · combustible |
+| **F · Comercial** | compras · ventas · CRM · clientes · proveedores |
+| **G · Finanzas** | contabilidad · costos y rentabilidad · tesorería |
+| **H · Personas** | recursos humanos · nómina y jornales |
+| **I / J** | laboratorio · reportes |
+
+Algunas capacidades que atraviesan todo el sistema:
+
+- **Modo manga** (`/manga` y móvil): captura de campo en alto contraste, con la tarjeta del animal
+  avisando retiro activo, caso clínico abierto y parto próximo — la misma regla en los dos canales.
+- **Offline real**: el móvil opera sin señal y converge por changesets con relojes híbridos (HLC),
+  LWW por campo y resolución de conflictos por semántica de dominio.
+- **Aislamiento multi-tenant por RLS**, verificado en CI contra PostgreSQL real con un rol no
+  privilegiado — no solo por el `WHERE tenant_id` de cada consulta.
+- **Reconstrucción por eventos**: el inventario del hato a una fecha se recalcula desde el ciclo de
+  vida de cada animal, no desde un saldo guardado.
+
+### Estado operativo
+
+Desplegable: imágenes de producción, migraciones versionadas, almacenamiento de objetos, envío real
+de email, sondas de plataforma, métricas y backup con restore ensayado. El detalle —qué se corrigió,
+qué falta y por qué— está en [la auditoría](docs/audits/auditoria-2026-07-24.md); cada módulo tiene
+además su documento en [docs/sprints/](docs/sprints/).
+
+Antes de un despliegue real hay que configurar `STORAGE_DRIVER=s3` y `EMAIL_PROVIDER=smtp`: con los
+valores de desarrollo el arranque avisa exactamente qué queda roto.
 
 ## Estructura del monorepo
 

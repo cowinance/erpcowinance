@@ -284,9 +284,9 @@ No son errores, pero son la señal temprana de uno:
 
 ---
 
-## 3. Estado funcional: 36 de 40 módulos del catálogo
+## 3. Estado funcional: 35 de 45 módulos del catálogo
 
-Contrastado con `docs/Cowinance_Catalogo_Modulos.docx` (11 suites, 40 módulos) y verificado contra
+Contrastado con `docs/Cowinance_Catalogo_Modulos.docx` y verificado contra
 las rutas reales de la API (`apps/api/src/modules`, 35 módulos) y de la web (61 páginas).
 
 | Suite | Entregado | Falta |
@@ -305,6 +305,10 @@ las rutas reales de la API (`apps/api/src/modules`, 35 módulos) y de la web (61
 
 **Fase 2 del roadmap está a 1 módulo de cerrar: G4 · facturación electrónica.**
 (D4 · clima y F3 · CRM entregados — ver `docs/sprints/weather-completion.md` y `crm-completion.md`.)
+
+*Corrección de conteo:* una versión anterior de este documento decía «36 de 40», tomando el total de
+la portada del catálogo. El catálogo dice 40 en la portada pero **enumera 45 fichas**; el conteo
+correcto contra las fichas es 35 entregados y 10 pendientes, de los cuales solo G4 es de Fase 2.
 Todo lo demás pendiente es Fase 3-4 y no pertenece al producto final de esta etapa.
 
 Paridad móvil (offline-first): hato, manga, sanidad, reproducción, tareas, agenda, notificaciones y
