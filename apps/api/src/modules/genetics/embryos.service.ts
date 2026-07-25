@@ -45,11 +45,14 @@ export class EmbryosService {
   }
 
   /** Mismo nombre de siempre para no romper a quien lo consume; ahora es un conteo con desglose. */
-  private saldo(c: { available: number; located: number; unlocated: number; used: number } | undefined) {
+  private saldo(c: { available: number; located: number; unlocated: number; reserved: number; used: number } | undefined) {
     return {
       straws_available: c?.available ?? 0,
       straws_located: c?.located ?? 0,
       straws_unlocated: c?.unlocated ?? 0,
+      // Reservadas van aparte de las libres (GT-3): están en el termo pero ya tienen dueña. Sumarlas
+      // al disponible haría planificar sobre pajuelas que ya están comprometidas.
+      straws_reserved: c?.reserved ?? 0,
       straws_used: c?.used ?? 0,
     };
   }
@@ -70,7 +73,7 @@ export class EmbryosService {
     );
     // Una colecta de 4 embriones son 4 unidades físicas, cada una con su identidad.
     if (straws > 0) await this.straws.createBatch({ embryo_id: row!.id }, { quantity: straws });
-    return { ...row, ...this.saldo({ available: straws, located: 0, unlocated: straws, used: 0 }) };
+    return { ...row, ...this.saldo({ available: straws, located: 0, unlocated: straws, reserved: 0, used: 0 }) };
   }
 
   async adjustStraws(id: string, delta: number, reason: string) {

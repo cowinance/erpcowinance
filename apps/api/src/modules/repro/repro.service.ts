@@ -9,6 +9,7 @@ import { TaskService } from '../tasks/task.service';
 import { SemenService } from '../genetics/semen.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import { StrawsService } from '../genetics/straws.service';
+import { ServicePlanService } from './service-plan.service';
 
 @Injectable()
 export class ReproService {
@@ -19,6 +20,7 @@ export class ReproService {
     private readonly semen: SemenService,
     private readonly embryos: EmbryosService,
     private readonly straws: StrawsService,
+    private readonly plans: ServicePlanService,
   ) {}
 
   /**
@@ -855,16 +857,46 @@ export class ReproService {
     const steps: any[] = Array.isArray(assignment.steps) ? assignment.steps : [];
     if (stepIndex < 0 || stepIndex >= steps.length) throw new BadRequestException({ code: 'assignment.invalid_step', title: 'Paso inválido' });
     const step = steps[stepIndex];
-    const animals = await this.db.query<{ animal_id: string }>(`SELECT animal_id FROM repro_protocol_assignment_animals WHERE assignment_id=$1 AND tenant_id=$2`, [assignmentId, t]);
+    // Se trae también la revisión: un vientre marcado «no apta» no entra a la jornada. Servirlo
+    // igual gastaría una pajuela en un animal que la ecografía ya descartó.
+    const animals = await this.db.query<{ animal_id: string; eligibility: string }>(
+      `SELECT animal_id, eligibility FROM repro_protocol_assignment_animals WHERE assignment_id=$1 AND tenant_id=$2`,
+      [assignmentId, t],
+    );
     const occurredAt = (body.occurred_at ?? new Date().toISOString()).slice(0, 10);
     const kind = step.kind ?? 'other';
 
     let eventsCreated = 0;
-    for (const { animal_id } of animals) {
+    let skippedNotEligible = 0;
+    for (const { animal_id, eligibility } of animals) {
       const opKey = `protocol:${assignmentId}:${stepIndex}`;
+      if (kind === 'insemination' && eligibility === 'not_eligible') {
+        skippedNotEligible++;
+        continue;
+      }
       try {
         if (kind === 'insemination') {
-          await this.service(animal_id, { method: 'ai', occurred_at: occurredAt, sire_id: body.sire_id, semen_batch_id: body.semen_batch_id, protocol_id: assignment.protocol_id, force: true }, this.deriveId(opKey, animal_id));
+          // GT-3: si el vientre tiene PLAN, la jornada lo ejecuta — su propio toro y su propia
+          // pajuela. Sin plan se cae al comportamiento de siempre (un mismo semen para el grupo),
+          // que sigue siendo lo correcto para una IATF donde todas van con el mismo toro.
+          const plan = await this.plans.planFor(assignmentId, animal_id);
+          const evento = await this.service(
+            animal_id,
+            plan
+              ? {
+                  method: plan.method === 'embryo_transfer' ? 'embryo_transfer' : 'ai',
+                  occurred_at: occurredAt,
+                  sire_id: body.sire_id,
+                  semen_batch_id: plan.semen_batch_id ?? undefined,
+                  embryo_id: plan.embryo_id ?? undefined,
+                  straw_id: plan.straw_id ?? undefined,
+                  protocol_id: assignment.protocol_id,
+                  force: true,
+                }
+              : { method: 'ai', occurred_at: occurredAt, sire_id: body.sire_id, semen_batch_id: body.semen_batch_id, protocol_id: assignment.protocol_id, force: true },
+            this.deriveId(opKey, animal_id),
+          );
+          if (plan && evento?.id) await this.plans.markServed(assignmentId, animal_id, evento.id, evento.straw_ids?.[0] ?? null);
           eventsCreated++;
         } else if (kind === 'hormonal' || kind === 'device_removal') {
           const id = this.deriveId(opKey, animal_id);
@@ -896,7 +928,15 @@ export class ReproService {
       [t, assignmentId, `${step.action} — %`],
     );
 
-    return { assignment_id: assignmentId, step: stepIndex, kind, animals: animals.length, events_created: eventsCreated, completed_steps: completed };
+    return {
+      assignment_id: assignmentId,
+      step: stepIndex,
+      kind,
+      animals: animals.length,
+      events_created: eventsCreated,
+      skipped_not_eligible: skippedNotEligible,
+      completed_steps: completed,
+    };
   }
 
   /** Progreso de una asignación: pasos con estado (completado/pendiente) + cantidad de animales. */

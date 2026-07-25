@@ -194,6 +194,44 @@ export class StrawsService {
     });
   }
 
+  // ──────────────────────────── Reserva (GT-3) ────────────────────────────
+
+  /**
+   * Reserva una pajuela para un animal. La unidad sigue en el termo pero deja de estar libre.
+   *
+   * `FOR UPDATE` no es ceremonia: dos personas planificando la misma campaña a la vez llegarían a
+   * la misma pajuela libre, y sin el lock las dos se la llevarían.
+   */
+  async reserve(q: Q, strawId: string, animalId: string): Promise<void> {
+    const s = await q.one<{ id: string; status: StrawStatus; reserved_for_animal_id: string | null }>(
+      `SELECT id, status, reserved_for_animal_id FROM cryo_straws
+       WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL FOR UPDATE`,
+      [strawId, this.db.tenant],
+    );
+    if (!s) throw new NotFoundException({ code: 'genetics.straw_not_found', title: 'Pajuela no encontrada' });
+    // Reservarla otra vez para el MISMO animal es reaplicar el mismo plan: no es un error.
+    if (s.status === 'reserved' && s.reserved_for_animal_id === animalId) return;
+    try {
+      assertStrawTransition(s.status, 'reserved');
+    } catch (e) {
+      throw new ConflictException({ code: 'genetics.straw_not_available', title: (e as Error).message });
+    }
+    await q.query(
+      `UPDATE cryo_straws SET status='reserved', reserved_for_animal_id=$3, updated_at=now()
+       WHERE id=$1 AND tenant_id=$2`,
+      [strawId, this.db.tenant, animalId],
+    );
+  }
+
+  /** Suelta la reserva y devuelve la pajuela al stock libre. Silencioso si ya no estaba reservada. */
+  async release(q: Q, strawId: string): Promise<void> {
+    await q.query(
+      `UPDATE cryo_straws SET status='stored', reserved_for_animal_id=NULL, updated_at=now()
+       WHERE id=$1 AND tenant_id=$2 AND status='reserved' AND deleted_at IS NULL`,
+      [strawId, this.db.tenant],
+    );
+  }
+
   // ─────────────────────────── Consumo (repro) ────────────────────────────
 
   /**
@@ -226,7 +264,9 @@ export class StrawsService {
         [strawId, t, semen, embryo],
       );
       if (!s) throw new NotFoundException({ code: 'genetics.straw_not_found', title: 'Pajuela no encontrada en ese origen' });
-      if (s.status !== 'stored')
+      // Reservada TAMBIÉN se puede consumir: es el caso normal del plan, donde la pajuela se apartó
+      // justamente para este servicio. Lo que no se puede es usar una que ya salió del termo.
+      if (s.status !== 'stored' && s.status !== 'reserved')
         throw new ConflictException({ code: 'genetics.straw_not_available', title: `La pajuela ya no está disponible (${s.status}).` });
       await this.marcarUsadas(q, [s.id], reason);
       return [s.id];
@@ -257,7 +297,7 @@ export class StrawsService {
   async releaseByEvent(q: Q, breedingEventId: string): Promise<number> {
     const r = await q.query<{ id: string }>(
       `UPDATE cryo_straws
-       SET status='stored', status_reason=NULL, used_at=NULL, breeding_event_id=NULL, updated_at=now()
+       SET status='stored', status_reason=NULL, reserved_for_animal_id=NULL, used_at=NULL, breeding_event_id=NULL, updated_at=now()
        WHERE tenant_id=$1 AND breeding_event_id=$2 AND status='used' AND deleted_at IS NULL
        RETURNING id`,
       [this.db.tenant, breedingEventId],
@@ -277,7 +317,7 @@ export class StrawsService {
 
   private async marcarUsadas(q: Q, ids: string[], reason: string) {
     await q.query(
-      `UPDATE cryo_straws SET status='used', status_reason=$3, used_at=now(), updated_at=now()
+      `UPDATE cryo_straws SET status='used', status_reason=$3, reserved_for_animal_id=NULL, used_at=now(), updated_at=now()
        WHERE tenant_id=$1 AND id = ANY($2::uuid[])`,
       [this.db.tenant, ids, reason.slice(0, 64)],
     );

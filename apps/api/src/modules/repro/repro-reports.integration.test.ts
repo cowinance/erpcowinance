@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
+import { ServicePlanService } from './service-plan.service';
 import { ReproReportsService } from './repro-reports.service';
 import { SemenService } from '../genetics/semen.service';
 import { StrawsService } from '../genetics/straws.service';
@@ -45,7 +46,7 @@ describe('repro — reportes reproductivos (E5)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)));
     reports = new ReproReportsService(db, repro);
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;

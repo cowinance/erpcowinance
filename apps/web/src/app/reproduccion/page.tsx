@@ -23,6 +23,7 @@ export default async function ReproPage() {
         <div className="flex items-center gap-4">
           <Link href="/reproduccion/reportes" className="text-label font-medium text-brand hover:underline">Reportes →</Link>
           <Link href="/reproduccion/protocolos" className="text-label font-medium text-brand hover:underline">Protocolos IATF →</Link>
+          <Link href="/reproduccion/campanas" className="text-label font-medium text-brand hover:underline">Campañas →</Link>
         </div>
       </div>
       <p className="mt-0.5 mb-5 text-body text-ink-3">Celos, servicios, gestaciones, partos y destetes</p>

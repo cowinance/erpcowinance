@@ -21,3 +21,15 @@ export {
   validateStrawBatch,
 } from './straw';
 export type { StrawBatchInput, StrawCounts, StrawStatus } from './straw';
+
+export {
+  ELIGIBILITY,
+  InvalidServicePlanError,
+  PLAN_METHODS,
+  PLAN_STATUSES,
+  buildPickingList,
+  shouldReleaseReservation,
+  summarizeCampaign,
+  validatePlanEntry,
+} from './service-plan';
+export type { CampaignSummary, Eligibility, PickingLine, PlanEntryInput, PlanMethod, PlanStatus } from './service-plan';

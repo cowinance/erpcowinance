@@ -34,9 +34,19 @@ describe('assertStrawTransition', () => {
     expect(() => assertStrawTransition('stored', 'stored')).toThrow(/ya está en estado/);
   });
 
-  it('solo cuenta como stock lo guardado', () => {
+  it('solo cuenta como stock LIBRE lo guardado — reservada no', () => {
     expect(isStrawAvailable('stored')).toBe(true);
-    for (const s of ['used', 'lost', 'discarded', 'sold'] as const) expect(isStrawAvailable(s)).toBe(false);
+    for (const s of ['reserved', 'used', 'lost', 'discarded', 'sold'] as const) expect(isStrawAvailable(s)).toBe(false);
+  });
+
+  // Reservada es transitorio: o se sirve, o vuelve al stock. Perderla o venderla estando reservada
+  // dejaría a la vaca que la tenía asignada sin nada, y en silencio.
+  it('una reservada solo puede servirse o volver al stock', () => {
+    expect(() => assertStrawTransition('stored', 'reserved')).not.toThrow();
+    expect(() => assertStrawTransition('reserved', 'used')).not.toThrow();
+    expect(() => assertStrawTransition('reserved', 'stored')).not.toThrow();
+    expect(() => assertStrawTransition('reserved', 'sold')).toThrow(/Soltá primero esa asignación/);
+    expect(() => assertStrawTransition('reserved', 'lost')).toThrow(InvalidStrawTransitionError);
   });
 });
 
@@ -67,6 +77,7 @@ describe('summarizeStraws', () => {
     { status: 'stored' as const, goblet_id: 'g1' },
     { status: 'stored' as const, goblet_id: 'g1' },
     { status: 'stored' as const, goblet_id: null },
+    { status: 'reserved' as const, goblet_id: 'g1' },
     { status: 'used' as const, goblet_id: 'g1' },
     { status: 'lost' as const, goblet_id: 'g1' },
     { status: 'sold' as const, goblet_id: null },
@@ -77,11 +88,13 @@ describe('summarizeStraws', () => {
    * disponibles darían un saldo que parece completo mientras media partida es, en la práctica,
    * imposible de encontrar dentro del termo.
    */
-  it('separa lo disponible entre ubicado y sin ubicar', () => {
-    expect(summarizeStraws(filas)).toEqual({ available: 3, located: 2, unlocated: 1, used: 1, other_exits: 2 });
+  it('separa lo disponible entre ubicado y sin ubicar, y lo reservado aparte', () => {
+    // Reservada NO suma a `available`: sigue en el termo pero ya tiene dueña. Si sumara, se podrían
+    // planificar 30 servicios sobre 20 pajuelas.
+    expect(summarizeStraws(filas)).toEqual({ available: 3, located: 2, unlocated: 1, reserved: 1, used: 1, other_exits: 2 });
   });
 
   it('un conjunto vacío da todo en cero', () => {
-    expect(summarizeStraws([])).toEqual({ available: 0, located: 0, unlocated: 0, used: 0, other_exits: 0 });
+    expect(summarizeStraws([])).toEqual({ available: 0, located: 0, unlocated: 0, reserved: 0, used: 0, other_exits: 0 });
   });
 });

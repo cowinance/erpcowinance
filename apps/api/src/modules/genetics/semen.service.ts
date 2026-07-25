@@ -52,11 +52,14 @@ export class SemenService {
    * reproducción— pero ahora es un conteo. Al lado viaja el desglose, que es lo que el contador
    * nunca pudo decir: cuántas de esas están realmente ubicadas dentro de un termo.
    */
-  private saldo(c: { available: number; located: number; unlocated: number; used: number } | undefined) {
+  private saldo(c: { available: number; located: number; unlocated: number; reserved: number; used: number } | undefined) {
     return {
       straws_available: c?.available ?? 0,
       straws_located: c?.located ?? 0,
       straws_unlocated: c?.unlocated ?? 0,
+      // Reservadas van aparte de las libres (GT-3): están en el termo pero ya tienen dueña. Sumarlas
+      // al disponible haría planificar sobre pajuelas que ya están comprometidas.
+      straws_reserved: c?.reserved ?? 0,
       straws_used: c?.used ?? 0,
     };
   }
@@ -79,7 +82,7 @@ export class SemenService {
     // Comprar una partida es comprar pajuelas: se dan de alta como unidades sin ubicar, porque la
     // caja llegó y todavía nadie abrió el termo para cargarlas.
     if (straws > 0) await this.straws.createBatch({ semen_batch_id: row!.id }, { quantity: straws });
-    return { ...row, ...this.saldo({ available: straws, located: 0, unlocated: straws, used: 0 }) };
+    return { ...row, ...this.saldo({ available: straws, located: 0, unlocated: straws, reserved: 0, used: 0 }) };
   }
 
   async update(id: string, body: any) {

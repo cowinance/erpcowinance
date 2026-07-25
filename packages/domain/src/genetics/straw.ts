@@ -8,11 +8,11 @@
  * mienta justamente cuando se la usa para decidir qué semen comprar.
  */
 
-export const STRAW_STATUSES = ['stored', 'used', 'lost', 'discarded', 'sold'] as const;
+export const STRAW_STATUSES = ['stored', 'reserved', 'used', 'lost', 'discarded', 'sold'] as const;
 export type StrawStatus = (typeof STRAW_STATUSES)[number];
 
 /** Motivo por el que una pajuela dejó de estar disponible. */
-export const STRAW_EXIT_REASONS: Record<Exclude<StrawStatus, 'stored'>, string> = {
+export const STRAW_EXIT_REASONS: Record<Exclude<StrawStatus, 'stored' | 'reserved'>, string> = {
   used: 'Usada en un servicio',
   lost: 'Descongelada y no utilizada',
   discarded: 'Descartada (vencida o rechazada)',
@@ -36,7 +36,11 @@ export class InvalidStrawTransitionError extends Error {
  * deshacer el servicio, que es donde de verdad está el error.
  */
 export const STRAW_TRANSITIONS: Record<StrawStatus, readonly StrawStatus[]> = {
-  stored: ['used', 'lost', 'discarded', 'sold'],
+  stored: ['reserved', 'used', 'lost', 'discarded', 'sold'],
+  // Reservada es un estado TRANSITORIO: o se usa, o vuelve al stock. Nunca se pierde ni se vende
+  // estando reservada — primero hay que soltar el plan, para que la vaca que la tenía asignada no
+  // se quede en silencio sin nada con qué servirla.
+  reserved: ['stored', 'used'],
   used: [],
   lost: ['stored'],
   discarded: ['stored'],
@@ -50,11 +54,21 @@ export function assertStrawTransition(from: StrawStatus, to: StrawStatus): void 
       throw new InvalidStrawTransitionError(
         'La pajuela ya se usó en un servicio. Para devolverla al stock hay que corregir ese servicio.',
       );
+    if (from === 'reserved')
+      throw new InvalidStrawTransitionError(
+        'La pajuela está reservada para un animal. Soltá primero esa asignación del plan.',
+      );
     throw new InvalidStrawTransitionError(`No se puede pasar de "${from}" a "${to}".`);
   }
 }
 
-/** ¿Cuenta como stock disponible? Una sola definición, usada por el saldo y por la reserva. */
+/**
+ * ¿Cuenta como stock LIBRE?
+ *
+ * Reservada no cuenta: sigue en el termo, pero ya tiene dueña. Si contara, se podrían planificar 30
+ * servicios sobre 20 pajuelas y el problema aparecería recién en el corral, con los animales ya
+ * sincronizados y sin vuelta atrás.
+ */
 export function isStrawAvailable(status: StrawStatus): boolean {
   return status === 'stored';
 }
@@ -94,9 +108,12 @@ export function validateStrawBatch(raw: any): StrawBatchInput {
 }
 
 export interface StrawCounts {
+  /** Libres: se pueden reservar o consumir hoy. */
   available: number;
   located: number;
   unlocated: number;
+  /** Comprometidas con un animal del plan. Están en el termo, pero no se pueden volver a asignar. */
+  reserved: number;
   used: number;
   other_exits: number;
 }
@@ -114,6 +131,7 @@ export function summarizeStraws(rows: readonly { status: StrawStatus; goblet_id:
     available: disponibles.length,
     located: disponibles.filter((r) => r.goblet_id !== null).length,
     unlocated: disponibles.filter((r) => r.goblet_id === null).length,
+    reserved: rows.filter((r) => r.status === 'reserved').length,
     used: rows.filter((r) => r.status === 'used').length,
     other_exits: rows.filter((r) => r.status === 'lost' || r.status === 'discarded' || r.status === 'sold').length,
   };
