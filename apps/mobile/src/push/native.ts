@@ -26,6 +26,23 @@ export function pushEnabled(): boolean {
   return process.env.EXPO_PUBLIC_PUSH_ENABLED !== 'false';
 }
 
+/**
+ * ¿La plataforma tiene notificaciones nativas? En web NO: `expo-notifications` expone el módulo
+ * pero varios métodos lanzan «is not available on web».
+ *
+ * Importa porque el harness de verificación en navegador (`npm run mobile`, react-native-web) es
+ * parte del flujo de trabajo del repo, y `PushBridge` se monta siempre: sin esta guarda, la app
+ * **crashea al arrancar** en web y no se puede verificar ninguna pantalla. Mismo criterio que
+ * `ensureAndroidChannel`, que ya es no-op fuera de Android: la plataforma se conoce acá, no en
+ * cada consumidor.
+ */
+export function pushSupported(): boolean {
+  return Platform.OS === 'ios' || Platform.OS === 'android';
+}
+
+/** Suscripción inerte para las plataformas sin push: el consumidor llama `.remove()` igual. */
+const NOOP_SUBSCRIPTION: Subscription = { remove: () => {} } as Subscription;
+
 /** Canal Android: DEBE existir antes de pedir permiso u obtener token (Android 13+). No-op en iOS. */
 async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
@@ -99,6 +116,7 @@ type Subscription = { remove: () => void };
 /** Handler de foreground (una sola vez): banner + lista, sin sonido ni badge del SO. */
 let handlerConfigured = false;
 export function configureForegroundHandler(): void {
+  if (!pushSupported()) return;
   if (handlerConfigured) return;
   handlerConfigured = true;
   Notifications.setNotificationHandler({
@@ -113,11 +131,13 @@ export function configureForegroundHandler(): void {
 
 /** Notificación recibida en foreground → señal para refrescar el feed (el caller la debouncea). */
 export function addReceivedListener(cb: () => void): Subscription {
+  if (!pushSupported()) return NOOP_SUBSCRIPTION;
   return Notifications.addNotificationReceivedListener(() => cb());
 }
 
 /** Respuesta (tap) → entrega el `data` crudo + identificador (para deduplicar con el cold start). */
 export function addResponseListener(cb: (data: unknown, id: string) => void): Subscription {
+  if (!pushSupported()) return NOOP_SUBSCRIPTION;
   return Notifications.addNotificationResponseReceivedListener((res) =>
     cb(res.notification.request.content.data, res.notification.request.identifier),
   );
@@ -125,6 +145,7 @@ export function addResponseListener(cb: (data: unknown, id: string) => void): Su
 
 /** Respuesta que abrió la app en frío (o null). Mismo shape que el listener para reusar el handler. */
 export async function getInitialResponse(): Promise<{ data: unknown; id: string } | null> {
+  if (!pushSupported()) return null;
   const res = await Notifications.getLastNotificationResponseAsync();
   if (!res) return null;
   return { data: res.notification.request.content.data, id: res.notification.request.identifier };
