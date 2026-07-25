@@ -63,8 +63,48 @@ botones que llevan a Movimiento y a Pesaje.
 
 ## Qué falta
 
-- **Verificarlo en un dispositivo real.** El typecheck de móvil pasa y la lógica está probada, pero
-  la app se corre con Expo: nadie ejecutó esta pantalla en un teléfono en esta sesión.
 - **Retiro de leche en la web.** El DTO de `herd.lookup` expone `has_withdrawal` y la fecha de
   carne, pero no la de leche; la web muestra la alerta igual, sin la fecha. El móvil sí tiene las
   dos. Emparejarlo es agregar un campo al DTO.
+- **Un teléfono de verdad** — ver abajo: se verificó corriendo la app, pero en el harness de
+  navegador, no en un dispositivo.
+
+## Verificado corriendo la app (25 jul 2026)
+
+Sobre el harness de Expo en navegador (`npm run mobile`, react-native-web — el mismo código de
+`manga.tsx`), con la API real y un animal preparado con retiro activo, caso clínico grave y sin
+lote:
+
+| Alerta | Se ve | Color | Al tocarla |
+|---|---|---|---|
+| `RETIRO ACTIVO · carne hasta 29/08` | sí | rojo | **nada** (correcto: no es tocable) |
+| `CASO ABIERTO (grave) · tratar` | sí | rojo | cambia a **Tratamiento**, con la lista de productos |
+| `SIN LOTE · mover` | sí | ámbar | cambia a **Movimiento**, con el selector de lote destino |
+
+El animal además no tenía pesaje, o sea una cuarta alerta candidata: la tarjeta mostró **tres**,
+respetando el tope.
+
+**Bug encontrado al hacerlo:** la app **crasheaba al arrancar** en el harness web —
+`expo-notifications` expone el módulo pero sus métodos lanzan «is not available on web», y
+`PushBridge` llama a `getLastNotificationResponseAsync` en el montaje. Con eso, el camino de
+verificación que documenta el README no servía para ninguna pantalla. Corregido con guardas de
+plataforma en el módulo de push (commit `0110f82`).
+
+### Lo que sigue faltando: un teléfono de verdad
+
+El harness ejecuta el mismo componente, pero **no es un teléfono**: no cubre gestos táctiles reales,
+tamaño de toque con guantes, vibración ni el comportamiento offline del almacenamiento nativo
+(SQLite en el dispositivo vs AsyncStorage en web).
+
+No se pudo usar el simulador de iOS: Xcode está instalado pero **sin runtimes de iOS** (`xcrun simctl
+list runtimes` vacío), y bajarlos son varios GB con permiso del usuario.
+
+Para probarlo con Expo Go, la API tiene que ser alcanzable desde el teléfono — `localhost` no sirve:
+
+```bash
+docker compose up -d db          # opcional; sin esto usa PGlite
+npm run api                      # en una terminal
+EXPO_PUBLIC_API_URL=http://<IP-de-la-Mac>:3001/v1 npm run start --prefix apps/mobile
+```
+
+Con el teléfono en la misma red WiFi, escanear el QR con Expo Go.
