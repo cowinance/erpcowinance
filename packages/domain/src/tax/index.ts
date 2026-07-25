@@ -43,3 +43,13 @@ export {
   validateVatRates,
 } from './vat';
 export type { VatTreatment, VatRates, VatGroup, VatLineInput, VatBreakdown } from './vat';
+
+export {
+  NOTE_TYPES,
+  FiscalDocumentError,
+  assertIssuable,
+  assertNoteReference,
+  assertVoidable,
+  isNote,
+} from './document';
+export type { FiscalDocumentStanding, IssuerIdentity, ReferencedDocument } from './document';

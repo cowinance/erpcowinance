@@ -39,8 +39,7 @@ import {
   ChevronsUpDown,
   Search,
   Zap,
-  LogOut,
-} from 'lucide-react';
+  LogOut, Receipt } from 'lucide-react';
 import { clearSession } from '@/lib/auth';
 
 const SECTIONS: { title: string | null; items: { href: string; label: string; icon: any }[] }[] = [
@@ -81,6 +80,7 @@ const SECTIONS: { title: string | null; items: { href: string; label: string; ic
       { href: '/finanzas', label: 'Finanzas', icon: Landmark },
       { href: '/comercial', label: 'Compras y Ventas', icon: ShoppingCart },
       { href: '/costos', label: 'Costos', icon: Calculator },
+      { href: '/facturacion', label: 'Facturación', icon: Receipt },
       { href: '/rrhh', label: 'Personal', icon: Users },
       { href: '/modulo/marketplace', label: 'Marketplace', icon: Store },
       { href: '/trazabilidad', label: 'Trazabilidad', icon: ShieldCheck },

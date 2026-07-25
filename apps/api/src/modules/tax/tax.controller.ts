@@ -1,6 +1,9 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { NumberingService } from './numbering.service';
 import { VatService } from './vat.service';
+import { IssuanceService } from './issuance.service';
+import { BooksService } from './books.service';
+import { IssuerService } from './issuer.service';
 
 /**
  * Fiscal (G4) — series de numeración (G4-2) y alícuotas de IVA (G4-3).
@@ -14,6 +17,9 @@ export class TaxController {
   constructor(
     private readonly numbering: NumberingService,
     private readonly vat: VatService,
+    private readonly issuance: IssuanceService,
+    private readonly books: BooksService,
+    private readonly issuer: IssuerService,
   ) {}
 
   /** Series con su estado DERIVADO (cuánto queda del lote, si hay que pedir uno nuevo). */
@@ -58,5 +64,46 @@ export class TaxController {
   @Post('vat-preview')
   vatPreview(@Body() body: any) {
     return this.vat.preview(body);
+  }
+
+  // ── Comprobantes (G4-4) ───────────────────────────────────────────────────
+  @Get('documents')
+  documents(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.issuance.list({ from, to });
+  }
+
+  @Get('documents/:id')
+  document(@Param('id') id: string) {
+    return this.issuance.get(id);
+  }
+
+  /** Emite el comprobante de una venta: identidad + los dos números + el IVA, en una transacción. */
+  @Post('documents/issue')
+  issue(@Body() body: any) {
+    return this.issuance.issueFromSale(body);
+  }
+
+  /** Anula. NO libera el número: el comprobante sigue ocupando su lugar en el correlativo. */
+  @Post('documents/:id/void')
+  voidDocument(@Param('id') id: string, @Body() body: any) {
+    return this.issuance.voidDocument(id, body);
+  }
+
+  // ── Libro de ventas (G4-5) ────────────────────────────────────────────────
+  @Get('books/sales')
+  salesBook(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.books.salesBook({ from, to });
+  }
+
+  // ── Identidad fiscal propia (G4-4) ────────────────────────────────────────
+  /** Datos fiscales de la empresa que emite. Sin RIF propio no se puede emitir nada. */
+  @Get('issuer')
+  getIssuer() {
+    return this.issuer.get();
+  }
+
+  @Put('issuer')
+  setIssuer(@Body() body: any) {
+    return this.issuer.update(body);
   }
 }

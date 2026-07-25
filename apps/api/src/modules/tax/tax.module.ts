@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { TaxController } from './tax.controller';
 import { NumberingService } from './numbering.service';
 import { VatService } from './vat.service';
+import { IssuanceService } from './issuance.service';
+import { BooksService } from './books.service';
+import { IssuerService } from './issuer.service';
 
 /**
  * Fiscal (G4 · facturación electrónica, Venezuela). Hoy: numeración (G4-2) e IVA (G4-3). Va a sumar los
@@ -14,7 +17,7 @@ import { VatService } from './vat.service';
  */
 @Module({
   controllers: [TaxController],
-  providers: [NumberingService, VatService],
-  exports: [NumberingService, VatService],
+  providers: [NumberingService, VatService, IssuanceService, BooksService, IssuerService],
+  exports: [NumberingService, VatService, IssuanceService],
 })
 export class TaxModule {}
