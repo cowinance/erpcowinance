@@ -8,21 +8,7 @@ import {
   setSessionCookies,
   type SessionTokens,
 } from '@/lib/session';
-
-/**
- * Rutas accesibles SIN sesión (P1.3.3). `verify-email`/`forgot-password`/
- * `reset-password` implementan su lógica en P1.3.4, pero se permiten desde ya
- * para no volver a tocar el middleware. Decisión de acceso centralizada aquí —
- * sin comparaciones de strings dispersas por el archivo.
- */
-const PUBLIC_ROUTES = ['/login', '/register', '/verify-email', '/forgot-password', '/reset-password'];
-
-/** Rutas donde un usuario ya autenticado no debería estar (obtener cuenta/sesión). */
-const AUTHENTICATED_REDIRECT_ROUTES = ['/login', '/register'];
-
-function isPublicRoute(pathname: string): boolean {
-  return PUBLIC_ROUTES.includes(pathname);
-}
+import { AUTHENTICATED_REDIRECT_ROUTES, PATHNAME_HEADER, isPublicRoute } from '@/lib/routes';
 
 /**
  * Puerta de sesión de la web y —esto es nuevo— el lugar donde el token se RENUEVA al navegar.
@@ -62,7 +48,13 @@ function decidir(req: NextRequest, haySesion: boolean): NextResponse {
   if (!haySesion && !isPublicRoute(pathname)) return NextResponse.redirect(new URL('/login', req.url));
   if (haySesion && AUTHENTICATED_REDIRECT_ROUTES.includes(pathname))
     return NextResponse.redirect(new URL('/', req.url));
-  return NextResponse.next();
+
+  // El path viaja al layout raíz para que decida si dibuja el shell de la app. Es la única forma
+  // de que un layout de servidor sepa en qué ruta está: Next no se lo pasa, porque el layout se
+  // comparte entre rutas y volverlo dependiente del path rompería su cacheo.
+  const headers = new Headers(req.headers);
+  headers.set(PATHNAME_HEADER, pathname);
+  return NextResponse.next({ request: { headers } });
 }
 
 async function renovar(refreshToken: string): Promise<SessionTokens | null> {

@@ -6,6 +6,12 @@ test('registro + auto-login → dashboard vacío con nombre real, finca y banner
 
   // fillRegister ya asserta que el select de países cargó (catálogo real) y elige uno conocido.
   await fillRegister(page, u, 'Argentina');
+
+  // Quien está registrándose todavía NO tiene finca: el menú de módulos al costado no le ofrece
+  // nada y le sugiere que se está perdiendo algo. `/login` lo tapaba con un `fixed inset-0`, así
+  // que el problema solo se veía acá — por eso la comprobación va en el registro.
+  await expect(page.locator('aside')).toHaveCount(0);
+
   await page.getByRole('button', { name: 'Crear cuenta' }).click();
 
   // Redirección al dashboard (auto-login exitoso → window.location = '/').

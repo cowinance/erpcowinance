@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import './globals.css';
 import { Sidebar } from '@/components/Sidebar';
 import { API_URL } from '@/lib/api';
 import { ACCESS_COOKIE } from '@/lib/session';
+import { PATHNAME_HEADER, isPublicRoute } from '@/lib/routes';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -46,7 +47,25 @@ async function sessionContext() {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const session = await sessionContext();
+  // Registro, login y recuperación de contraseña NO son parte de la app: quien está ahí todavía no
+  // tiene finca, así que un menú de módulos al costado no le ofrece nada y le sugiere que se está
+  // perdiendo algo. `/login` lo venía tapando con un `fixed inset-0`; `/register` no, y por eso el
+  // menú vacío aparecía al lado del formulario. Se corrige acá —donde se dibuja— en vez de agregar
+  // otro parche por pantalla.
+  const pathname = (await headers()).get(PATHNAME_HEADER) ?? '';
+  const publica = isPublicRoute(pathname);
+
+  // En una ruta pública tampoco se piden los datos de sesión: son cinco llamadas a la API que no
+  // pueden devolver nada útil sin cookie.
+  const session = publica ? null : await sessionContext();
+
+  if (publica)
+    return (
+      <html lang="es" data-density="standard" className={inter.variable}>
+        <body className="font-sans text-[14px] leading-5">{children}</body>
+      </html>
+    );
+
   return (
     <html lang="es" data-density="standard" className={inter.variable}>
       <body className="font-sans text-[14px] leading-5">
