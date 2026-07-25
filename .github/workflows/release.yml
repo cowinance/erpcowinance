@@ -57,8 +57,13 @@ jobs:
           file: apps/web/Dockerfile
           load: true
           tags: cowinance-web:candidata
+          # El fallback tiene que ser el host del COMPOSE (`api`), no `localhost`. Dentro del
+          # contenedor de la web, `localhost` es la web misma: la imagen quedaba sin poder hablar
+          # con la API y —desde que existe la guardia de arranque— directamente no levantaba, así
+          # que el humo fallaba y el Release nunca publicaba. La variable se INLINEA al construir,
+          # no se lee en runtime, de modo que un default equivocado no se puede corregir después.
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:3001/v1' }}
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://api:3001/v1' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
