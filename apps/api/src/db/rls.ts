@@ -41,6 +41,9 @@ export const RLS_TABLES = [
   'inventory_batches',
   // Comercial (C-1): maestro de socios + compras/ventas (tablas dormidas activadas).
   'business_partners',
+  'partner_interactions',
+  'opportunities',
+  'opportunity_stage_events',
   'suppliers',
   'customers',
   'contacts',

@@ -34,3 +34,5 @@ export * from './herd';
 export * from './costing';
 // Clima — índices agroclimáticos: grados-día, THI/estrés calórico, balance hídrico (D4).
 export * from './weather';
+// CRM — pipeline comercial y vigencia de contratos (F3).
+export * from './crm';

@@ -296,15 +296,15 @@ las rutas reales de la API (`apps/api/src/modules`, 35 módulos) y de la web (61
 | **C · Sistemas productivos** (4) | C1 tambo · C2 feedlot · C3 cría y recría | **C4 marketplace** (Fase 4) |
 | **D · Agricultura y tierra** (4) | D1 cultivos · D2 pastoreo · D3 mapas/GPS · **D4 clima** | — |
 | **E · Cadena de suministro** (4) | E1 inventarios · E2 maquinaria · E3 mantenimiento · E4 combustible | — |
-| **F · Comercial** (5) | F1 compras · F2 ventas · F4 clientes · F5 proveedores | **F3 CRM** (Fase 2-3) |
+| **F · Comercial** (5) | F1 compras · F2 ventas · **F3 CRM** · F4 clientes · F5 proveedores | — |
 | **G · Finanzas** (4) | G1 contabilidad · G2 costos · G3 tesorería | **G4 facturación electrónica** (Fase 2-3) |
 | **H · Personas** (2) | H1 RRHH · H2 nómina/jornales | — |
 | **I · Laboratorio** (1) | I1 LIMS | — |
 | **J · Datos e IA** (4) | J1 reportes | J2 BI, J3 IA, J4 gemelo (Fase 3-4) |
 | **K · Ecosistema** (5) | — | K1 IoT, K2 drones, K3 blockchain, K4 academia, K5 integraciones (Fase 3-4) |
 
-**Fase 2 del roadmap está a 2 módulos de cerrar: F3 CRM y G4 facturación electrónica.**
-(D4 · clima entregado — ver `docs/sprints/weather-completion.md`.)
+**Fase 2 del roadmap está a 1 módulo de cerrar: G4 · facturación electrónica.**
+(D4 · clima y F3 · CRM entregados — ver `docs/sprints/weather-completion.md` y `crm-completion.md`.)
 Todo lo demás pendiente es Fase 3-4 y no pertenece al producto final de esta etapa.
 
 Paridad móvil (offline-first): hato, manga, sanidad, reproducción, tareas, agenda, notificaciones y
@@ -384,7 +384,9 @@ software esté completo.
    vuelto a avisar en toda la ola de calor.
 2. **G4 · Facturación electrónica** — el de mayor valor comercial y el único con requisito
    regulatorio por país (AFIP/ARCA en AR). Depende de G1, que ya está.
-3. **F3 · CRM** — pipeline comercial sobre `business_partners`, que ya existe. El de menor riesgo.
+3. ~~**F3 · CRM**~~ **HECHO** — contactos, interacciones con seguimiento, pipeline ponderado con
+   historial de etapas y contratos con vigencia derivada, sobre el maestro de socios que ya existía.
+   Vive dentro de `commerce` porque comparte `business_partners` con compras y ventas.
 4. **Push activo** (H-13): dev build del móvil + EAS.
 5. **Paridad de los 7 modos de manga en móvil.**
 
@@ -436,6 +438,6 @@ software esté completo.
 | `apps/api/src/db/db.service.ts` | H-15 · arranque bajo `pg_advisory_lock` |
 | `docker-compose.prod.yml` | paso 1.5 · `API_IMAGE`/`WEB_IMAGE` para desplegar sin reconstruir |
 
-**Verificación tras los cambios: 1072 tests verdes, typecheck limpio (5 proyectos + web), build de
+**Verificación tras los cambios: 1119 tests verdes, typecheck limpio (5 proyectos + web), build de
 producción OK, 0 ciclos, y el stack de contenedores levantado de punta a punta contra
 PostgreSQL 17 + PostGIS con la RLS enforceada.**

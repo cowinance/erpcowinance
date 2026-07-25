@@ -7,9 +7,10 @@ const TABS: [string, string][] = [
   ['/comercial', 'Socios'],
   ['/comercial/compras', 'Compras'],
   ['/comercial/ventas', 'Ventas'],
+  ['/comercial/crm', 'CRM'],
 ];
 
-/** Navegación local del módulo comercial (3 subrutas). Sigue el patrón de enlaces de la app. */
+/** Navegación local del módulo comercial (4 subrutas). Sigue el patrón de enlaces de la app. */
 export function CommerceNav() {
   const pathname = usePathname();
   return (
