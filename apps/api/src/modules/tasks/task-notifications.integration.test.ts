@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
+import { WeatherService } from '../alerts/../weather/weather.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { NotificationService } from '../notifications/notification.service';
 
@@ -28,7 +29,7 @@ describe('Tareas · notificaciones (E6)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any);
+    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db));
     notifications = new NotificationService(db, alerts);
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;

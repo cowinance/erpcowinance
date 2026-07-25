@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { ReproService } from '../repro/repro.service';
+import { WeatherService } from '../weather/weather.service';
 
 /**
  * Motor de alertas (doc Catálogo A5). Reglas declarativas condición→severidad
@@ -16,7 +17,7 @@ import { ReproService } from '../repro/repro.service';
 interface RuleDef {
   code: string;
   name: string;
-  category: 'health' | 'reproduction' | 'task';
+  category: 'health' | 'reproduction' | 'task' | 'iot';
   severity: 'info' | 'warning' | 'critical';
   /** Umbral configurable en días (ventana de anticipación / antigüedad). Ausente = regla sin parámetro. */
   defaultDays?: number;
@@ -39,7 +40,17 @@ const RULES: RuleDef[] = [
   { code: 'task_overdue', name: 'Tarea vencida', category: 'task', severity: 'warning' },
   { code: 'task_due_today', name: 'Tarea para hoy', category: 'task', severity: 'info' },
   { code: 'task_urgent', name: 'Tarea urgente', category: 'task', severity: 'warning' },
+  // Clima (D4). Van en la categoría `iot` porque su fuente es la estación meteorológica, que en
+  // el modelo canónico es un dispositivo. SIN parámetro numérico a propósito: el umbral no es una
+  // preferencia del productor sino una escala agronómica documentada (THI de Armstrong para
+  // lechería y LWSI para carne, 0 °C para helada). Lo que sí varía por finca —lechería o carne—
+  // se DERIVA de si hay tambo cargado, no se configura.
+  { code: 'heat_stress', name: 'Estrés calórico', category: 'iot', severity: 'warning' },
+  { code: 'frost', name: 'Helada', category: 'iot', severity: 'warning' },
 ];
+
+/** Nivel de estrés en el idioma del producto: la alerta la lee una persona, no un sistema. */
+const NIVEL_ES: Record<string, string> = { mild: 'leve', moderate: 'moderado', severe: 'severo', emergency: 'de emergencia' };
 
 interface Desired {
   code: string;
@@ -85,6 +96,7 @@ export class AlertsService {
   constructor(
     private readonly db: DbService,
     private readonly repro: ReproService,
+    private readonly weather: WeatherService,
   ) {}
 
   /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente.
@@ -97,7 +109,7 @@ export class AlertsService {
     // Activas (para actualizar/auto-resolver) + resueltas/descartadas recientes
     // (para respetar la acción del usuario y no recrear la misma alerta al toque).
     const existing = await this.db.query<any>(
-      `SELECT id, rule_id, related_id, status FROM alerts
+      `SELECT id, rule_id, related_id, status, resolved_by FROM alerts
        WHERE tenant_id = $1 AND rule_id IS NOT NULL AND deleted_at IS NULL
          AND (status IN ('open','acknowledged')
               OR (status IN ('resolved','dismissed') AND updated_at > now() - interval '14 days'))`,
@@ -111,7 +123,11 @@ export class AlertsService {
       if (!ourRuleIds.has(e.rule_id)) continue;
       const k = key(e.rule_id, e.related_id);
       if (e.status === 'open' || e.status === 'acknowledged') active.set(k, e);
-      else muted.add(k);
+      // Solo silencia lo que cerró una PERSONA. Lo que auto-resolvió el motor —porque la condición
+      // dejó de darse— tiene que poder volver a dispararse: el estrés calórico se termina cada
+      // noche, y con el silencio de 14 días la finca no recibiría un aviso más en toda la ola de
+      // calor.
+      else if (e.resolved_by) muted.add(k);
     }
 
     const seen = new Set<string>();
@@ -128,7 +144,7 @@ export class AlertsService {
         );
         updated++;
       } else if (muted.has(k)) {
-        // el usuario ya la resolvió/descartó hace poco: no la recreamos
+        // la PERSONA ya la resolvió/descartó hace poco: no la recreamos
       } else {
         await this.db.query(
           `INSERT INTO alerts (tenant_id, rule_id, category, severity, title, message, related_type, related_id, status, triggered_at, created_by)
@@ -257,10 +273,15 @@ export class AlertsService {
     const status = map[action];
     if (!status) throw new BadRequestException({ code: 'alert.invalid_action', title: 'Acción inválida' });
     const resolvedAt = status === 'resolved' ? ', resolved_at = now()' : '';
+    // Queda registrado QUIÉN la cerró: es lo que distingue el cierre de una persona (se silencia
+    // 14 días) del auto-cierre del motor (puede volver a dispararse).
+    const resolvedBy = status === 'resolved' || status === 'dismissed' ? ', resolved_by = $4' : '';
+    const params = [id, status, this.db.tenant];
+    if (resolvedBy) params.push(this.db.user);
     const row = await this.db.one(
-      `UPDATE alerts SET status = $2${resolvedAt}, updated_at = now()
+      `UPDATE alerts SET status = $2${resolvedAt}${resolvedBy}, updated_at = now()
        WHERE id = $1 AND tenant_id = $3 AND deleted_at IS NULL RETURNING id, status`,
-      [id, status, this.db.tenant],
+      params,
     );
     if (!row) throw new NotFoundException({ code: 'alert.not_found', title: 'Alerta no encontrada' });
     return row;
@@ -559,6 +580,43 @@ export class AlertsService {
         related_type: null,
         related_id: null,
       });
+    }
+
+    // Clima (D4). La condición la evalúa `WeatherService`: los umbrales agronómicos viven en el
+    // dominio y acá solo se traduce a alerta. Si la finca no tiene estación —o no cargó nada— no
+    // hay nada que decir y no se inventa una alerta "sin datos".
+    if (cfg.get('heat_stress')!.active || cfg.get('frost')!.active) {
+      const clima = await this.weather.currentConditions();
+      if (clima) {
+        const escala = clima.system === 'dairy' ? 'lechería' : 'carne';
+        // `moderate` en adelante: en `mild` el animal se acomoda solo (sombra, agua) y avisar
+        // todos los días de verano entrenaría al productor a ignorar la alerta.
+        if (cfg.get('heat_stress')!.active && (clima.heatStress === 'moderate' || clima.heatStress === 'severe' || clima.heatStress === 'emergency')) {
+          const critico = clima.heatStress === 'severe' || clima.heatStress === 'emergency';
+          out.push({
+            code: 'heat_stress',
+            category: 'iot',
+            severity: critico ? 'critical' : 'warning',
+            title: `Estrés calórico ${NIVEL_ES[clima.heatStress]} (THI ${clima.thi})`,
+            message: `Escala de ${escala}. Asegurar sombra y agua; evitar encierros y traslados en las horas de calor.`,
+            related_type: null,
+            related_id: null,
+            due_at: clima.date,
+          });
+        }
+        if (cfg.get('frost')!.active && clima.frost) {
+          out.push({
+            code: 'frost',
+            category: 'iot',
+            severity: 'warning',
+            title: `Helada — mínima de ${clima.tempMinC} °C`,
+            message: 'Revisar aguadas congeladas, terneros recién nacidos y pasturas sensibles.',
+            related_type: null,
+            related_id: null,
+            due_at: clima.date,
+          });
+        }
+      }
     }
 
     return out;

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
+import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from './alerts.service';
 
 /**
@@ -32,7 +33,7 @@ describe('alerts — motor de reglas configurable', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    svc = new AlertsService(db, { statusAlerts: async () => [] } as any);
+    svc = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db));
     const t = db.tenant;
     const farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [t]))[0].id;
     const speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;

@@ -7,6 +7,7 @@ import { requestContext } from '../../common/request-context';
 import { DashboardService } from './dashboard.service';
 import { DashboardHomeService } from './dashboard-home.service';
 import { TaskService } from '../tasks/task.service';
+import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { HealthService } from '../health/health.service';
 import { ReproService } from '../repro/repro.service';
@@ -37,7 +38,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     await db.onModuleInit();
     tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any);
-    const alerts = new AlertsService(db, repro as any);
+    const alerts = new AlertsService(db, repro as any, new WeatherService(db));
     const health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
     home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;

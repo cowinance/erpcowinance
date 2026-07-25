@@ -39,6 +39,7 @@ import { ConfigModule } from './modules/config/config.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OpsModule } from './modules/ops/ops.module';
+import { WeatherModule } from './modules/weather/weather.module';
 
 /**
  * Monolito modular (Fase 0-1 del roadmap): cada módulo se alinea 1:1 con un
@@ -46,6 +47,6 @@ import { OpsModule } from './modules/ops/ops.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule],
+  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule, WeatherModule],
 })
 export class AppModule {}

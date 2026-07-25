@@ -294,7 +294,7 @@ las rutas reales de la API (`apps/api/src/modules`, 35 módulos) y de la web (61
 | **A · Núcleo** (6) | A1 admin/facturación SaaS · A2 identidad · A3 configuración · A4 sync offline · A5 alertas · A6 documentos | — |
 | **B · Ganadería** (6) | B1 hato · B2 reproducción+genética · B3 sanidad · B4 producción/GDP · B5 nutrición · B6 trazabilidad | — |
 | **C · Sistemas productivos** (4) | C1 tambo · C2 feedlot · C3 cría y recría | **C4 marketplace** (Fase 4) |
-| **D · Agricultura y tierra** (4) | D1 cultivos · D2 pastoreo · D3 mapas/GPS | **D4 clima** (Fase 2-3) |
+| **D · Agricultura y tierra** (4) | D1 cultivos · D2 pastoreo · D3 mapas/GPS · **D4 clima** | — |
 | **E · Cadena de suministro** (4) | E1 inventarios · E2 maquinaria · E3 mantenimiento · E4 combustible | — |
 | **F · Comercial** (5) | F1 compras · F2 ventas · F4 clientes · F5 proveedores | **F3 CRM** (Fase 2-3) |
 | **G · Finanzas** (4) | G1 contabilidad · G2 costos · G3 tesorería | **G4 facturación electrónica** (Fase 2-3) |
@@ -303,7 +303,8 @@ las rutas reales de la API (`apps/api/src/modules`, 35 módulos) y de la web (61
 | **J · Datos e IA** (4) | J1 reportes | J2 BI, J3 IA, J4 gemelo (Fase 3-4) |
 | **K · Ecosistema** (5) | — | K1 IoT, K2 drones, K3 blockchain, K4 academia, K5 integraciones (Fase 3-4) |
 
-**Fase 2 del roadmap está a 3 módulos de cerrar: D4 clima, F3 CRM, G4 facturación electrónica.**
+**Fase 2 del roadmap está a 2 módulos de cerrar: F3 CRM y G4 facturación electrónica.**
+(D4 · clima entregado — ver `docs/sprints/weather-completion.md`.)
 Todo lo demás pendiente es Fase 3-4 y no pertenece al producto final de esta etapa.
 
 Paridad móvil (offline-first): hato, manga, sanidad, reproducción, tareas, agenda, notificaciones y
@@ -375,9 +376,12 @@ software esté completo.
 
 ### Paso 3 — Cerrar Fase 2 funcional (3 módulos)
 
-1. **D4 · Clima y agrometeorología** — ingesta de estación/API meteorológica, series por finca,
-   índices agroclimáticos. Es el más barato y el que más módulos ya construidos alimenta
-   (pastoreo, cultivos, alertas).
+1. ~~**D4 · Clima y agrometeorología.**~~ **HECHO** — índices agroclimáticos derivados (lluvia,
+   grados-día, THI/estrés calórico, balance hídrico) sobre `devices`+`sensor_readings`, con alertas
+   de calor y helada dentro del motor A5. La gestión de flota de dispositivos queda para K1 (Fase 3).
+   *De paso destapó un bug del motor de alertas que afectaba a todas las reglas:* silenciaba 14 días
+   lo que él mismo auto-resolvía, así que el estrés calórico —que se termina cada noche— no habría
+   vuelto a avisar en toda la ola de calor.
 2. **G4 · Facturación electrónica** — el de mayor valor comercial y el único con requisito
    regulatorio por país (AFIP/ARCA en AR). Depende de G1, que ya está.
 3. **F3 · CRM** — pipeline comercial sobre `business_partners`, que ya existe. El de menor riesgo.
@@ -432,6 +436,6 @@ software esté completo.
 | `apps/api/src/db/db.service.ts` | H-15 · arranque bajo `pg_advisory_lock` |
 | `docker-compose.prod.yml` | paso 1.5 · `API_IMAGE`/`WEB_IMAGE` para desplegar sin reconstruir |
 
-**Verificación tras los cambios: 1016 tests verdes, typecheck limpio (5 proyectos + web), build de
+**Verificación tras los cambios: 1072 tests verdes, typecheck limpio (5 proyectos + web), build de
 producción OK, 0 ciclos, y el stack de contenedores levantado de punta a punta contra
 PostgreSQL 17 + PostGIS con la RLS enforceada.**

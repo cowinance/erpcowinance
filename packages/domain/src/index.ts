@@ -32,3 +32,5 @@ export * from './geo';
 export * from './herd';
 // Costos — costo unitario por actividad, regla única de división (G2).
 export * from './costing';
+// Clima — índices agroclimáticos: grados-día, THI/estrés calórico, balance hídrico (D4).
+export * from './weather';

@@ -24,6 +24,7 @@ export const FLAG_REGISTRY = [
   { key: 'module_grazing', label: 'Pastoreo', description: 'Rotación y métricas de pastoreo por potrero.', default: true },
   { key: 'module_machinery', label: 'Maquinaria', description: 'Máquinas, mantenimiento y combustible.', default: true },
   { key: 'module_traceability', label: 'Trazabilidad', description: 'Guías de traslado y certificaciones.', default: true },
+  { key: 'module_weather', label: 'Clima', description: 'Estaciones meteorológicas, índices agroclimáticos y alertas por calor y helada.', default: true },
   { key: 'module_marketplace', label: 'Marketplace', description: 'Comercialización de hacienda (próximamente).', default: true },
   { key: 'module_academy', label: 'Academia', description: 'Cursos y capacitación (próximamente).', default: true },
 ] as const;
