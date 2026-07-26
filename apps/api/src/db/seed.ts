@@ -523,6 +523,10 @@ export async function seedDemo(db: Queryable) {
     }
   }
 
+  // El ítem de gasoil lo crea Maquinaria y lo necesita Inventario para que el kardex explique de
+  // dónde salieron los litros. Se declara acá para que el orden entre los dos bloques sea explícito.
+  let gasoilItem = '';
+
   // ── Maquinaria: flota con cargas y services (Fase 4) ─────────────────────────────────
   //
   // La comparación entre máquinas solo enseña algo si las máquinas son distintas ENTRE SÍ de las
@@ -548,6 +552,7 @@ export async function seedDemo(db: Queryable) {
       `INSERT INTO inventory_items (tenant_id, name, unit, created_by) VALUES ($1,'Gasoil','l',$2) RETURNING id`,
       [org, userId],
     );
+    gasoilItem = gasoil;
 
     for (const [nombre, tipo, anio, medidor, inicio] of flota) {
       const [{ id: maquina }] = await q(
@@ -592,6 +597,97 @@ export async function seedDemo(db: Queryable) {
         );
       }
     }
+  }
+
+  // ── Inventario: depósito, ítems y kardex (Fase 4) ────────────────────────────────────
+  //
+  // La pantalla de rotación solo enseña algo si los ítems se diferencian en lo que decide una
+  // compra, y son cuatro situaciones distintas:
+  //
+  //   - El que se consume parejo y ALCANZA: la referencia.
+  //   - El que se consume parejo y NO llega a cubrir la reposición: hay que pedirlo hoy.
+  //   - El DORMIDO: tiene saldo y hace meses que nadie lo toca. Es plata quieta, no stock de sobra,
+  //     y a ojo se ven igual.
+  //   - El que tiene un MÍNIMO cargado a mano que quedó viejo: la alerta de stock bajo depende de
+  //     ese número, y cuando está mal avisa siempre (y se ignora) o avisa tarde (y se corta).
+  //
+  // El saldo se calcula DESDE los movimientos sembrados, no aparte: `stock_levels` es un saldo
+  // materializado y un demo donde el kardex y el saldo no coinciden enseñaría a desconfiar de los
+  // dos. Es la misma cuenta que hace `recordMovementInTx`, sobre las mismas filas.
+  {
+    const [{ id: deposito }] = await q(
+      `INSERT INTO warehouses (tenant_id, farm_id, name, created_by) VALUES ($1,$2,'Galpón Central',$3) RETURNING id`,
+      [org, farm, userId],
+    );
+    const [{ id: catInsumos }] = await q(
+      `INSERT INTO inventory_categories (tenant_id, name, kind, created_by) VALUES ($1,'Insumos','supply',$2) RETURNING id`,
+      [org, userId],
+    );
+
+    /** [nombre, unidad, costo, compra inicial, consumo por entrega, entregas, mínimo a mano] */
+    const insumos: [string, string, number, number, number, number, number | null][] = [
+      ['Ración balanceada 18%', 'kg', 0.42, 24000, 900, 22, null],
+      // Se consume parejo y el saldo no cubre los 30 días de reposición: hay que pedirlo hoy.
+      ['Antiparasitario Ivermectina', 'l', 38, 40, 2.2, 16, null],
+      // Comprado para una campaña que no se hizo: hace más de medio año que nadie lo toca.
+      ['Herbicida Glifosato', 'l', 6.5, 600, 0, 0, null],
+      // Mínimo cargado hace años, muy por encima de lo que hoy se consume.
+      ['Sal mineralizada', 'kg', 0.75, 8000, 260, 20, 4000],
+    ];
+
+    for (const [nombre, unidad, costo, compra, porEntrega, entregas, minimo] of insumos) {
+      const [{ id: item }] = await q(
+        `INSERT INTO inventory_items (tenant_id, category_id, name, unit, reorder_point, standard_cost, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [org, catInsumos, nombre, unidad, minimo, costo, userId],
+      );
+      await q(
+        `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, movement_type, quantity, unit_cost, occurred_at, reference_type, created_by)
+         VALUES ($1,$2,$3,'in',$4,$5,$6,'purchase',$7)`,
+        [org, item, deposito, compra, costo, daysAgo(200).toISOString(), userId],
+      );
+      for (let i = 0; i < entregas; i++) {
+        await q(
+          `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, movement_type, quantity, unit_cost, occurred_at, reference_type, created_by)
+           VALUES ($1,$2,$3,'consumption',$4,$5,$6,'feed_delivery',$7)`,
+          [org, item, deposito, -porEntrega, costo, daysAgo(190 - i * 8).toISOString(), userId],
+        );
+      }
+    }
+
+    // Gasoil: las cargas de la flota salieron de algún lado. Sin esto, el ítem quedaría en cero y
+    // el demo diría que la finca cargó combustible sin tenerlo.
+    const [{ litros }] = await q(`SELECT COALESCE(sum(liters),0)::float AS litros FROM fuel_logs WHERE tenant_id=$1`, [org]);
+    if (Number(litros) > 0) {
+      await q(
+        `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, movement_type, quantity, unit_cost, occurred_at, reference_type, created_by)
+         VALUES ($1,$2,$3,'in',$4,1.02,$5,'purchase',$6)`,
+        [org, gasoilItem, deposito, Math.ceil(Number(litros) * 1.15), daysAgo(365).toISOString(), userId],
+      );
+      const cargas = await q(`SELECT id, liters::float AS liters, fueled_at FROM fuel_logs WHERE tenant_id=$1 ORDER BY fueled_at`, [org]);
+      for (const c of cargas)
+        await q(
+          `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, movement_type, quantity, unit_cost, occurred_at, reference_type, reference_id, created_by)
+           VALUES ($1,$2,$3,'consumption',$4,1.02,$5,'fuel_log',$6,$7)`,
+          [org, gasoilItem, deposito, -c.liters, c.fueled_at, c.id, userId],
+        );
+    }
+
+    // El saldo materializado, derivado de los mismos movimientos: kardex y saldo no pueden discrepar.
+    await q(
+      `INSERT INTO stock_levels (tenant_id, item_id, warehouse_id, quantity, avg_cost, created_by)
+       SELECT m.tenant_id, m.item_id, m.warehouse_id, sum(m.quantity),
+              -- Costo promedio de lo que ENTRÓ: el promedio sobre todos los movimientos incluiría
+              -- las salidas y daría un número que no fue el de ninguna compra.
+              CASE WHEN sum(m.quantity) FILTER (WHERE m.quantity > 0) > 0
+                   THEN sum(m.quantity * m.unit_cost) FILTER (WHERE m.quantity > 0)
+                        / sum(m.quantity) FILTER (WHERE m.quantity > 0) END,
+              $2
+         FROM stock_movements m
+        WHERE m.tenant_id = $1 AND m.deleted_at IS NULL
+        GROUP BY m.tenant_id, m.item_id, m.warehouse_id`,
+      [org, userId],
+    );
   }
 
   // ── RRHH: empleados y partes de trabajo (Fase 3.4) ───────────────────────────────────

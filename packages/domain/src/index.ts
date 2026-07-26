@@ -44,3 +44,5 @@ export * from './tax';
 export * from './traceability';
 // Maquinaria — costo por hora de uso y proporción de correctivo (Fase 4).
 export * from './machinery';
+// Inventario — rotación, cobertura y punto de reposición derivado del consumo (Fase 4).
+export * from './inventory';

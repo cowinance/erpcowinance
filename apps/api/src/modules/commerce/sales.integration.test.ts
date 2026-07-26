@@ -82,6 +82,14 @@ describe('commerce — ventas', () => {
   });
 
   it('entrega de ítem → `out` de stock; idempotente; sin saldo → 403', async () => {
+    // `SalesService.deliver` descuenta del depósito MÁS VIEJO del tenant (limitación documentada:
+    // las ventas no tienen depósito por línea). Este test antes suponía que el suyo era el único,
+    // y se rompió cuando el demo pasó a traer un galpón propio — la suposición estaba en el test,
+    // no en el código. Se stockea el depósito que la venta va a usar de verdad.
+    const usado = (await db.query<{ id: string }>(`SELECT id FROM warehouses WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`, [tenantId]))[0].id;
+    if (usado !== whId) await inv.recordMovement({ item_id: itemId, warehouse_id: usado, movement_type: 'in', quantity: 100, unit_cost: 10 });
+    whId = usado;
+
     const before: any[] = await inv.listStock(whId, itemId);
     const q0 = before[0].quantity;
     const s: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemId, quantity: 10, unit_price: 25 }] });

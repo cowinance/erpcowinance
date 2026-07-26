@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { computeStockRotation, DEFAULT_LEAD_TIME_DAYS } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 
 const CATEGORY_KINDS = ['feed', 'veterinary', 'agrochemical', 'seed', 'fuel', 'spare_part', 'supply', 'product'];
@@ -287,6 +288,107 @@ export class InventoryService {
        ORDER BY i.name, w.name`,
       params,
     );
+  }
+
+  /**
+   * Rotación: para cuántos días alcanza cada ítem y qué plata está quieta (Fase 4).
+   *
+   * El kardex ya decía cuánto hay y cuánto costó. No decía las dos cosas que se preguntan de
+   * verdad: **¿para cuántos días me alcanza?** y **¿qué compré que no uso?**
+   *
+   * El consumo se toma de los movimientos que SALIERON (`out` y `consumption`). Quedan afuera a
+   * propósito:
+   *
+   *   - `in`: una compra sube el stock y no es consumo. Contarla haría parecer que un ítem rota
+   *     cuando lo único que pasó fue que se compró.
+   *   - `transfer`: mover bolsas de un galpón a otro no gastó nada. Contarlo inflaría el consumo
+   *     diario y con él el punto de reposición sugerido — el sistema recomendaría comprar de más.
+   *   - `adjustment`: un ajuste corrige un error de carga; no es trabajo hecho.
+   *
+   * El saldo se suma sobre TODOS los depósitos, igual que la alerta de stock bajo: tener el mínimo
+   * repartido en dos galpones no es faltante.
+   */
+  async rotation(params: { from?: string; to?: string; leadTimeDays?: number } = {}) {
+    const to = params.to ?? new Date().toISOString().slice(0, 10);
+    const from = params.from ?? new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10);
+    const periodDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+    const leadTimeDays = Number(params.leadTimeDays) > 0 ? Number(params.leadTimeDays) : DEFAULT_LEAD_TIME_DAYS;
+
+    const rows = await this.db.query<any>(
+      `SELECT i.id, i.name, i.unit, i.reorder_point::float AS reorder_point,
+              COALESCE(s.stock, 0)::float AS stock,
+              s.avg_cost::float AS avg_cost,
+              COALESCE(c.consumed, 0)::float AS consumed,
+              mv.days_since_movement
+         FROM inventory_items i
+         LEFT JOIN LATERAL (
+           SELECT sum(sl.quantity) AS stock,
+                  -- Promedio PONDERADO por saldo: promediar los costos de dos depósitos con saldos
+                  -- muy distintos daría un costo que no existió en ninguna compra.
+                  --
+                  -- Si CUALQUIER parte del saldo no tiene costo, el costo del ítem es DESCONOCIDO,
+                  -- no la parte que sí se sabe. Un COALESCE(avg_cost, 0) acá convertiría «no sé
+                  -- cuánto vale» en «no vale nada», y el total de plata quieta saldría más bajo que
+                  -- la realidad sin que nada se vea roto.
+                  CASE WHEN sum(sl.quantity) > 0 AND count(*) FILTER (WHERE sl.avg_cost IS NULL AND sl.quantity > 0) = 0
+                       THEN sum(sl.quantity * sl.avg_cost) / sum(sl.quantity) END AS avg_cost
+             FROM stock_levels sl
+            WHERE sl.item_id = i.id AND sl.tenant_id = $1 AND sl.deleted_at IS NULL) s ON true
+         LEFT JOIN LATERAL (
+           SELECT sum(abs(m.quantity)) AS consumed
+             FROM stock_movements m
+            WHERE m.item_id = i.id AND m.tenant_id = $1 AND m.deleted_at IS NULL
+              AND m.movement_type IN ('out','consumption')
+              AND m.occurred_at::date BETWEEN $2::date AND $3::date) c ON true
+         LEFT JOIN LATERAL (
+           SELECT (CURRENT_DATE - max(m.occurred_at)::date)::int AS days_since_movement
+             FROM stock_movements m
+            WHERE m.item_id = i.id AND m.tenant_id = $1 AND m.deleted_at IS NULL) mv ON true
+        WHERE i.tenant_id = $1 AND i.deleted_at IS NULL AND i.is_active
+        ORDER BY i.name`,
+      [this.db.tenant, from, to],
+    );
+
+    const items = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      unit: r.unit,
+      reorder_point: r.reorder_point,
+      days_since_movement: r.days_since_movement,
+      ...computeStockRotation(
+        {
+          stock: r.stock,
+          consumed: r.consumed,
+          periodDays,
+          avgCost: r.avg_cost,
+          daysSinceMovement: r.days_since_movement,
+          reorderPoint: r.reorder_point,
+        },
+        { leadTimeDays },
+      ),
+    }));
+
+    // Primero lo que frena el trabajo, después lo que inmoviliza plata, al final lo que anda bien.
+    const ORDEN: Record<string, number> = { sin_stock: 0, critico: 1, dormido: 2, normal: 3 };
+    items.sort((a, b) => ORDEN[a.status] - ORDEN[b.status] || (b.stockValue ?? 0) - (a.stockValue ?? 0));
+
+    const dormidos = items.filter((i) => i.status === 'dormido');
+    return {
+      from,
+      to,
+      period_days: periodDays,
+      lead_time_days: leadTimeDays,
+      items,
+      totals: {
+        stock_value: +items.reduce((s, i) => s + (i.stockValue ?? 0), 0).toFixed(2),
+        /** Plata quieta: saldo de ítems que no se consumieron en el período. */
+        idle_value: +dormidos.reduce((s, i) => s + (i.stockValue ?? 0), 0).toFixed(2),
+        idle_items: dormidos.length,
+        critical_items: items.filter((i) => i.status === 'critico' || i.status === 'sin_stock').length,
+        /** Ítems sin costo cargado: su saldo no entra en los totales de arriba. */
+        items_without_cost: items.filter((i) => i.stockValue == null).length,
+      },
+    };
   }
 
   /** Kardex: historial de movimientos (más recientes primero). */

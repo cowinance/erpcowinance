@@ -69,4 +69,82 @@ describe('inventory — movimientos y existencias', () => {
     expect(moves.length).toBeGreaterThanOrEqual(4);
     expect(moves[0].item_name).toBe('Maíz kardex');
   });
+
+  /**
+   * Rotación (Fase 4). Lo que se fija acá es QUÉ CUENTA COMO CONSUMO. Si una compra o una
+   * transferencia entraran en la cuenta, el consumo diario saldría inflado y con él el punto de
+   * reposición sugerido: el sistema recomendaría comprar de más, y el número se vería razonable.
+   */
+  describe('rotación y cobertura (Fase 4)', () => {
+    const R = { from: '2036-01-01', to: '2036-03-31' }; // 91 días
+    let corriente: string;
+    let dormido: string;
+    let otroDeposito: string;
+
+    beforeAll(async () => {
+      corriente = ((await inv.createItem({ name: 'Insumo corriente 4', unit: 'kg', standard_cost: 2 })) as any).id;
+      dormido = ((await inv.createItem({ name: 'Insumo dormido 4', unit: 'kg' })) as any).id;
+      otroDeposito = ((await inv.createWarehouse({ name: 'Depósito 2 · rotación' })) as any).id;
+
+      const mov = (item: string, tipo: string, cantidad: number, fecha: string, wh = whId) =>
+        db.query(
+          `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, movement_type, quantity, unit_cost, occurred_at) VALUES ($1,$2,$3,$4,$5,2,$6)`,
+          [db.tenant, item, wh, tipo, cantidad, `${fecha}T10:00:00Z`],
+        );
+      const saldo = (item: string, cantidad: number, costo: number | null, wh = whId) =>
+        db.query(`INSERT INTO stock_levels (tenant_id, item_id, warehouse_id, quantity, avg_cost) VALUES ($1,$2,$3,$4,$5)`, [db.tenant, item, wh, cantidad, costo]);
+
+      // 910 consumidos en 91 días = 10 por día. Y ruido que NO debe contar.
+      await mov(corriente, 'consumption', -910, '2036-02-01');
+      await mov(corriente, 'in', 5000, '2036-02-02'); // compra
+      await mov(corriente, 'transfer', -400, '2036-02-03'); // mudanza entre galpones
+      await mov(corriente, 'adjustment', -300, '2036-02-04'); // corrección de carga
+      await mov(corriente, 'consumption', -900, '2035-06-01'); // fuera del período
+      await saldo(corriente, 200, 2);
+      await saldo(corriente, 100, 2, otroDeposito); // el mínimo repartido en dos galpones no es faltante
+
+      await mov(dormido, 'in', 500, '2035-01-01');
+      await saldo(dormido, 500, null); // sin costo cargado
+    });
+
+    it('SOLO LO QUE SALIÓ CUENTA COMO CONSUMO', async () => {
+      const r: any = await inv.rotation(R);
+      const i = r.items.find((x: any) => x.id === corriente);
+      expect(i.consumed).toBe(910); // ni la compra, ni la transferencia, ni el ajuste, ni el año pasado
+      expect(i.dailyUse).toBe(10);
+    });
+
+    it('suma el saldo de TODOS los depósitos', async () => {
+      const r: any = await inv.rotation(R);
+      const i = r.items.find((x: any) => x.id === corriente);
+      expect(i.stock).toBe(300); // 200 + 100
+      expect(i.coverageDays).toBe(30);
+    });
+
+    it('deriva el mínimo del consumo real, sin depender de que alguien lo cargue', async () => {
+      const r: any = await inv.rotation({ ...R, leadTimeDays: 45 });
+      expect(r.items.find((x: any) => x.id === corriente).suggestedReorderPoint).toBe(450); // 10/día × 45
+    });
+
+    it('el que no se consume es plata quieta, no stock de sobra', async () => {
+      const r: any = await inv.rotation(R);
+      const i = r.items.find((x: any) => x.id === dormido);
+      expect(i.status).toBe('dormido');
+      expect(i.coverageDays).toBeNull();
+    });
+
+    it('SIN COSTO CARGADO NO VALE CERO: queda fuera de los totales y se dice', async () => {
+      // Valorizarlo en cero bajaría el total de plata quieta y nadie lo notaría.
+      const r: any = await inv.rotation(R);
+      expect(r.items.find((x: any) => x.id === dormido).stockValue).toBeNull();
+      expect(r.totals.items_without_cost).toBeGreaterThan(0);
+    });
+
+    it('ordena por lo que frena el trabajo, no por saldo', async () => {
+      const r: any = await inv.rotation(R);
+      const orden = ['sin_stock', 'critico', 'dormido', 'normal'];
+      const pos = r.items.map((i: any) => orden.indexOf(i.status));
+      for (let k = 1; k < pos.length; k++) expect(pos[k]).toBeGreaterThanOrEqual(pos[k - 1]);
+    });
+  });
 });

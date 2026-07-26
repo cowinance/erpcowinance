@@ -57,6 +57,15 @@ export class InventoryController {
   movements(@Query('item_id') itemId?: string, @Query('warehouse_id') warehouseId?: string) {
     return this.inv.listMovements(itemId, warehouseId);
   }
+  /**
+   * Rotación: para cuántos días alcanza cada ítem, qué plata está quieta y qué punto de reposición
+   * pide el consumo real (Fase 4). `lead_time_days` = lo que tarda el proveedor en entregar.
+   */
+  @Get('rotation')
+  rotation(@Query('from') from?: string, @Query('to') to?: string, @Query('lead_time_days') lead?: string) {
+    return this.inv.rotation({ from, to, leadTimeDays: lead ? Number(lead) : undefined });
+  }
+
   @Get('stock')
   stock(@Query('warehouse_id') warehouseId?: string, @Query('item_id') itemId?: string) {
     return this.inv.listStock(warehouseId, itemId);
