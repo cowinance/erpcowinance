@@ -523,6 +523,77 @@ export async function seedDemo(db: Queryable) {
     }
   }
 
+  // ── Maquinaria: flota con cargas y services (Fase 4) ─────────────────────────────────
+  //
+  // La comparación entre máquinas solo enseña algo si las máquinas son distintas ENTRE SÍ de las
+  // maneras que importan, y son tres:
+  //
+  //   - El tractor nuevo: se mide en horas, gasta en service programado. Es la referencia.
+  //   - El tractor viejo: mismas horas, y casi todo el mantenimiento es por ROTURA. Ése es el que
+  //     hay que poder ver, y el costo total solo no lo muestra.
+  //   - La camioneta: se mide en KILÓMETROS. Existe para que la pantalla tenga que no mezclarla en
+  //     el mismo ranking; un «costo por hora» de camioneta no significa nada.
+  //
+  // Y una cuarta a la que nadie le anotó el horómetro: sin dos lecturas no hay costo por hora, y la
+  // pantalla tiene que decir eso en vez de mostrarla como la más barata de todas.
+  {
+    const flota: [string, string, number, 'hours' | 'km' | 'none', number][] = [
+      // [nombre, tipo, año, medidor, horas/km al inicio del período]
+      ['Tractor John Deere 5090', 'tractor', 2021, 'hours', 2400],
+      ['Tractor Ford 6600', 'tractor', 1998, 'hours', 11800],
+      ['Camioneta Toyota Hilux', 'truck', 2019, 'km', 96000],
+      ['Mixer Mainero', 'mixer', 2017, 'none', 0],
+    ];
+    const [{ id: gasoil }] = await q(
+      `INSERT INTO inventory_items (tenant_id, name, unit, created_by) VALUES ($1,'Gasoil','l',$2) RETURNING id`,
+      [org, userId],
+    );
+
+    for (const [nombre, tipo, anio, medidor, inicio] of flota) {
+      const [{ id: maquina }] = await q(
+        `INSERT INTO machinery (tenant_id, farm_id, name, type, make, year, engine_hours, odometer_km, status, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9) RETURNING id`,
+        [org, farm, nombre, tipo, nombre.split(' ')[1] ?? null, anio, medidor === 'hours' ? inicio + 900 : null, medidor === 'km' ? inicio + 24000 : null, userId],
+      );
+      const viejo = anio < 2005;
+
+      // Cargas de combustible cada tres semanas, con el medidor anotado (salvo el mixer).
+      for (let i = 0; i < 17; i++) {
+        const dias = 360 - i * 21;
+        const litros = +between(90, 160).toFixed(1);
+        const precio = +between(0.9, 1.15).toFixed(3);
+        const avance = medidor === 'km' ? Math.round((24000 / 17) * (i + 1)) : Math.round((900 / 17) * (i + 1));
+        await q(
+          `INSERT INTO fuel_logs (tenant_id, machinery_id, fueled_at, item_id, liters, engine_hours, odometer_km, unit_cost, total_cost, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            org, maquina, daysAgo(dias).toISOString(), gasoil, litros,
+            medidor === 'hours' ? inicio + avance : null,
+            medidor === 'km' ? inicio + avance : null,
+            precio, +(litros * precio).toFixed(2), userId,
+          ],
+        );
+      }
+
+      // El viejo se rompe; el nuevo se mantiene. Misma plata, señal opuesta.
+      const services: [string, number, number][] = viejo
+        ? [['corrective', 300, 620], ['corrective', 190, 480], ['corrective', 95, 910], ['preventive', 20, 180]]
+        : [['preventive', 320, 210], ['preventive', 150, 240], ['inspection', 40, 90]];
+      for (const [tipoServ, dias, costo] of services) {
+        await q(
+          `INSERT INTO maintenance_records (tenant_id, machinery_id, type, performed_at, description, engine_hours, cost, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            org, maquina, tipoServ, daysAgo(dias).toISOString(),
+            tipoServ === 'corrective' ? 'Reparación de urgencia' : 'Service programado',
+            medidor === 'hours' ? inicio + Math.round((900 * (360 - dias)) / 360) : null,
+            costo, userId,
+          ],
+        );
+      }
+    }
+  }
+
   // ── RRHH: empleados y partes de trabajo (Fase 3.4) ───────────────────────────────────
   //
   // El corte «en qué se va la mano de obra» solo enseña algo si las horas se parecen a las de una

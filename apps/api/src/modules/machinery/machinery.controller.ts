@@ -5,6 +5,15 @@ import { MachineryService } from './machinery.service';
 export class MachineryController {
   constructor(private readonly machinery: MachineryService) {}
 
+  /**
+   * Lo que cuesta usar cada máquina: costo por hora (o por km) y cuánto del mantenimiento fue por
+   * rotura (Fase 4). Antes de `:id` porque una ruta estática después de la paramétrica no se alcanza.
+   */
+  @Get('costs')
+  costs(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.machinery.costs({ from, to });
+  }
+
   @Get()
   list(@Query('status') status?: string) {
     return this.machinery.list(status);

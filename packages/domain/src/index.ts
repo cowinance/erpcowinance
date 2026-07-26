@@ -42,3 +42,5 @@ export * from './genetics';
 export * from './tax';
 // Trazabilidad — certificaciones contrastadas contra una venta, antes de cerrarla (Fase 3.3).
 export * from './traceability';
+// Maquinaria — costo por hora de uso y proporción de correctivo (Fase 4).
+export * from './machinery';
