@@ -5,6 +5,12 @@ import { CropsService } from './crops.service';
 export class AgricultureController {
   constructor(private readonly crops: CropsService) {}
 
+  /** Rinde y costo por hectárea, comparados contra los lotes del mismo cultivo (Fase 4). */
+  @Get('yields')
+  yields(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.crops.yields({ from, to });
+  }
+
   @Get()
   list(@Query('status') status?: string) {
     return this.crops.list(status);

@@ -84,4 +84,92 @@ describe('agriculture — labores y cosechas', () => {
     expect((await crops.get(cropId) as any).status).toBe('harvested');
     await expect(ops.recordHarvest(cropId, { harvest_date: '2030-04-11', yield_quantity: 0 })).rejects.toMatchObject({ status: 400 });
   });
+
+  /**
+   * Rinde y costo por hectárea (Fase 4). Lo que se fija acá es que el rinde se DERIVE: la tabla
+   * guarda `yield_per_ha` y un reporte que lea esa columna daría el número escrito una vez, no el
+   * que se desprende de la cosecha y la superficie que están al lado.
+   */
+  describe('rinde por hectárea (Fase 4)', () => {
+    const R = { from: '2037-01-01', to: '2037-12-31' };
+    let bueno: string;
+    let flojo: string;
+    let enPie: string;
+
+    const labor = (crop: string, costo: number, fecha = '2037-03-01') =>
+      db.query(`INSERT INTO crop_operations (tenant_id, crop_id, operation_type, performed_at, cost) VALUES ($1,$2,'fertilization',$3,$4)`, [db.tenant, crop, `${fecha}T10:00:00Z`, costo]);
+    const cosecha = (crop: string, kg: number, yieldPerHaGuardado: number, item: string | null = null) =>
+      db.query(
+        `INSERT INTO harvests (tenant_id, crop_id, harvest_date, yield_quantity, yield_unit, yield_per_ha, destination_item_id) VALUES ($1,$2,'2037-06-01',$3,'kg',$4,$5)`,
+        [db.tenant, crop, kg, yieldPerHaGuardado, item],
+      );
+
+    beforeAll(async () => {
+      const nuevo = async (ha: number) => ((await crops.create({ paddock_id: paddockId, crop_type: 'trigo', area_ha: ha })) as any).id as string;
+      bueno = await nuevo(100);
+      flojo = await nuevo(100);
+      enPie = await nuevo(50);
+
+      // La columna guardada dice 999: si el reporte la leyera, el rinde saldría de ahí.
+      await cosecha(bueno, 400000, 999, grano);
+      await labor(bueno, 20000);
+      await cosecha(flojo, 200000, 999);
+      await labor(flojo, 20000);
+      await labor(enPie, 8000); // sembrado y sin cosechar
+    });
+
+    it('EL RINDE SE DERIVA, NO SE LEE DE LA COLUMNA GUARDADA', async () => {
+      const r: any = await crops.yields(R);
+      const c = r.crops.find((x: any) => x.cropId === bueno);
+      expect(c.yieldPerHa).toBe(4000); // 400.000 / 100 ha, no los 999 guardados
+    });
+
+    it('compara contra los lotes del MISMO cultivo', async () => {
+      const r: any = await crops.yields(R);
+      expect(r.crops.find((x: any) => x.cropId === bueno).yieldIndex).toBeGreaterThan(100);
+      expect(r.crops.find((x: any) => x.cropId === flojo).yieldIndex).toBeLessThan(100);
+    });
+
+    it('el lote en pie tiene costo por hectárea y NO rinde', async () => {
+      // Distinguirlo de uno que rindió mal es la diferencia entre «esperar» y «cambiar algo».
+      const r: any = await crops.yields(R);
+      const c = r.crops.find((x: any) => x.cropId === enPie);
+      expect(c.costPerHa).toBe(160);
+      expect(c.yieldPerHa).toBeNull();
+      expect(c.yieldIndex).toBeNull();
+    });
+
+    it('SIN VENTA DEL GRANO NO HAY MARGEN INVENTADO', async () => {
+      // El precio sale de ventas reales. Un margen sobre un precio supuesto se ve igual de
+      // convincente que uno real, y sobre eso alguien decide qué sembrar el año que viene.
+      const r: any = await crops.yields(R);
+      expect(r.crops.find((x: any) => x.cropId === bueno).margin).toBeNull();
+      expect(r.crops.find((x: any) => x.cropId === bueno).price_used).toBeNull();
+    });
+
+    it('con la venta del grano aparece el margen, al precio que se cobró', async () => {
+      const [{ id: cliente }] = await db.query<any>(
+        `INSERT INTO business_partners (tenant_id, company_id, type, name) VALUES ($1,(SELECT id FROM companies WHERE tenant_id=$1 LIMIT 1),'customer','Acopio test') RETURNING id`,
+        [db.tenant],
+      );
+      await db.query(`INSERT INTO customers (tenant_id, partner_id) VALUES ($1,$2)`, [db.tenant, cliente]);
+      const [{ id: venta }] = await db.query<any>(
+        `INSERT INTO sales (tenant_id, company_id, customer_partner_id, sale_date, type, currency, subtotal, tax_total, total, status)
+         VALUES ($1,(SELECT id FROM companies WHERE tenant_id=$1 LIMIT 1),$2,'2037-07-01','crop','USD',0,0,0,'delivered') RETURNING id`,
+        [db.tenant, cliente],
+      );
+      await db.query(
+        `INSERT INTO sale_lines (tenant_id, sale_id, item_id, quantity, unit_price, tax_rate, line_total) VALUES ($1,$2,$3,400000,0.2,0,80000)`,
+        [db.tenant, venta, grano],
+      );
+
+      const r: any = await crops.yields(R);
+      const c = r.crops.find((x: any) => x.cropId === bueno);
+      expect(c.price_used).toBe(0.2);
+      expect(c.revenue).toBe(80000); // 400.000 × 0,2
+      expect(c.margin).toBe(60000); // − 20.000 de labores
+      // El lote sin ítem destino sigue sin margen: la venta no le corresponde.
+      expect(r.crops.find((x: any) => x.cropId === flojo).margin).toBeNull();
+    });
+  });
 });

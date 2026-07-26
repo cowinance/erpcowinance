@@ -46,3 +46,5 @@ export * from './traceability';
 export * from './machinery';
 // Inventario — rotación, cobertura y punto de reposición derivado del consumo (Fase 4).
 export * from './inventory';
+// Agricultura — rinde por hectárea derivado, índice por cultivo y margen con precio real (Fase 4).
+export * from './agriculture';

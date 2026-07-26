@@ -690,6 +690,87 @@ export async function seedDemo(db: Queryable) {
     );
   }
 
+  // ── Agricultura: campaña con lotes que rindieron distinto (Fase 4) ───────────────────
+  //
+  // La comparación por cultivo solo enseña algo si hay VARIOS lotes del mismo cultivo y rindieron
+  // distinto: con uno solo no hay índice, y con dos iguales no hay nada que mirar.
+  //
+  //   - Dos lotes de maíz, uno bastante peor que el otro: es la fila que hay que poder ver.
+  //   - Un lote de sorgo cosechado y VENDIDO: es el único que puede tener margen, porque el precio
+  //     sale de una venta real y no de un supuesto.
+  //   - Un lote de maíz sembrado y todavía sin cosechar: tiene costo por hectárea y no tiene rinde.
+  //     La pantalla tiene que distinguirlo de uno que rindió mal.
+  {
+    const [{ id: itemMaiz }] = await q(
+      `INSERT INTO inventory_items (tenant_id, name, unit, created_by) VALUES ($1,'Maíz grano','kg',$2) RETURNING id`,
+      [org, userId],
+    );
+    const [{ id: itemSorgo }] = await q(
+      `INSERT INTO inventory_items (tenant_id, name, unit, created_by) VALUES ($1,'Sorgo grano','kg',$2) RETURNING id`,
+      [org, userId],
+    );
+
+    /** [potrero, cultivo, ha, kg cosechados (0 = sin cosechar), costo total, ítem destino] */
+    const campania: [number, string, number, number, number, string | null][] = [
+      [1, 'maiz', 45, 337500, 21600, itemMaiz], // 7.500 kg/ha
+      [4, 'maiz', 38, 190000, 19000, itemMaiz], // 5.000 kg/ha — bastante peor
+      [2, 'maiz', 30, 0, 12800, null], // sembrado, sin cosechar
+      [5, 'sorgo', 25, 137500, 9500, itemSorgo], // 5.500 kg/ha, y se vendió
+    ];
+
+    for (const [pi, cultivo, ha, kg, costo, destino] of campania) {
+      const siembra = daysAgo(260);
+      const [{ id: crop }] = await q(
+        `INSERT INTO crops (tenant_id, paddock_id, crop_type, variety, planting_date, expected_harvest_date, area_ha, status, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [
+          org, paddocks[pi], cultivo, cultivo === 'maiz' ? 'DK 7210' : 'Advanta 1500',
+          siembra.toISOString().slice(0, 10), daysAgo(120).toISOString().slice(0, 10), ha,
+          kg > 0 ? 'harvested' : 'growing', userId,
+        ],
+      );
+
+      // Las labores reparten el costo total: si fuera una sola línea, el costo por hectárea sería
+      // igual de correcto y la pantalla de labores no se parecería a la de una finca.
+      const labores: [string, number, number][] = [
+        ['planting', 250, 0.35],
+        ['fertilization', 235, 0.4],
+        ['spraying', 200, 0.15],
+        ...(kg > 0 ? ([['harvest', 125, 0.1]] as [string, number, number][]) : []),
+      ];
+      for (const [tipo, dias, parte] of labores)
+        await q(
+          `INSERT INTO crop_operations (tenant_id, crop_id, operation_type, performed_at, cost, created_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [org, crop, tipo, daysAgo(dias).toISOString(), +(costo * parte).toFixed(2), userId],
+        );
+
+      if (kg > 0)
+        await q(
+          `INSERT INTO harvests (tenant_id, crop_id, harvest_date, yield_quantity, yield_unit, yield_per_ha, moisture_pct, destination_item_id, created_by)
+           VALUES ($1,$2,$3,$4,'kg',$5,$6,$7,$8)`,
+          [org, crop, daysAgo(120).toISOString().slice(0, 10), kg, +(kg / ha).toFixed(3), +between(13, 15.5).toFixed(1), destino, userId],
+        );
+    }
+
+    // La venta del sorgo: sin ella no hay precio real y el margen no existe, que es exactamente lo
+    // que la pantalla tiene que mostrar para el resto de los cultivos.
+    const [{ id: acopio }] = await q(
+      `INSERT INTO business_partners (tenant_id, company_id, type, name) VALUES ($1,$2,'customer','Acopio San Rafael') RETURNING id`,
+      [org, company],
+    );
+    await q(`INSERT INTO customers (tenant_id, partner_id, segment) VALUES ($1,$2,'other')`, [org, acopio]);
+    const [{ id: ventaGrano }] = await q(
+      `INSERT INTO sales (tenant_id, company_id, customer_partner_id, document_number, sale_date, type, currency, subtotal, tax_total, total, status, created_by)
+       VALUES ($1,$2,$3,'VTA-2026-0031',$4,'crop','USD',13750,0,13750,'delivered',$5) RETURNING id`,
+      [org, company, acopio, daysAgo(100).toISOString().slice(0, 10), userId],
+    );
+    await q(
+      `INSERT INTO sale_lines (tenant_id, sale_id, item_id, description, quantity, unit_price, tax_rate, line_total, created_by)
+       VALUES ($1,$2,$3,'Sorgo grano cosecha 2026',137500,0.1,0,13750,$4)`,
+      [org, ventaGrano, itemSorgo, userId],
+    );
+  }
+
   // ── RRHH: empleados y partes de trabajo (Fase 3.4) ───────────────────────────────────
   //
   // El corte «en qué se va la mano de obra» solo enseña algo si las horas se parecen a las de una
