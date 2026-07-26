@@ -3,7 +3,7 @@ import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain
 import { DbService } from '../../db/db.service';
 import { ReproService } from '../repro/repro.service';
 import { WeatherService } from '../weather/weather.service';
-import { nitrogenAlertMessage, seriesStatus } from '@cowinance/domain';
+import { computeStockRotation, nitrogenAlertMessage, seriesStatus } from '@cowinance/domain';
 import { NitrogenService } from '../genetics/nitrogen.service';
 
 /**
@@ -21,6 +21,16 @@ import { NitrogenService } from '../genetics/nitrogen.service';
  * si divergen, la regla se crea en TypeScript y la rechaza la base al insertarla.
  */
 type AlertCategory = 'health' | 'reproduction' | 'task' | 'iot' | 'inventory' | 'finance' | 'machinery' | 'compliance';
+
+/**
+ * Ventana para medir el ritmo de consumo de un insumo.
+ *
+ * Medio año: suficiente para promediar la estacionalidad de una finca (una campaña sanitaria, un
+ * invierno de suplementación) sin arrastrar un ritmo de hace dos años que ya no es el de hoy. Es el
+ * mismo período por defecto que usa la pantalla de rotación, para que el mínimo sugerido que se ve
+ * ahí sea el mismo con el que dispara la alerta.
+ */
+const STOCK_CONSUMPTION_WINDOW_DAYS = 180;
 
 interface RuleDef {
   code: string;
@@ -70,10 +80,12 @@ const RULES: RuleDef[] = [
   // Y la regla que las gobierna a todas: **si una alerta no cambia lo que alguien va a hacer hoy,
   // no es una alerta — es un dato de reporte.**
 
-  // SIN parámetro numérico a propósito: el umbral ya vive por artículo en
-  // `inventory_items.reorder_point`. Un número global sería mentira — no se le pide el mismo mínimo
-  // a una vacuna que al gasoil. Acá la regla solo se enciende o se apaga.
-  { code: 'stock_below_reorder', name: 'Insumo bajo el punto de reposición', category: 'inventory', severity: 'warning' },
+  // El umbral por artículo vive en `inventory_items.reorder_point` y sigue mandando cuando está
+  // cargado: es una decisión explícita del productor. El parámetro de acá NO es un mínimo global
+  // —pedirle el mismo a una vacuna y al gasoil sería mentira—: son los DÍAS QUE TARDA LA
+  // REPOSICIÓN, y sirven para derivar el mínimo del consumo real en los artículos donde nadie
+  // cargó ninguno. Sin eso, esos artículos no avisaban nunca.
+  { code: 'stock_below_reorder', name: 'Insumo bajo el punto de reposición', category: 'inventory', severity: 'warning', defaultDays: 30, paramLabel: 'Días que tarda la reposición' },
 
   // Días de GRACIA, no de anticipación: avisar antes del vencimiento sería ruido (la factura no
   // está vencida todavía). Cero = avisa apenas se pasa la fecha.
@@ -773,37 +785,73 @@ export class AlertsService {
     /**
      * Insumo bajo el punto de reposición.
      *
-     * El mínimo vive POR ARTÍCULO (`reorder_point`), así que un artículo sin punto de reposición
-     * cargado no genera alerta: no es que esté bien, es que nadie declaró cuánto es «poco». Avisar
-     * de lo que no se configuró sería ruido sobre el catálogo entero.
+     * El mínimo vive POR ARTÍCULO (`reorder_point`) y lo carga una persona. Durante mucho tiempo la
+     * regla miró SOLO ese campo, y eso la dejaba fallando en las dos direcciones a la vez:
+     *
+     * - **Falso negativo**, el caro: el artículo al que nadie le cargó mínimo NUNCA avisaba. En el
+     *   demo, el antiparasitario tenía 28 días de cobertura contra 30 de reposición —o sea, se
+     *   terminaba antes de que llegara lo que se pidiera ese día— y la alerta estaba muda.
+     * - **Falso positivo**: el artículo con un mínimo viejo y muy alto avisaba siempre. La sal
+     *   tenía 108 días de cobertura y sonaba igual, por un mínimo de 4000 cuando alcanzaba con 776.
+     *
+     * Ahora, cuando NO hay mínimo cargado, se usa el DERIVADO del consumo real: lo que se gasta
+     * mientras llega la reposición (misma regla que la pantalla de rotación, `computeStockRotation`,
+     * para que las dos digan lo mismo). Un artículo sin consumo en la ventana no dispara nada — sin
+     * ritmo no hay nada que proyectar, y avisar por lo que no se usa sería ruido sobre el catálogo.
+     *
+     * El mínimo CARGADO sigue mandando cuando existe: es una decisión explícita del productor y el
+     * sistema no la pisa en silencio. Que esté desactualizado se avisa en la pantalla de rotación,
+     * que es donde se puede corregir.
      *
      * Se suma el stock de TODOS los depósitos: tener el mínimo repartido en dos galpones no es
      * faltante, y alertar por depósito llenaría la lista de avisos falsos.
      */
     if (cfg.get('stock_below_reorder')!.active) {
+      const lead = cfg.get('stock_below_reorder')!.days;
       const bajos = await this.db.query<any>(
+        // Una sola consulta para las dos vías: `computeDesired` es el camino caro del sistema y
+        // sumar un round-trip por regla es lo que lo vuelve lento sin que se note de a poco.
         `SELECT i.id AS rid, i.name, i.reorder_point::float AS minimo,
-                COALESCE(SUM(sl.quantity), 0)::float AS hay,
+                COALESCE(s.hay, 0)::float AS hay,
+                COALESCE(c.consumido, 0)::float AS consumido,
                 u.code AS unidad
            FROM inventory_items i
-           LEFT JOIN stock_levels sl ON sl.item_id = i.id AND sl.deleted_at IS NULL
            LEFT JOIN units u ON u.code = i.unit
-          WHERE i.tenant_id = $1 AND i.deleted_at IS NULL AND i.reorder_point IS NOT NULL
-          GROUP BY i.id, i.name, i.reorder_point, u.code
-         HAVING COALESCE(SUM(sl.quantity), 0) <= i.reorder_point`,
-        [t],
+           LEFT JOIN LATERAL (
+             SELECT SUM(sl.quantity) AS hay FROM stock_levels sl
+              WHERE sl.item_id = i.id AND sl.tenant_id = $1 AND sl.deleted_at IS NULL) s ON true
+           LEFT JOIN LATERAL (
+             -- Solo lo que SALIÓ: una compra no es consumo y una transferencia entre galpones no
+             -- gastó nada. Contarlas inflaría el ritmo y el mínimo derivado saldría de más.
+             SELECT SUM(abs(m.quantity)) AS consumido FROM stock_movements m
+              WHERE m.item_id = i.id AND m.tenant_id = $1 AND m.deleted_at IS NULL
+                AND m.movement_type IN ('out','consumption')
+                AND m.occurred_at >= now() - ($2::int * interval '1 day')) c ON true
+          WHERE i.tenant_id = $1 AND i.deleted_at IS NULL AND i.is_active`,
+        [t, STOCK_CONSUMPTION_WINDOW_DAYS],
       );
-      for (const b of bajos)
+
+      for (const b of bajos) {
+        const derivado = computeStockRotation(
+          { stock: b.hay, consumed: b.consumido, periodDays: STOCK_CONSUMPTION_WINDOW_DAYS, reorderPoint: b.minimo },
+          { leadTimeDays: lead },
+        );
+        // El cargado manda; si no hay, el derivado del consumo. Sin ninguno de los dos no hay con
+        // qué comparar y el artículo no dispara nada.
+        const minimo: number | null = b.minimo ?? derivado.suggestedReorderPoint;
+        if (minimo == null || b.hay > minimo) continue;
+        const origen = b.minimo != null ? `el mínimo es ${b.minimo}` : `al ritmo de uso alcanzan ${derivado.coverageDays} días y la reposición tarda ${lead}`;
         out.push({
           code: 'stock_below_reorder',
           category: 'inventory',
           // Quedarse EN CERO ya frenó el trabajo; estar bajo el mínimo todavía se puede reponer.
           severity: b.hay <= 0 ? 'critical' : 'warning',
           title: b.hay <= 0 ? `Sin stock: ${b.name}` : `Stock bajo: ${b.name}`,
-          message: `Quedan ${b.hay} ${b.unidad ?? ''} y el mínimo es ${b.minimo}`.trim(),
+          message: `Quedan ${b.hay} ${b.unidad ?? ''}, ${origen}`.replace(/\s+/g, ' ').trim(),
           related_type: 'inventory_item',
           related_id: b.rid,
         });
+      }
     }
 
     /**

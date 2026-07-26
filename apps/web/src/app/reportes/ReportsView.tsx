@@ -81,7 +81,7 @@ export function ReportsView() {
         ['Bloque', 'Concepto', 'Valor'],
         ['Hacienda', 'Cabezas', data.hacienda?.total ?? ''],
         ['Producción', 'Pesajes', data.produccion?.pesajes ?? ''],
-        ['Producción', 'GDP promedio (kg/d)', data.produccion?.gdp_promedio ?? ''],
+        ['Producción', 'GDP del período (kg/d)', data.produccion?.gdp_periodo ?? ''],
         ['Economía', 'Ingresos', data.economia?.ingresos ?? ''],
         ['Economía', 'Costos', data.economia?.costos ?? ''],
         ['Economía', 'Margen', data.economia?.margen ?? ''],
@@ -533,7 +533,10 @@ function FarmSummary({ data }: { data: any }) {
       contenido: data.produccion && (
         <>
           <Row label="Pesajes" value={qty(data.produccion.pesajes)} />
-          <Row label="GDP promedio" value={data.produccion.gdp_promedio == null ? '—' : `${qty(data.produccion.gdp_promedio, 3)} kg/d`} />
+          {/* «del período», no «promedio» a secas: el Inicio muestra la GDP de los últimos 120
+              días, que es otra pregunta. Dos números distintos con el mismo nombre hacen que no se
+              le crea a ninguno. */}
+          <Row label="GDP del período" value={data.produccion.gdp_periodo == null ? '—' : `${qty(data.produccion.gdp_periodo, 3)} kg/d`} />
         </>
       ),
     },

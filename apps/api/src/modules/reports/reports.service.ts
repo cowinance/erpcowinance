@@ -39,10 +39,19 @@ function avisoDeMargen(ingresos: number, costos: number): string | null {
   return null;
 }
 
-/** Promedio de los valores que EXISTEN. Los null no son cero: son «no se midió». */
-const promedioDe = (valores: (number | null | undefined)[]): number | null => {
-  const hay = valores.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
-  return hay.length === 0 ? null : Math.round((hay.reduce((a, b) => a + b, 0) / hay.length) * 1000) / 1000;
+/**
+ * Promedio PONDERADO de los valores que existen. Los null no son cero: son «no se midió».
+ *
+ * El peso importa y la primera versión no lo tenía: promediar la GDP de un lote con 87 pesajes y
+ * otro con 197 como si valieran igual da un número que no ocurrió en ningún animal. Con los datos
+ * del demo la diferencia era 1,121 contra 1,153 — poco a la vista y suficiente para que dos
+ * pantallas no coincidan.
+ */
+const promedioPonderado = (pares: { valor: number | null | undefined; peso: number }[]): number | null => {
+  const hay = pares.filter((p) => typeof p.valor === 'number' && Number.isFinite(p.valor) && p.peso > 0);
+  const peso = hay.reduce((s, p) => s + p.peso, 0);
+  if (peso <= 0) return null;
+  return Math.round((hay.reduce((s, p) => s + (p.valor as number) * p.peso, 0) / peso) * 1000) / 1000;
 };
 
 const isoDate = (s?: string): string => {
@@ -117,9 +126,19 @@ export class ReportsService {
           ? null
           : {
               pesajes: produccion.total_pesajes,
-              // La GDP de la finca es el promedio de los lotes que la midieron: incluir los que no
-              // pesaron como cero bajaría el número sin que nada se vea roto.
-              gdp_promedio: promedioDe(produccion.rows.map((r: any) => r.gdp_promedio)),
+              /**
+               * GDP DEL PERÍODO consultado, ponderada por pesajes.
+               *
+               * Se llama distinto que la del inicio a propósito. Esa otra es una foto de los
+               * ÚLTIMOS 120 DÍAS y contesta «¿cómo viene el rodeo ahora?»; ésta cubre el rango que
+               * se pidió y contesta «¿cómo anduvo el ejercicio?». Son preguntas distintas y dan
+               * números distintos; el error sería llamarlas igual, porque entonces el productor ve
+               * dos valores para lo mismo y deja de creerle a los dos.
+               *
+               * Los lotes que no midieron no entran como cero: bajarían el promedio por no haber
+               * pasado la balanza.
+               */
+              gdp_periodo: promedioPonderado(produccion.rows.map((r: any) => ({ valor: r.gdp_promedio, peso: r.pesajes }))),
             },
       reproduccion,
       sanidad: sanidad == null ? null : { vacunaciones: sanidad.vacunaciones, tratamientos: sanidad.tratamientos, mortalidad: sanidad.mortalidad },

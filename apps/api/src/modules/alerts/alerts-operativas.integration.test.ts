@@ -87,14 +87,88 @@ describe('alertas operativas — stock, cobranzas y comprobantes', () => {
       expect(await abiertas('stock_below_reorder', itemId)).toBe(0);
     });
 
-    it('un artículo SIN punto de reposición nunca alerta', async () => {
-      // No es que esté bien: es que nadie declaró cuánto es «poco». Avisar de lo no configurado
-      // llenaría la lista con el catálogo entero.
+    it('sin mínimo cargado Y SIN consumo no alerta: no hay ritmo que proyectar', async () => {
+      // Un artículo que nadie usa no está por acabarse. Avisar por el catálogo entero sería ruido.
       const sinMin = (
         await db.query<{ id: string }>(`INSERT INTO inventory_items (tenant_id, name, unit) VALUES ($1,'Sin mínimo','un') RETURNING id`, [db.tenant])
       )[0].id;
       await svc.evaluate();
       expect(await abiertas('stock_below_reorder', sinMin)).toBe(0);
+    });
+
+    /**
+     * El falso negativo caro: durante mucho tiempo la regla miraba SOLO `reorder_point`, así que el
+     * artículo al que nadie le cargó mínimo NUNCA avisaba — justo el caso normal en una finca que
+     * recién empieza a usar el sistema. Ahora, si hay consumo, el mínimo se DERIVA.
+     */
+    describe('sin mínimo cargado, el consumo real lo deriva', () => {
+      /** Artículo con saldo y consumo en la ventana, sin `reorder_point`. */
+      const conConsumo = async (nombre: string, saldo: number, consumoDiario: number) => {
+        const id = (
+          await db.query<{ id: string }>(`INSERT INTO inventory_items (tenant_id, name, unit) VALUES ($1,$2,'l') RETURNING id`, [db.tenant, nombre])
+        )[0].id;
+        const wh = (await db.query<{ id: string }>(`INSERT INTO warehouses (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [db.tenant, farmId, `Dep ${nombre}`]))[0].id;
+        await db.query(`INSERT INTO stock_levels (tenant_id, item_id, warehouse_id, quantity) VALUES ($1,$2,$3,$4)`, [db.tenant, id, wh, saldo]);
+        // 90 días de consumo dentro de la ventana de 180.
+        await db.query(
+          `INSERT INTO stock_movements (tenant_id, item_id, warehouse_id, movement_type, quantity, occurred_at)
+           VALUES ($1,$2,$3,'consumption',$4, now() - interval '45 days')`,
+          [db.tenant, id, wh, -(consumoDiario * 90)],
+        );
+        return id;
+      };
+
+      it('AVISA CUANDO EL SALDO NO LLEGA A CUBRIR LA REPOSICIÓN', async () => {
+        // 5 litros con 0,5/día = 10 días de cobertura, contra 30 de reposición: se termina antes de
+        // que llegue lo que se pida hoy. Antes, este artículo estaba mudo.
+        const item = await conConsumo('Antiparasitario justo', 5, 0.5);
+        await svc.evaluate();
+        expect(await abiertas('stock_below_reorder', item)).toBe(1);
+      });
+
+      it('el aviso EXPLICA que el mínimo salió del consumo, no de una configuración', async () => {
+        // Un aviso sobre algo que el productor nunca configuró se lee como error del sistema si no
+        // dice de dónde salió el número.
+        const item = await conConsumo('Explicación', 5, 0.5);
+        await svc.evaluate();
+        const [a] = await db.query<{ message: string }>(
+          `SELECT a.message FROM alerts a JOIN alert_rules r ON r.id=a.rule_id
+            WHERE a.tenant_id=$1 AND r.condition->>'code'='stock_below_reorder' AND a.related_id=$2 AND a.status='open'`,
+          [db.tenant, item],
+        );
+        expect(a.message).toMatch(/al ritmo de uso/i);
+      });
+
+      it('con saldo de sobra no avisa: la cobertura supera la reposición', async () => {
+        // 100 litros con 0,5/día = 200 días. Avisar acá entrenaría a ignorar la lista.
+        const item = await conConsumo('De sobra', 100, 0.5);
+        await svc.evaluate();
+        expect(await abiertas('stock_below_reorder', item)).toBe(0);
+      });
+
+      it('EL MÍNIMO CARGADO MANDA sobre el derivado', async () => {
+        // Es una decisión explícita del productor y el sistema no la pisa en silencio. Con 200
+        // litros el derivado no avisaría; el mínimo de 500 sí.
+        const item = await conConsumo('Con mínimo propio', 200, 0.5);
+        await db.query(`UPDATE inventory_items SET reorder_point=500 WHERE id=$1`, [item]);
+        await svc.evaluate();
+        expect(await abiertas('stock_below_reorder', item)).toBe(1);
+        const [a] = await db.query<{ message: string }>(
+          `SELECT a.message FROM alerts a JOIN alert_rules r ON r.id=a.rule_id
+            WHERE a.tenant_id=$1 AND r.condition->>'code'='stock_below_reorder' AND a.related_id=$2 AND a.status='open'`,
+          [db.tenant, item],
+        );
+        expect(a.message).toMatch(/el mínimo es 500/i);
+      });
+
+      it('se apaga sola cuando se repone: sigue siendo un reconciliador', async () => {
+        const item = await conConsumo('Se repone', 5, 0.5);
+        await svc.evaluate();
+        expect(await abiertas('stock_below_reorder', item)).toBe(1);
+        await db.query(`UPDATE stock_levels SET quantity=400 WHERE item_id=$1`, [item]);
+        await svc.evaluate();
+        expect(await abiertas('stock_below_reorder', item)).toBe(0);
+      });
     });
 
     it('el stock repartido en dos depósitos NO es faltante', async () => {
