@@ -540,4 +540,81 @@ describe('costing — costos por centro', () => {
       expect(res.totals.unattributed_labor).toBe(300); // y siguen sin atribuir solo los 3 h sueltos
     });
   });
+
+  /**
+   * En qué se va la mano de obra, por TIPO DE TRABAJO (Fase 3.4).
+   *
+   * Corre sobre su propio año (2032) para no depender del fixture de E6: un test que se cae porque
+   * otro bloque agregó una jornada no estaría defendiendo nada.
+   */
+  describe('mano de obra por tipo de trabajo (3.4)', () => {
+    const R = { from: '2032-01-01', to: '2032-12-31' };
+    const DIA = '2032-05-10';
+
+    beforeAll(async () => {
+      // `one` y `companyId` viven en el beforeAll de afuera: se rearman acá en vez de subirlos, para
+      // que este bloque no dependa del orden de los otros.
+      const one = async (sql: string, args: unknown[] = []) => (await db.query<{ id: string }>(sql, args))[0].id;
+      const companyId = await one(`SELECT id FROM companies WHERE tenant_id=$1 LIMIT 1`, [tenantId]);
+      const caro = await one(`INSERT INTO employees (tenant_id, company_id, full_name, hourly_rate) VALUES ($1,$2,'Vet 3.4',20) RETURNING id`, [tenantId, companyId]);
+      const barato = await one(`INSERT INTO employees (tenant_id, company_id, full_name, hourly_rate) VALUES ($1,$2,'Peón 3.4',5) RETURNING id`, [tenantId, companyId]);
+      const sinTarifa = await one(`INSERT INTO employees (tenant_id, company_id, full_name) VALUES ($1,$2,'Eventual 3.4') RETURNING id`, [tenantId, companyId]);
+      const tarea = (tipo: string) => one(`INSERT INTO tasks (tenant_id, farm_id, title, type) VALUES ($1,$2,$3,$4) RETURNING id`, [tenantId, farmId, `T ${tipo}`, tipo]);
+      const parte = (emp: string, task: string | null, hours: number) =>
+        db.query(`INSERT INTO work_logs (tenant_id, employee_id, work_date, hours, task_id) VALUES ($1,$2,$3,$4,$5)`, [tenantId, emp, DIA, hours, task]);
+
+      const sanidad = await tarea('health');
+      const alimentacion = await tarea('feeding');
+      const mantenimiento = await tarea('maintenance');
+      await parte(caro, sanidad, 10); // 200
+      await parte(barato, alimentacion, 100); // 500
+      await parte(barato, mantenimiento, 10); // 50 con tarifa…
+      await parte(sinTarifa, mantenimiento, 90); // …y 90 h que no se pueden valorizar
+      await parte(barato, null, 20); // 100, sin tarea vinculada
+    });
+
+    it('agrupa las horas por el tipo de la tarea vinculada', async () => {
+      const r: any = await svc.laborByActivity(R);
+      expect(r.rows.find((x: any) => x.activity === 'health').cost).toBe(200);
+      expect(r.rows.find((x: any) => x.activity === 'feeding').cost).toBe(500);
+    });
+
+    it('el costo por hora distingue quién hace cada trabajo', async () => {
+      const r: any = await svc.laborByActivity(R);
+      expect(r.rows.find((x: any) => x.activity === 'health').costPerHour).toBe(20);
+      expect(r.rows.find((x: any) => x.activity === 'feeding').costPerHour).toBe(5);
+    });
+
+    it('UNA ACTIVIDAD CON POCA COBERTURA SE VE BARATA Y LA PANTALLA LO DICE', async () => {
+      // El riesgo entero: mantenimiento es la segunda en horas (100) y casi la última en costo (50),
+      // solo porque 90 de esas horas no tienen tarifa. Sin el aviso, «nos conviene hacerlo nosotros».
+      const r: any = await svc.laborByActivity(R);
+      const m = r.rows.find((x: any) => x.activity === 'maintenance');
+      expect(m.hours).toBe(100);
+      expect(m.cost).toBe(50);
+      expect(m.coveragePct).toBe(10);
+      expect(m.caveat).toMatch(/por debajo del real/i);
+    });
+
+    it('las jornadas sin tarea van al final y se nombran como dato faltante', async () => {
+      const r: any = await svc.laborByActivity(R);
+      expect(r.rows[r.rows.length - 1].activity).toBeNull();
+      expect(r.totals.hoursWithoutActivity).toBe(20);
+    });
+
+    it('el total coincide con la valorización de E6: dos cortes, un solo número', async () => {
+      // Si los dos cortes dieran totales distintos, ninguno sería creíble.
+      const porActividad: any = await svc.laborByActivity(R);
+      const porCentro: any = await svc.costsByCenter({ level: 'lot', ...R });
+      const e6 = porCentro.totals.by_category.labor + porCentro.totals.unattributed_labor;
+      expect(porActividad.totals.cost).toBeCloseTo(e6, 2);
+      expect(porActividad.totals.unpricedHours).toBe(porCentro.totals.unpriced_hours);
+    });
+
+    it('fuera del rango no cuenta nada', async () => {
+      const r: any = await svc.laborByActivity({ from: '2033-01-01', to: '2033-12-31' });
+      expect(r.rows).toEqual([]);
+      expect(r.totals.cost).toBe(0);
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { computeBudgetVariance, computeMargin, computeUnitCost } from '@cowinance/domain';
+import { computeBudgetVariance, computeMargin, computeUnitCost, summarizeLaborByActivity } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { SALE_COUNTS } from '../commerce/sales.service';
 
@@ -440,6 +440,48 @@ export class CostingService {
   }
 
   /** Rango por defecto: último año. Compartido por todos los reportes del módulo. */
+  /**
+   * En qué se va la mano de obra, por TIPO DE TRABAJO (Fase 3.4).
+   *
+   * E6 ya valoriza los partes y los imputa a un centro de costo: cuánto cuesta la mano de obra de
+   * ese lote. Este es el otro corte, el que decide una contratación — sanidad, reproducción,
+   * alimentación, mantenimiento — y contesta la pregunta previa a «¿tomo otro empleado o tercerizo
+   * esto?».
+   *
+   * **No confundir con el «costo por actividad» de E2**, que en Costos significa carne / leche /
+   * agricultura. Son dos cortes distintos sobre la misma plata y por eso este método no reusa esa
+   * palabra: dos números distintos con el mismo nombre es la forma más rápida de que nadie crea en
+   * ninguno de los dos.
+   *
+   * La actividad sale de la tarea vinculada al parte (`work_logs.task_id` → `tasks.type`), que es la
+   * clasificación que el módulo de Tareas ya registra. No se pide cargar el dato dos veces, y las
+   * jornadas sin tarea no se reparten entre las demás: se informan aparte, porque «no sé en qué se
+   * fueron» no es lo mismo que «se fueron en esto».
+   *
+   * La valorización es la MISMA que E6 —`hours × employees.hourly_rate`, y las horas sin tarifa no
+   * valen cero—, porque si los dos cortes dieran totales distintos ninguno sería creíble.
+   */
+  async laborByActivity(params: { from?: string; to?: string } = {}) {
+    const { from, to } = this.range(params);
+    const rows = await this.db.query<any>(
+      `SELECT tk.type AS activity,
+              COALESCE(sum(wl.hours) FILTER (WHERE e.hourly_rate IS NOT NULL), 0)::float AS priced_hours,
+              COALESCE(sum(wl.hours * e.hourly_rate) FILTER (WHERE e.hourly_rate IS NOT NULL), 0)::float AS cost,
+              COALESCE(sum(wl.hours) FILTER (WHERE e.hourly_rate IS NULL), 0)::float AS unpriced_hours
+         FROM work_logs wl
+         JOIN employees e ON e.id = wl.employee_id AND e.tenant_id = $1 AND e.deleted_at IS NULL
+         LEFT JOIN tasks tk ON tk.id = wl.task_id AND tk.tenant_id = $1 AND tk.deleted_at IS NULL
+        WHERE wl.tenant_id = $1 AND wl.deleted_at IS NULL AND wl.hours IS NOT NULL
+          AND wl.work_date BETWEEN $2::date AND $3::date
+        GROUP BY tk.type`,
+      [this.db.tenant, from, to],
+    );
+    const resumen = summarizeLaborByActivity(
+      rows.map((r) => ({ activity: r.activity ?? null, pricedHours: r.priced_hours, cost: r.cost, unpricedHours: r.unpriced_hours })),
+    );
+    return { from, to, ...resumen };
+  }
+
   private range(params: { from?: string; to?: string }) {
     const to = params.to ?? new Date().toISOString().slice(0, 10);
     const from = params.from ?? new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);

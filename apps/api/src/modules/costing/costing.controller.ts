@@ -12,6 +12,17 @@ export class CostingController {
     return this.costing.costsByCenter({ level: level as CostLevel | undefined, from, to });
   }
 
+  /**
+   * En qué se va la mano de obra, por tipo de trabajo (Fase 3.4).
+   *
+   * Distinto de `/costs/unit`, que corta por carne/leche/agricultura. Éste corta por la clase de
+   * trabajo —sanidad, alimentación, mantenimiento— que es lo que se compara contra un tercero.
+   */
+  @Get('labor-by-activity')
+  laborByActivity(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.costing.laborByActivity({ from, to });
+  }
+
   /** Costo unitario por actividad: $/kg producido, $/litro y $/kg cosechado + $/ha (E2). */
   @Get('unit')
   unit(@Query('from') from?: string, @Query('to') to?: string) {

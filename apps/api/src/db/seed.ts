@@ -523,6 +523,86 @@ export async function seedDemo(db: Queryable) {
     }
   }
 
+  // ── RRHH: empleados y partes de trabajo (Fase 3.4) ───────────────────────────────────
+  //
+  // El corte «en qué se va la mano de obra» solo enseña algo si las horas se parecen a las de una
+  // finca real, y en una finca real pasan las tres cosas a la vez:
+  //
+  //   - La alimentación se lleva MUCHAS horas baratas (la hace el operario).
+  //   - La sanidad se lleva POCAS horas caras (la hace el veterinario).
+  //   - El mantenimiento lo hace, en parte, alguien SIN tarifa cargada — así se ve más barato de lo
+  //     que es, que es justamente la lectura que puede invertir la decisión de tercerizar.
+  //
+  // Y siempre hay jornadas sin tarea vinculada: horas que existen y de las que no se sabe en qué se
+  // fueron. Se siembran a propósito para que la pantalla tenga que distinguirlas de una actividad.
+  {
+    const empleados: [string, string, number | null][] = [
+      ['Ramón Gutiérrez', 'Capataz', 6.5],
+      ['Luis Peña', 'Operario', 4.2],
+      ['Dra. Carmen Ríos', 'Veterinaria', 18],
+      // Sin tarifa: su trabajo es real y el sistema no lo puede poner en dólares.
+      ['Jesús Marcano', 'Operario eventual', null],
+    ];
+    const empleadoIds: string[] = [];
+    for (const [nombre, rol, tarifa] of empleados) {
+      const [{ id }] = await q(
+        `INSERT INTO employees (tenant_id, company_id, full_name, role, employment_type, hire_date, hourly_rate, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [org, company, nombre, rol, tarifa == null ? 'temporary' : 'permanent', daysAgo(between(300, 1200)).toISOString().slice(0, 10), tarifa, userId],
+      );
+      empleadoIds.push(id);
+    }
+    const [capataz, operario, veterinaria, eventual] = empleadoIds;
+
+    /** Tarea ya hecha, del tipo indicado, para que el parte tenga a qué colgarse. */
+    const tareaHecha = async (tipo: string, titulo: string, diasAtras: number) => {
+      const cuando = daysAgo(diasAtras);
+      const [{ id }] = await q(
+        `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, completed_at, created_by)
+         VALUES ($1,$2,$3,$4,$5,'normal','done',$5,$6) RETURNING id`,
+        [org, farm, titulo, tipo, cuando.toISOString(), userId],
+      );
+      return id as string;
+    };
+    const parte = async (empleado: string, tarea: string | null, diasAtras: number, horas: number) => {
+      await q(
+        `INSERT INTO work_logs (tenant_id, employee_id, work_date, hours, task_id, farm_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [org, empleado, daysAgo(diasAtras).toISOString().slice(0, 10), horas, tarea, farm, userId],
+      );
+    };
+
+    for (let semana = 0; semana < 24; semana++) {
+      const d = semana * 7 + 3;
+      // Alimentación: todas las semanas, muchas horas del operario.
+      const alimentacion = await tareaHecha('feeding', 'Reparto de ración y recorrida de comederos', d);
+      await parte(operario, alimentacion, d, +between(6, 9).toFixed(1));
+      await parte(capataz, alimentacion, d, +between(1, 2.5).toFixed(1));
+
+      // Sanidad: cada tres semanas, pocas horas y caras.
+      if (semana % 3 === 0) {
+        const sanidad = await tareaHecha('health', 'Recorrida sanitaria y tratamientos', d - 1);
+        await parte(veterinaria, sanidad, d - 1, +between(2.5, 4.5).toFixed(1));
+        await parte(capataz, sanidad, d - 1, +between(1.5, 3).toFixed(1));
+      }
+
+      // Mantenimiento: cada dos semanas, y la mayor parte la hace el eventual SIN tarifa.
+      if (semana % 2 === 1) {
+        const mantenimiento = await tareaHecha('maintenance', 'Alambrados, bebederos y caminos', d + 1);
+        await parte(eventual, mantenimiento, d + 1, +between(6, 9).toFixed(1));
+        await parte(operario, mantenimiento, d + 1, +between(1, 2).toFixed(1));
+      }
+
+      // Reproducción: solo en la temporada de servicio.
+      if (semana < 10) {
+        const repro = await tareaHecha('breeding', 'Detección de celo y servicio', d + 2);
+        await parte(capataz, repro, d + 2, +between(2, 4).toFixed(1));
+      }
+
+      // Y las jornadas que nadie vinculó a una tarea: existen en toda finca.
+      if (semana % 4 === 0) await parte(operario, null, d + 4, +between(4, 8).toFixed(1));
+    }
+  }
+
   // ── Trazabilidad y una venta de hacienda (Fase 3.3) ──────────────────────────────────
   //
   // El aviso de certificación solo se puede ver si hay algo contra qué contrastar. Se siembran los

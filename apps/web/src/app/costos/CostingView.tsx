@@ -16,7 +16,7 @@ import { downloadCsv } from '@/lib/csv';
  * casi siempre dice qué falta cargar.
  */
 
-type Tab = 'profit' | 'unit' | 'centers' | 'budget';
+type Tab = 'profit' | 'unit' | 'centers' | 'labor' | 'budget';
 
 interface Activity {
   reference_id: string;
@@ -46,6 +46,9 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'profit', label: 'Rentabilidad' },
   { key: 'unit', label: 'Costo unitario' },
   { key: 'centers', label: 'Costos por centro' },
+  // «Mano de obra» y no «actividad»: en esta misma pantalla «actividad» ya significa carne/leche/
+  // agricultura, y dos cosas con el mismo nombre hacen que no se crea en ninguna.
+  { key: 'labor', label: 'Mano de obra' },
   { key: 'budget', label: 'Vs presupuesto' },
 ];
 
@@ -56,6 +59,15 @@ const CENTER_LEVELS = [
   { key: 'machinery', label: 'Máquina' },
 ];
 const CATEGORY_LABEL: Record<string, string> = { health: 'Sanidad', feed: 'Nutrición', crop: 'Agricultura', machinery: 'Maquinaria', labor: 'Mano de obra' };
+/** Tipos de tarea (`tasks.type`): en qué clase de trabajo se fueron las horas. */
+const ACTIVITY_LABEL: Record<string, string> = {
+  health: 'Sanidad',
+  breeding: 'Reproducción',
+  feeding: 'Alimentación',
+  maintenance: 'Mantenimiento',
+  crop: 'Agricultura',
+  general: 'General',
+};
 
 export function CostingView({
   initialProfit,
@@ -75,6 +87,7 @@ export function CostingView({
   const [unit, setUnit] = useState<any>(initialUnit);
   const [centers, setCenters] = useState<any>(null);
   const [centerLevel, setCenterLevel] = useState('lot');
+  const [labor, setLabor] = useState<any>(null);
   const [budgetId, setBudgetId] = useState<string>(budgets[0]?.id ?? '');
   const [budgetData, setBudgetData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -92,6 +105,7 @@ export function CostingView({
       if (next === 'profit') setProfit(await get(`/costs/profitability?level=${opts.profitLevel ?? profitLevel}&${range()}`));
       else if (next === 'unit') setUnit(await get(`/costs/unit?${range()}`));
       else if (next === 'centers') setCenters(await get(`/costs/by-center?level=${opts.centerLevel ?? centerLevel}&${range()}`));
+      else if (next === 'labor') setLabor(await get(`/costs/labor-by-activity?${range()}`));
       else if (next === 'budget') {
         const id = opts.budgetId ?? budgetId;
         setBudgetData(id ? await get(`/costs/budget-vs-actual?budget_id=${id}&level=lot&${range()}`) : null);
@@ -104,7 +118,7 @@ export function CostingView({
   async function switchTab(next: Tab) {
     setTab(next);
     // Se carga bajo demanda la primera vez; después queda cacheada hasta que cambie el rango.
-    if ((next === 'centers' && !centers) || (next === 'budget' && !budgetData)) await reload(next);
+    if ((next === 'centers' && !centers) || (next === 'labor' && !labor) || (next === 'budget' && !budgetData)) await reload(next);
   }
 
   function exportCsv() {
@@ -122,6 +136,12 @@ export function CostingView({
       const rows: (string | number | null)[][] = [['Centro', ...cats.map((c) => CATEGORY_LABEL[c]), 'Total']];
       for (const r of centers?.rows ?? []) rows.push([r.name, ...cats.map((c) => r.categories[c]), r.total]);
       downloadCsv(`costos-por-centro-${centerLevel}-${from}_${to}.csv`, rows);
+    } else if (tab === 'labor') {
+      const rows: (string | number | null)[][] = [['Trabajo', 'Horas', 'Horas con tarifa', 'Horas sin tarifa', 'Costo', 'Costo por hora', '% del total', 'Cobertura %']];
+      for (const r of labor?.rows ?? [])
+        rows.push([ACTIVITY_LABEL[r.activity] ?? r.activity ?? 'Sin tarea vinculada', r.hours, r.pricedHours, r.unpricedHours, r.cost, r.costPerHour, r.sharePct, r.coveragePct]);
+      rows.push(['TOTAL', labor?.totals?.hours, null, labor?.totals?.unpricedHours, labor?.totals?.cost, null, null, labor?.totals?.coveragePct]);
+      downloadCsv(`mano-de-obra-${from}_${to}.csv`, rows);
     } else {
       const rows: (string | number | null)[][] = [['Centro de costo', 'Presupuesto', 'Real', 'Desvío', 'Desvío %']];
       for (const r of budgetData?.rows ?? []) rows.push([r.name, r.budget, r.actual, r.variance, r.variance_pct]);
@@ -133,6 +153,7 @@ export function CostingView({
     (tab === 'profit' && profit?.rows?.length) ||
     (tab === 'unit' && unit?.activities?.length) ||
     (tab === 'centers' && centers?.rows?.length) ||
+    (tab === 'labor' && labor?.rows?.length) ||
     (tab === 'budget' && budgetData?.rows?.length);
 
   return (
@@ -206,6 +227,7 @@ export function CostingView({
           }}
         />
       )}
+      {tab === 'labor' && <LaborTab data={labor} />}
       {tab === 'budget' && (
         <BudgetTab
           data={budgetData}
@@ -515,5 +537,70 @@ function BudgetTab({
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * En qué se va la mano de obra, por tipo de trabajo (Fase 3.4).
+ *
+ * La cobertura va EN LA MISMA FILA que el costo, no abajo ni en otra pestaña. Una actividad hecha
+ * en parte por gente sin tarifa cargada se ve más barata de lo que es, y sobre ese número alguien
+ * decide no tercerizarla — que es la conclusión exactamente invertida.
+ *
+ * Las jornadas sin tarea vinculada van últimas y aparte: no son la actividad más barata, son las
+ * que no se sabe en qué se fueron.
+ */
+function LaborTab({ data }: { data: any }) {
+  if (!data?.rows?.length) return <EmptyState title="Sin partes de trabajo en el período" body="Cargá horas en RRHH → Partes de trabajo para ver en qué se va la mano de obra." />;
+  const t = data.totals;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-4 gap-3 max-lg:grid-cols-2">
+        <KpiCard label="Costo laboral" value={money(t?.cost)} hint={`${num(t?.hours, 1)} horas`} />
+        <KpiCard label="Horas sin tarifa" value={num(t?.unpricedHours, 1)} hint="Trabajo real sin valorizar" />
+        <KpiCard label="Horas sin tarea" value={num(t?.hoursWithoutActivity, 1)} hint="No se sabe en qué se fueron" />
+        <KpiCard label="Cobertura" value={pct(t?.coveragePct)} hint="Horas con tarifa cargada" />
+      </div>
+
+      <Card>
+        <CardTitle>En qué se va la mano de obra</CardTitle>
+        <p className="text-label text-ink-3">
+          Por tipo de trabajo, no por actividad productiva. Es el corte que se compara contra el presupuesto de un tercero antes de decidir si conviene
+          contratar o tercerizar.
+        </p>
+        <div className="-mx-4 mt-3 overflow-x-auto px-4">
+          <table className="w-full min-w-[42rem] text-body">
+            <thead>
+              <tr className="border-b border-subtle text-left text-caption text-ink-3">
+                <th className="py-2 font-medium">Trabajo</th>
+                <th className="py-2 text-right font-medium">Horas</th>
+                <th className="py-2 text-right font-medium">Costo</th>
+                <th className="py-2 text-right font-medium">Costo/hora</th>
+                <th className="py-2 text-right font-medium">% del total</th>
+                <th className="py-2 text-right font-medium">Cobertura</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((r: any) => (
+                <tr key={r.activity ?? '__sin__'} className="border-b border-subtle align-top last:border-0">
+                  <td className="py-2">
+                    <div className={`font-medium ${r.activity == null ? 'text-ink-3' : ''}`}>{ACTIVITY_LABEL[r.activity] ?? r.activity ?? 'Sin tarea vinculada'}</div>
+                    {r.caveat && <p className="mt-0.5 max-w-md text-caption text-warning">{r.caveat}</p>}
+                  </td>
+                  <td className="tnum py-2 text-right">
+                    {num(r.hours, 1)}
+                    {r.unpricedHours > 0 && <div className="text-caption text-ink-3">{num(r.unpricedHours, 1)} sin tarifa</div>}
+                  </td>
+                  <td className="tnum py-2 text-right">{money(r.cost)}</td>
+                  <td className="tnum py-2 text-right">{unitMoney(r.costPerHour)}</td>
+                  <td className="tnum py-2 text-right">{pct(r.sharePct)}</td>
+                  <td className={`tnum py-2 text-right ${r.coveragePct < 80 ? 'font-medium text-warning' : 'text-ink-3'}`}>{pct(r.coveragePct)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
   );
 }
