@@ -251,11 +251,16 @@ export async function seedDemo(db: Queryable) {
   const defs: Def[] = [
     { catCode: 'vaca', sex: 'F', n: 18, ageMo: [40, 110], kg: [420, 520], lot: 0 },
     { catCode: 'vaca', sex: 'F', n: 10, ageMo: [40, 96], kg: [410, 500], lot: 1 },
-    { catCode: 'toro', sex: 'M', n: 2, ageMo: [36, 84], kg: [700, 880], lot: 0 },
+    // TRES toros y no dos: con dos, el índice por toro es una comparación de a pares y no se ve
+    // que 100 es el promedio del GRUPO. Con tres, la demo enseña a leerlo.
+    { catCode: 'toro', sex: 'M', n: 3, ageMo: [36, 84], kg: [700, 880], lot: 0 },
     { catCode: 'vaquillona', sex: 'F', n: 8, ageMo: [15, 26], kg: [280, 380], lot: 2 },
     { catCode: 'novillo', sex: 'M', n: 9, ageMo: [14, 24], kg: [300, 430], lot: 3 },
-    { catCode: 'ternero', sex: 'M', n: 5, ageMo: [3, 9], kg: [90, 190], lot: 2 },
-    { catCode: 'ternera', sex: 'F', n: 5, ageMo: [3, 9], kg: [85, 180], lot: 2 },
+    // Terneros de 7 a 11 meses: a esa edad YA ESTÁN DESTETADOS, que es lo que hace posible evaluar
+    // genética. Antes eran de 3 a 9 y solo dos llegaban al destete, así que la evaluación por toro
+    // se veía vacía aunque el cálculo estuviera bien.
+    { catCode: 'ternero', sex: 'M', n: 9, ageMo: [7, 11], kg: [140, 210], lot: 2 },
+    { catCode: 'ternera', sex: 'F', n: 9, ageMo: [7, 11], kg: [130, 195], lot: 2 },
   ];
 
   const names = ['Estrella', 'Malinche', 'Paloma', 'Golondrina', 'Margarita', 'Fortuna', 'Serena', 'Yerbabuena', 'Centella', 'Amapola', 'Curiosa', 'Morocha', 'Overita', 'Zaina', 'Pampa'];
@@ -292,7 +297,12 @@ export async function seedDemo(db: Queryable) {
         // Destete a los ~7 meses para los que ya tienen la edad
         if (ageMonths >= 7) {
           const weanDate = new Date(birth.getTime() + 7 * 30.4 * 86400000);
-          const weanKg = +between(150, 200).toFixed(0);
+          // El peso al destete DEPENDE DEL PADRE, con ruido encima. Si fuera puro azar, el índice
+          // por toro compararía ruido y la demo enseñaría a confiar en un número sin señal — que es
+          // justo lo contrario de lo que este módulo intenta.
+          const toros = animalIds.filter((a) => a.catCode === 'toro').map((a) => a.id);
+          const efectoPadre = sireId ? [18, 0, -14][toros.indexOf(sireId) % 3] : 0;
+          const weanKg = +Math.max(120, between(160, 195) + efectoPadre).toFixed(0);
           await q(
             `INSERT INTO weanings (tenant_id, animal_id, weaning_date, weaning_weight_kg, dam_id, created_by)
              VALUES ($1,$2,$3,$4,$5,$6)`,
