@@ -448,9 +448,20 @@ export async function seedDemo(db: Queryable) {
       if (step.applies_to.length && !step.applies_to.includes(animal.category_code)) continue;
       const due = new Date(anchorTasks.getTime() + step.offset_days * 86400000);
       await q(
-        `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, related_type, related_id, created_by)
-         VALUES ($1,$2,$3,'health',$4,'normal','pending','animal',$5,$6)`,
-        [org, farm, `${step.label} — caravana ${animal.tag ?? '—'}`, due.toISOString(), animal.id, userId],
+        // `batch_key` igual que en la materialización real del plan: sin esto los datos demo no se
+        // parecerían a los de producción y el agrupado de alertas se vería «roto» solo en la demo.
+        `INSERT INTO tasks (tenant_id, farm_id, title, type, due_date, priority, status, related_type, related_id, created_by, batch_key, batch_label)
+         VALUES ($1,$2,$3,'health',$4,'normal','pending','animal',$5,$6,$7,$8)`,
+        [
+          org,
+          farm,
+          `${step.label} — caravana ${animal.tag ?? '—'}`,
+          due.toISOString(),
+          animal.id,
+          userId,
+          `plan:demo:${step.label}:${due.toISOString().slice(0, 10)}`,
+          step.label,
+        ],
       );
     }
   }

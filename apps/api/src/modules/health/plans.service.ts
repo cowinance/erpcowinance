@@ -109,7 +109,21 @@ export class PlansService {
         // versiones LWW, server-origin— es responsabilidad única de TaskService (P6-1).
         await this.taskService.createTask(
           this.db,
-          { title, type: 'health', dueDate: due.toISOString(), priority: 'normal', relatedType: 'animal', relatedId: animal.id, farmId: farm },
+          {
+            title,
+            type: 'health',
+            dueDate: due.toISOString(),
+            priority: 'normal',
+            relatedType: 'animal',
+            relatedId: animal.id,
+            farmId: farm,
+            // Mismo plan + mismo paso + misma fecha = el MISMO trabajo, repartido en varios
+            // animales. Es lo que permite que la lista de alertas muestre «Desparasitación · 10
+            // animales» en vez de diez renglones iguales. No lleva el animal a propósito: si lo
+            // llevara sería única por animal y no agruparía nada.
+            batchKey: `plan:${plan.id}:${step.label}:${due.toISOString().slice(0, 10)}`,
+            batchLabel: step.label,
+          },
           { origin: 'health', emitServerOrigin: true, actorUserId: this.db.user },
         );
         created++;

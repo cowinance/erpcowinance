@@ -37,17 +37,25 @@ describe('alertas agrupadas — una línea por trabajo, sin perder el detalle', 
     svc = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
 
-    // Seis tareas sanitarias iguales, misma fecha: un solo trabajo repartido en seis animales.
+    // Seis tareas del mismo trabajo, repartido en seis animales. **El título lleva la caravana**,
+    // igual que en producción (`plans.service` arma `${label} — caravana ${tag}`): un fixture con
+    // títulos idénticos daba falso verde: agrupaba en el test y no agrupaba en la app.
     for (let i = 0; i < 6; i++)
       await db.query(
-        `INSERT INTO tasks (tenant_id, farm_id, title, type, status, due_date)
-         VALUES ($1,$2,'Desparasitación de otoño','health','pending', CURRENT_DATE + 3)`,
-        [db.tenant, farmId],
+        `INSERT INTO tasks (tenant_id, farm_id, title, type, status, due_date, batch_key, batch_label)
+         VALUES ($1,$2,$3,'health','pending', CURRENT_DATE + 3, 'plan:test:Desparasitación de otoño:2026-08-01', 'Desparasitación de otoño')`,
+        [db.tenant, farmId, `Desparasitación de otoño — caravana ${100 + i}`],
       );
     // Y una distinta, para comprobar que no se mezcla con las anteriores.
     await db.query(
+      `INSERT INTO tasks (tenant_id, farm_id, title, type, status, due_date, batch_key, batch_label)
+       VALUES ($1,$2,'Revisión de cascos — caravana 200','health','pending', CURRENT_DATE + 3, 'plan:test:Revisión de cascos:2026-08-01','Revisión de cascos')`,
+      [db.tenant, farmId],
+    );
+    // Suelta, creada a mano: sin `batch_key` no agrupa, que es lo correcto.
+    await db.query(
       `INSERT INTO tasks (tenant_id, farm_id, title, type, status, due_date)
-       VALUES ($1,$2,'Revisión de cascos','health','pending', CURRENT_DATE + 3)`,
+       VALUES ($1,$2,'Revisar aguada del potrero 4','health','pending', CURRENT_DATE + 3)`,
       [db.tenant, farmId],
     );
     await svc.evaluate();
@@ -63,7 +71,10 @@ describe('alertas agrupadas — una línea por trabajo, sin perder el detalle', 
     const grupo = lista.filter((a) => String(a.title).startsWith('Desparasitación de otoño'));
     expect(grupo).toHaveLength(1);
     expect(grupo[0].count).toBe(6);
+    // El encabezado NO lleva caravana: «Desparasitación de otoño · 6 animales». Con el título
+    // individual diría «… — caravana 100 · 6 animales», que se lee como si fuera sobre ese animal.
     expect(grupo[0].title).toBe('Desparasitación de otoño · 6 animales');
+    expect(grupo[0].title).not.toContain('caravana');
   });
 
   it('el detalle NO se pierde: quedan las seis para desplegar', async () => {
@@ -80,7 +91,7 @@ describe('alertas agrupadas — una línea por trabajo, sin perder el detalle', 
     expect(otra).toHaveLength(1);
     expect(otra[0].count).toBe(1);
     // Con una sola no se le agrega el conteo al título: «· 1 animales» sería absurdo.
-    expect(otra[0].title).toBe('Revisión de cascos');
+    expect(otra[0].title).toBe('Revisión de cascos — caravana 200');
   });
 
   it('lo que es único por entidad NO se agrupa', async () => {
@@ -96,13 +107,13 @@ describe('alertas agrupadas — una línea por trabajo, sin perder el detalle', 
     // Es la mitad que importa. En la agenda se marca de a uno; si el agrupado hubiera vivido en
     // `computeDesired`, acá quedarían 1 ítem en vez de 6 y nadie lo habría notado hasta usar la app.
     const { agenda } = await svc.agendaAndKpis();
-    const items = agenda.filter((i: any) => i.title === 'Desparasitación de otoño');
+    const items = agenda.filter((i: any) => String(i.title).startsWith('Desparasitación de otoño'));
     expect(items).toHaveLength(6);
   });
 
   it('en la base siguen existiendo las seis, cada una con su entidad', async () => {
     const [{ n }] = await db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM alerts WHERE tenant_id=$1 AND title='Desparasitación de otoño' AND status='open'`,
+      `SELECT count(*)::int AS n FROM alerts WHERE tenant_id=$1 AND title LIKE 'Desparasitación de otoño%' AND status='open'`,
       [db.tenant],
     );
     expect(n).toBe(6);
@@ -114,11 +125,11 @@ describe('alertas agrupadas — una línea por trabajo, sin perder el detalle', 
     // volviera a dispararse—. Se vería como que el agrupado «no funciona», y justo en la
     // instalación con más alertas acumuladas. Se detectó corriendo la app, no en los tests.
     await db.query(
-      `UPDATE alerts SET group_key = NULL WHERE tenant_id=$1 AND title='Desparasitación de otoño'`,
+      `UPDATE alerts SET group_key = NULL WHERE tenant_id=$1 AND title LIKE 'Desparasitación de otoño%'`,
       [db.tenant],
     );
     let lista: any[] = await svc.list();
-    expect(lista.filter((a) => a.title === 'Desparasitación de otoño')).toHaveLength(6); // sin agrupar
+    expect(lista.filter((a) => String(a.title).startsWith('Desparasitación de otoño'))).toHaveLength(6); // sin agrupar
 
     await svc.evaluate();
     lista = await svc.list();
@@ -129,7 +140,7 @@ describe('alertas agrupadas — una línea por trabajo, sin perder el detalle', 
 
   it('completar una de las seis baja el conteo a cinco', async () => {
     const [t1] = await db.query<any>(
-      `SELECT id FROM tasks WHERE tenant_id=$1 AND title='Desparasitación de otoño' AND status='pending' LIMIT 1`,
+      `SELECT id FROM tasks WHERE tenant_id=$1 AND title LIKE 'Desparasitación de otoño%' AND status='pending' LIMIT 1`,
       [db.tenant],
     );
     await db.query(`UPDATE tasks SET status='done' WHERE id=$1`, [t1.id]);

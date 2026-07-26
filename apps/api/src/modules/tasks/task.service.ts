@@ -50,6 +50,14 @@ export interface CreateTaskInput {
   assignedTo?: string | null;
   /** Clave de dedup para tareas AUTOGENERADAS (E4): una viva por (tenant, rule_key). */
   ruleKey?: string | null;
+  /**
+   * Agrupa tareas generadas JUNTAS —mismo plan, mismo paso, misma fecha— para que la lista de
+   * alertas las muestre como un trabajo y no como veinte. NO es única, a diferencia de `ruleKey`:
+   * varias tareas la comparten justamente porque son el mismo trabajo en varios animales.
+   */
+  batchKey?: string | null;
+  /** Nombre del trabajo SIN el animal, para encabezar el grupo (el título sí lleva la caravana). */
+  batchLabel?: string | null;
   /** Plantilla de recurrencia que generó esta instancia (E5). */
   recurrenceId?: string | null;
 }
@@ -128,10 +136,10 @@ export class TaskService {
     const hlc = ctx.hlc ?? this.serverClock.tick();
 
     await q.query(
-      `INSERT INTO tasks (id, tenant_id, farm_id, title, description, type, due_date, priority, status, related_type, related_id, assigned_to, rule_key, recurrence_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11,$12,$13,$14)
+      `INSERT INTO tasks (id, tenant_id, farm_id, title, description, type, due_date, priority, status, related_type, related_id, assigned_to, rule_key, recurrence_id, created_by, batch_key, batch_label)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (id) DO NOTHING`,
-      [taskId, t, farmId, title, description, type, dueDate, priority, relatedType, relatedId, assignedTo, ruleKey, recurrenceId, ctx.actorUserId],
+      [taskId, t, farmId, title, description, type, dueDate, priority, relatedType, relatedId, assignedTo, ruleKey, recurrenceId, ctx.actorUserId, input.batchKey ?? null, input.batchLabel ?? null],
     );
 
     const fields: Record<string, unknown> = {

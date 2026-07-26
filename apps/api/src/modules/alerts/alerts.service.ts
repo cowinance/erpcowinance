@@ -132,6 +132,11 @@ interface Desired {
    * genera la alerta: parsear el título después se rompería en silencio al cambiar un texto.
    */
   group_key?: string | null;
+  /**
+   * Encabezado del grupo, SIN la entidad. El título individual lleva la caravana y usarlo para el
+   * grupo daría «… — caravana 301 · 10 animales», que se lee como si fuera sobre ese animal.
+   */
+  group_title?: string | null;
 }
 
 /** Ítem de la agenda diaria (P4-1): hecho accionable estructurado del hato. */
@@ -213,17 +218,17 @@ export class AlertsService {
         // hasta que la condición desapareciera y volviera a dispararse. Se vería como que el
         // agrupado «no funciona», justo en la instalación que más alertas acumuladas tiene.
         await this.db.query(
-          `UPDATE alerts SET severity = $2, title = $3, message = $4, category = $5, group_key = $6, updated_at = now() WHERE id = $1`,
-          [ex.id, d.severity, d.title, d.message, d.category, d.group_key ?? null],
+          `UPDATE alerts SET severity = $2, title = $3, message = $4, category = $5, group_key = $6, group_title = $7, updated_at = now() WHERE id = $1`,
+          [ex.id, d.severity, d.title, d.message, d.category, d.group_key ?? null, d.group_title ?? null],
         );
         updated++;
       } else if (muted.has(k)) {
         // la PERSONA ya la resolvió/descartó hace poco: no la recreamos
       } else {
         await this.db.query(
-          `INSERT INTO alerts (tenant_id, rule_id, category, severity, title, message, related_type, related_id, status, triggered_at, created_by, group_key)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',now(),$9,$10)`,
-          [t, ruleIds[d.code], d.category, d.severity, d.title, d.message, d.related_type, d.related_id, this.db.user, d.group_key ?? null],
+          `INSERT INTO alerts (tenant_id, rule_id, category, severity, title, message, related_type, related_id, status, triggered_at, created_by, group_key, group_title)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',now(),$9,$10,$11)`,
+          [t, ruleIds[d.code], d.category, d.severity, d.title, d.message, d.related_type, d.related_id, this.db.user, d.group_key ?? null, d.group_title ?? null],
         );
         created++;
       }
@@ -302,7 +307,7 @@ export class AlertsService {
 
     const filas = await this.db.query<any>(
       `SELECT al.id, al.category, al.severity, al.title, al.message, al.related_type, al.related_id,
-              al.status, al.triggered_at, al.group_key, ai.value AS tag
+              al.status, al.triggered_at, al.group_key, al.group_title, ai.value AS tag
        FROM alerts al
        LEFT JOIN LATERAL (
          SELECT value FROM animal_identifiers x
@@ -344,7 +349,10 @@ export class AlertsService {
     }
     // El título del grupo dice cuántos son: «Desparasitación de destete · 10 animales» es una
     // decisión; diez líneas iguales son ruido.
-    for (const g of grupos.values()) if (g.count > 1) g.title = `${g.title} · ${g.count} animales`;
+    // El encabezado usa `group_title` —el nombre del trabajo sin el animal—; sin él caería al
+    // título individual, que lleva la caravana de la primera y se leería como si el grupo fuera
+    // sobre ESE animal.
+    for (const g of grupos.values()) if (g.count > 1) g.title = `${g.group_title ?? g.title} · ${g.count} animales`;
     return salida;
   }
 
@@ -575,7 +583,7 @@ export class AlertsService {
     // Tareas sanitarias programadas (de planes) por vencer o vencidas
     if (cfg.get('health_task_due')!.active) {
     const tasks = await this.db.query<any>(
-      `SELECT tk.id AS rid, tk.title, tk.due_date, (tk.due_date::date < CURRENT_DATE) AS overdue
+      `SELECT tk.id AS rid, tk.title, tk.due_date, tk.batch_key, tk.batch_label, (tk.due_date::date < CURRENT_DATE) AS overdue
        FROM tasks tk
        WHERE tk.tenant_id = $1 AND tk.type = 'health' AND tk.status = 'pending' AND tk.deleted_at IS NULL
          AND tk.due_date <= now() + ($2::int * interval '1 day')`,
@@ -592,8 +600,12 @@ export class AlertsService {
         related_id: tk.rid,
         due_at: iso(tk.due_date),
         tag: null,
-        // Diez terneros desparasitados el mismo día son UN trabajo, no diez decisiones.
-        group_key: `health_task_due|${tk.title}|${String(tk.due_date).slice(0, 10)}`,
+        // Diez terneros desparasitados el mismo día son UN trabajo, no diez decisiones. La clave
+        // la trae la TAREA (`batch_key`, 1.5): agruparlas por título no servía porque el título ya
+        // incluye la caravana, y partirlo por el guion se rompería en silencio al editar ese texto.
+        // Sin `batch_key` —una tarea suelta creada a mano— no agrupa, que es lo correcto.
+        group_key: tk.batch_key ? `health_task_due|${tk.batch_key}` : null,
+        group_title: tk.batch_label ?? null,
       });
     }
 
