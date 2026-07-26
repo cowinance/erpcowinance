@@ -97,6 +97,19 @@ const RULES: RuleDef[] = [
   // es la peor forma de fallar: callada.
   { code: 'milk_scc_high', name: 'Recuento celular alto (mastitis subclínica)', category: 'health', severity: 'warning', defaultDays: 200000, paramLabel: 'Recuento que dispara el aviso (células/mL)' },
 
+  // ── Fase 1.3: activos y cumplimiento ────────────────────────────────────────────────────────
+
+  // Por FECHA (`maintenance_records.next_due_date`), no por horas. El modelo NO tiene intervalo de
+  // servicio —hay horas actuales y horas al momento del último service, pero nadie declara «cada
+  // 250 h»—, así que avisar por horas exigiría un umbral global, y un tractor no se sirve cada las
+  // mismas horas que una desmalezadora. Sería la misma mentira que un stock mínimo único. El
+  // intervalo por máquina queda anotado para la mejora de Maquinaria (Fase 4).
+  { code: 'maintenance_due', name: 'Mantenimiento programado', category: 'machinery', severity: 'warning', defaultDays: 15, paramLabel: 'Días de anticipación' },
+
+  // La vigencia es DERIVADA de `valid_until`, igual que el `is_expired` del módulo: no hay un estado
+  // que un cron tenga que ir actualizando. Se avisa antes de que venza porque renovar una
+  // certificación lleva tiempo, y vencida ya frena la venta.
+  { code: 'certification_expiring', name: 'Certificación por vencer', category: 'compliance', severity: 'warning', defaultDays: 30, paramLabel: 'Días de anticipación' },
 ];
 
 /** Nivel de estrés en el idioma del producto: la alerta la lee una persona, no un sistema. */
@@ -908,6 +921,83 @@ export class AlertsService {
           related_id: esTanque ? m.tank_id : m.animal_id,
           due_at: iso(m.sample_date),
           tag: m.tag ?? null,
+        });
+      }
+    }
+
+    // ── Fase 1.3: activos y cumplimiento ────────────────────────────────────────────────────
+    // Las dos son «algo que vence»: una máquina que pide service y un papel que pierde vigencia.
+    // Se avisan ANTES porque las dos tienen plazo de gestión — conseguir el taller, renovar el
+    // certificado— y llegar tarde cuesta la cosecha o la venta.
+
+    /**
+     * Mantenimiento programado.
+     *
+     * Solo el ÚLTIMO registro de cada máquina: `next_due_date` viene del service anterior, así que
+     * hacer el mantenimiento nuevo —con su próxima fecha— apaga la alerta sola. Mirar todos los
+     * registros repetiría el aviso una vez por cada service histórico de la máquina.
+     */
+    if (cfg.get('maintenance_due')!.active) {
+      const vencen = await this.db.query<any>(
+        `SELECT DISTINCT ON (m.id) m.id AS rid, m.name, m.type, r.next_due_date, r.type AS ultimo_tipo,
+                (r.next_due_date - CURRENT_DATE)::int AS faltan
+           FROM machinery m
+           JOIN maintenance_records r ON r.machinery_id = m.id AND r.deleted_at IS NULL AND r.next_due_date IS NOT NULL
+          WHERE m.tenant_id = $1 AND m.deleted_at IS NULL
+          ORDER BY m.id, r.performed_at DESC, r.created_at DESC`,
+        [t],
+      );
+      for (const v of vencen) {
+        if (v.faltan > cfg.get('maintenance_due')!.days) continue;
+        const vencido = v.faltan < 0;
+        out.push({
+          code: 'maintenance_due',
+          category: 'machinery',
+          // Vencido = la máquina está trabajando sin el service hecho. Eso ya es riesgo de rotura.
+          severity: vencido ? 'critical' : 'warning',
+          title: vencido
+            ? `${v.name}: mantenimiento vencido hace ${Math.abs(v.faltan)} días`
+            : `${v.name}: mantenimiento en ${v.faltan} días`,
+          message: `Último service: ${v.ultimo_tipo ?? '—'}. Programado para el ${fmt(v.next_due_date)}.`,
+          related_type: 'machinery',
+          related_id: v.rid,
+          due_at: iso(v.next_due_date),
+        });
+      }
+    }
+
+    /**
+     * Certificación por vencer.
+     *
+     * La vigencia se DERIVA de `valid_until`, igual que el `is_expired` del módulo: no hay estado
+     * que un cron tenga que actualizar. Las suspendidas y revocadas quedan fuera — ésas no vencen,
+     * ya están fuera de juego por otra razón y avisarlas como «por vencer» confundiría el motivo.
+     */
+    if (cfg.get('certification_expiring')!.active) {
+      const porVencer = await this.db.query<any>(
+        `SELECT c.id AS rid, c.scheme, c.issuer, c.entity_type, c.valid_until,
+                (c.valid_until - CURRENT_DATE)::int AS faltan
+           FROM certifications c
+          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL AND c.status = 'active'
+            AND c.valid_until IS NOT NULL
+            AND c.valid_until <= CURRENT_DATE + $2::int
+          ORDER BY c.valid_until`,
+        [t, cfg.get('certification_expiring')!.days],
+      );
+      for (const c of porVencer) {
+        const vencida = c.faltan < 0;
+        out.push({
+          code: 'certification_expiring',
+          category: 'compliance',
+          // Vencida ya bloquea: sin certificación vigente no se vende.
+          severity: vencida ? 'critical' : 'warning',
+          title: vencida ? `${c.scheme}: certificación VENCIDA` : `${c.scheme}: vence en ${c.faltan} días`,
+          message: vencida
+            ? `Venció el ${fmt(c.valid_until)}. Sin ella no se puede comercializar lo certificado.`
+            : `Vence el ${fmt(c.valid_until)}${c.issuer ? ` (${c.issuer})` : ''}. Iniciá la renovación.`,
+          related_type: 'certification',
+          related_id: c.rid,
+          due_at: iso(c.valid_until),
         });
       }
     }
