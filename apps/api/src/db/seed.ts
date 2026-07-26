@@ -378,37 +378,55 @@ export async function seedDemo(db: Queryable) {
   // ── Reproducción: ciclo completo celo → servicio → diagnóstico ────────
   const cows = animalIds.filter((a) => a.catCode === 'vaca');
   const bulls = animalIds.filter((a) => a.catCode === 'toro');
+  // La FERTILIDAD DEPENDE DEL TORO, y no es la misma que su peso al destete.
+  //
+  // Antes el seed solo cargaba los servicios que habían preñado: las vacas vacías no tenían
+  // servicio, así que todos los toros daban 100% de concepción. Con eso, el costo por kilo
+  // destetado quedaba proporcional al precio de la pajuela y la pantalla enseñaba justo lo
+  // contrario de lo que existe para enseñar. Un servicio que no preñó ES un dato — es la mitad de
+  // la cuenta de cuántas dosis hace falta por ternero.
+  //
+  // Los valores se eligen para que el ranking por costo salga INVERTIDO al ranking por índice: el
+  // toro más caro es el mejor al destete (índice 109) y el más caro por kilo destetado. La pantalla
+  // muestra las dos columnas juntas justamente para que esa tensión se vea y la decida el productor.
+  const fertilidad = [0.85, 0.4, 0.7];
+  const fertilidadDe = (sireId: string) => fertilidad[Math.max(0, bulls.findIndex((b) => b.id === sireId)) % fertilidad.length];
   let pregnant = 0;
   for (const cow of cows) {
-    if (rand() < 0.65) {
-      const diagAt = daysAgo(between(15, 120));
-      const serviceAt = new Date(diagAt.getTime() - between(30, 45) * 86400000);
-      const heatAt = new Date(serviceAt.getTime() - 21 * 86400000);
-      const method = rand() < 0.5 ? 'service_ai' : 'service_natural';
-      const sire = method === 'service_natural' ? pick(bulls).id : null;
+    // Casi todo el rodeo entra al servicio; las que quedan afuera son las de parto reciente.
+    if (rand() >= 0.9) continue;
+    const diagAt = daysAgo(between(15, 120));
+    const serviceAt = new Date(diagAt.getTime() - between(30, 45) * 86400000);
+    const heatAt = new Date(serviceAt.getTime() - 21 * 86400000);
+    const method = rand() < 0.5 ? 'service_ai' : 'service_natural';
+    // La INSEMINACIÓN también lleva toro. Antes iba en null y la tasa de concepción por toro solo
+    // veía el servicio natural; sin esto tampoco hay a quién imputarle el costo de la pajuela.
+    const sire = pick(bulls).id;
 
-      await q(
-        `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, created_by) VALUES ($1,$2,'heat',$3,$4)`,
-        [org, cow.id, heatAt.toISOString(), userId],
-      );
-      events.push({ animal: cow.id, type: 'heat', payload: {}, at: heatAt });
+    await q(
+      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, created_by) VALUES ($1,$2,'heat',$3,$4)`,
+      [org, cow.id, heatAt.toISOString(), userId],
+    );
+    events.push({ animal: cow.id, type: 'heat', payload: {}, at: heatAt });
 
-      const [{ id: serviceId }] = await q(
-        `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [org, cow.id, method, serviceAt.toISOString(), sire, userId],
-      );
-      events.push({ animal: cow.id, type: 'service', payload: { method: method === 'service_ai' ? 'ai' : 'natural' }, at: serviceAt });
+    const [{ id: serviceId }] = await q(
+      `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [org, cow.id, method, serviceAt.toISOString(), sire, userId],
+    );
+    events.push({ animal: cow.id, type: 'service', payload: { method: method === 'service_ai' ? 'ai' : 'natural' }, at: serviceAt });
 
-      const due = new Date(serviceAt.getTime() + 283 * 86400000);
-      await q(
-        `INSERT INTO pregnancies (tenant_id, animal_id, breeding_event_id, diagnosis_date, method, expected_due_date, status, created_by)
-         VALUES ($1,$2,$3,$4,'ultrasound',$5,'open',$6)`,
-        [org, cow.id, serviceId, diagAt.toISOString().slice(0, 10), due.toISOString().slice(0, 10), userId],
-      );
-      events.push({ animal: cow.id, type: 'pregnancy_diagnosed', payload: { method: 'ultrasound', expected_due_date: due.toISOString().slice(0, 10) }, at: diagAt });
-      pregnant++;
-    }
+    // El servicio que no preñó queda cargado igual, sin preñez. Es lo que pasa en la finca.
+    if (rand() >= fertilidadDe(sire)) continue;
+
+    const due = new Date(serviceAt.getTime() + 283 * 86400000);
+    await q(
+      `INSERT INTO pregnancies (tenant_id, animal_id, breeding_event_id, diagnosis_date, method, expected_due_date, status, created_by)
+       VALUES ($1,$2,$3,$4,'ultrasound',$5,'open',$6)`,
+      [org, cow.id, serviceId, diagAt.toISOString().slice(0, 10), due.toISOString().slice(0, 10), userId],
+    );
+    events.push({ animal: cow.id, type: 'pregnancy_diagnosed', payload: { method: 'ultrasound', expected_due_date: due.toISOString().slice(0, 10) }, at: diagAt });
+    pregnant++;
   }
 
   // ── Escenario de alertas: eventos próximos y una preñez vencida ───────
@@ -476,6 +494,31 @@ export async function seedDemo(db: Queryable) {
           `plan:demo:${step.label}:${due.toISOString().slice(0, 10)}`,
           step.label,
         ],
+      );
+    }
+  }
+
+  // ── Partidas de semen: el costo de la genética ────────────────────────────────────────
+  // Sin precio de pajuela, la evaluación por toro contesta «cuál rinde más» pero no «cuál CONVIENE».
+  // Un toro 8% mejor al destete que cuesta el triple por dosis puede ser el peor negocio.
+  //
+  // Los precios difieren entre toros a propósito, y el más caro NO es el mejor: si el ranking por
+  // desempeño y el ranking por costo coincidieran, la pantalla no enseñaría nada.
+  {
+    const torosSemen = animalIds.filter((a) => a.catCode === 'toro');
+    const precios = [42, 18, 9]; // el mejor al destete es también el más caro
+    for (let i = 0; i < torosSemen.length; i++) {
+      const [{ id: partida }] = await q(
+        `INSERT INTO semen_batches (tenant_id, sire_id, batch_code, acquired_date, unit_cost, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [org, torosSemen[i].id, `LOTE-${2025}-${i + 1}`, daysAgo(between(200, 400)).toISOString().slice(0, 10), precios[i % 3], userId],
+      );
+      // El saldo es DERIVADO desde GT-2: son filas de pajuela, no un contador en la partida.
+      // Sembrar el contador dejaría la partida con stock cero en la pantalla de criogenia.
+      await q(
+        `INSERT INTO cryo_straws (tenant_id, kind, semen_batch_id, status, notes)
+         SELECT $1, 'semen', $2, 'stored', 'Sin ubicar en el termo.' FROM generate_series(1, $3)`,
+        [org, partida, Math.round(between(20, 60))],
       );
     }
   }

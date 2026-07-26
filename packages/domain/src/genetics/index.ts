@@ -62,3 +62,6 @@ export {
   sireIndexes,
 } from './weaning-weight';
 export type { AdjustedWeaning, AnimalSex, ContemporaryMember, DamAgeAdjustment, SireIndex, WeaningInput } from './weaning-weight';
+
+export { computeGeneticCost } from './genetic-cost';
+export type { GeneticCost, GeneticCostInput } from './genetic-cost';

@@ -18,6 +18,13 @@ export class SireEvaluationController {
     return this.evaluation.bySire({ year: Number.isFinite(y) ? y : undefined });
   }
 
+  /** Costo del semen por kilo destetado: cuál RINDE más contra cuál CONVIENE, que no es lo mismo. */
+  @Get('sire-cost')
+  cost(@Query('year') year?: string) {
+    const y = year ? Number(year) : undefined;
+    return this.evaluation.costBySire({ year: Number.isFinite(y) ? y : undefined });
+  }
+
   /** Rendimiento en el gancho por toro: el último escalón de la cadena, donde se cobra. */
   @Get('carcass-by-sire')
   carcass() {

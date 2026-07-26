@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { adjustWeaningWeight, computeDressingPct, confidenceFor, sireIndexes, type AnimalSex, type ContemporaryMember } from '@cowinance/domain';
+import { adjustWeaningWeight, computeDressingPct, computeGeneticCost, confidenceFor, sireIndexes, type AnimalSex, type ContemporaryMember } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -96,6 +96,68 @@ export class SireEvaluationService {
       /** Destetes con datos imposibles, descartados. Se informa en vez de esconderse. */
       discarded: descartadas,
       sires: sireIndexes(miembros).map((s) => ({ ...s, sire_name: nombres.get(s.sireId) ?? 'Sin identificar' })),
+    };
+  }
+
+  /**
+   * Costo de la genética por kilo destetado (Fase 2.5).
+   *
+   * Cierra el módulo: la evaluación por desempeño contesta **cuál rinde más**, ésta contesta **cuál
+   * conviene**. No es lo mismo — un toro 8% mejor al destete que cuesta el triple por dosis puede
+   * ser el peor negocio de la finca.
+   *
+   * La tasa de concepción usa la MISMA definición que el reporte por toro de Reproducción
+   * (`repro-reports.byBull`): una preñez `open` o `calved` ligada al evento de servicio. Si acá se
+   * contara distinto, dos pantallas del sistema mostrarían fertilidades distintas para el mismo
+   * toro y ninguna sería creíble. Lo único que cambia es la ventana: aquel reporte mira un período
+   * y éste mira TODA la historia del toro, porque volver a comprar esa genética es una decisión
+   * sobre el toro, no sobre una temporada.
+   *
+   * El precio es el de la partida MÁS RECIENTE de ese toro: comparar contra lo que costaba hace
+   * tres años no ayuda a decidir la compra de este año.
+   */
+  async costBySire(params: { year?: number } = {}) {
+    const t = this.db.tenant;
+    const desempeno = await this.bySire(params);
+
+    const economia = await this.db.query<any>(
+      `SELECT be.sire_id,
+              count(*)::int AS servicios,
+              count(*) FILTER (WHERE p.id IS NOT NULL)::int AS concepciones,
+              (SELECT sb.unit_cost::float FROM semen_batches sb
+                WHERE sb.sire_id = be.sire_id AND sb.tenant_id = be.tenant_id AND sb.deleted_at IS NULL
+                  AND sb.unit_cost IS NOT NULL
+                ORDER BY sb.acquired_date DESC NULLS LAST LIMIT 1) AS precio_pajuela
+         FROM breeding_events be
+         LEFT JOIN pregnancies p ON p.breeding_event_id = be.id AND p.status IN ('open','calved') AND p.deleted_at IS NULL
+        WHERE be.tenant_id = $1 AND be.deleted_at IS NULL AND be.sire_id IS NOT NULL
+          AND be.type IN ('service_natural','service_ai')
+        GROUP BY be.sire_id, be.tenant_id`,
+      [t],
+    );
+    const porToro = new Map(economia.map((e) => [e.sire_id, e]));
+
+    return {
+      ...desempeno,
+      sires: desempeno.sires.map((s) => {
+        const e = porToro.get(s.sireId);
+        const tasa = e && e.servicios > 0 ? (e.concepciones / e.servicios) * 100 : null;
+        const costo = computeGeneticCost({
+          // Sin partida con precio no hay costo que calcular; NaN es el «no sé» que la regla
+          // convierte en null. Un cero diría «gratis», que acá se leería al revés de la verdad.
+          strawCost: e?.precio_pajuela ?? Number.NaN,
+          conceptionRatePct: tasa,
+          avgWeaningKg: s.meanKg,
+        });
+        return {
+          ...s,
+          services: e?.servicios ?? 0,
+          conceptions: e?.concepciones ?? 0,
+          conception_rate_pct: tasa == null ? null : Math.round(tasa * 10) / 10,
+          straw_cost: e?.precio_pajuela ?? null,
+          ...costo,
+        };
+      }),
     };
   }
 

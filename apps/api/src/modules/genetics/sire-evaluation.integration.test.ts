@@ -238,4 +238,88 @@ describe('genética — evaluación de toros por la progenie', () => {
         expect(conRinde[i - 1].avg_dressing_pct!).toBeGreaterThanOrEqual(conRinde[i].avg_dressing_pct!);
     });
   });
+
+  describe('costo de la genética por kilo destetado', () => {
+    /** Servicios de un toro sobre la madre, de los cuales `preñan` terminaron en preñez. */
+    const servicios = async (sire: string, total: number, prenan: number) => {
+      for (let i = 0; i < total; i++) {
+        const [{ id }] = await db.query<any>(
+          `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id)
+           VALUES ($1,$2,'service_ai', now() - ($3::int || ' days')::interval, $4) RETURNING id`,
+          [db.tenant, madre, 200 + i, sire],
+        );
+        if (i < prenan)
+          await db.query(
+            `INSERT INTO pregnancies (tenant_id, animal_id, breeding_event_id, diagnosis_date, status)
+             VALUES ($1,$2,$3, CURRENT_DATE - 150, 'open')`,
+            [db.tenant, madre, id],
+          );
+      }
+    };
+
+    const partida = async (sire: string, precio: number, diasAtras: number) => {
+      await db.query(
+        `INSERT INTO semen_batches (tenant_id, sire_id, batch_code, acquired_date, unit_cost)
+         VALUES ($1,$2,$3, CURRENT_DATE - $4::int, $5)`,
+        [db.tenant, sire, `L-${sire.slice(0, 6)}-${diasAtras}`, diasAtras, precio],
+      );
+    };
+
+    it('sin precio de pajuela informa el desempeño pero NO inventa un costo', async () => {
+      // Es la diferencia que importa: un cero se leería «gratis», que acá es la lectura opuesta a
+      // la verdad. Falta el dato, y la pantalla tiene que decirlo.
+      await servicios(toroA, 4, 4);
+      const r = await svc.costBySire();
+      const a = r.sires.find((s) => s.sireId === toroA)!;
+      expect(a.conception_rate_pct).toBe(100);
+      expect(a.straw_cost).toBeNull();
+      expect(a.costPerWeanedKg).toBeNull();
+    });
+
+    it('EL SEMEN BARATO DE BAJA FERTILIDAD SALE MÁS CARO POR TERNERO', async () => {
+      // La razón de existir del cálculo. toroB cuesta menos de la mitad por dosis y preña la mitad
+      // de las veces: comparar precios de pajuela lo elegiría, y sería el peor negocio.
+      await partida(toroA, 40, 100);
+      await partida(toroB, 15, 100);
+      await servicios(toroB, 8, 2); // 25% de concepción
+
+      const r = await svc.costBySire();
+      const a = r.sires.find((s) => s.sireId === toroA)!;
+      const b = r.sires.find((s) => s.sireId === toroB)!;
+      expect(b.straw_cost).toBeLessThan(a.straw_cost!);
+      expect(b.costPerCalf!).toBeGreaterThan(a.costPerCalf!); // 15/0,25 = 60 contra 40/1 = 40
+    });
+
+    it('usa el precio de la partida MÁS RECIENTE, no el histórico', async () => {
+      // Comparar contra lo que costaba hace tres años no ayuda a decidir la compra de este año.
+      await partida(toroA, 90, 5);
+      const r = await svc.costBySire();
+      expect(r.sires.find((s) => s.sireId === toroA)!.straw_cost).toBe(90);
+    });
+
+    it('la tasa de concepción coincide con la del reporte por toro de Reproducción', async () => {
+      // Si acá se contara distinto, dos pantallas mostrarían fertilidades distintas del mismo toro
+      // y ninguna sería creíble.
+      const r = await svc.costBySire();
+      const b = r.sires.find((s) => s.sireId === toroB)!;
+      const [fila] = await db.query<any>(
+        `SELECT count(*)::int AS services, count(*) FILTER (WHERE p.id IS NOT NULL)::int AS conceptions
+           FROM breeding_events be
+           LEFT JOIN pregnancies p ON p.breeding_event_id = be.id AND p.status IN ('open','calved') AND p.deleted_at IS NULL
+          WHERE be.tenant_id = $1 AND be.sire_id = $2 AND be.deleted_at IS NULL
+            AND be.type IN ('service_natural','service_ai')`,
+        [db.tenant, toroB],
+      );
+      expect(b.services).toBe(fila.services);
+      expect(b.conceptions).toBe(fila.conceptions);
+    });
+
+    it('conserva el desempeño: el costo se agrega, no reemplaza al índice', async () => {
+      // Las dos preguntas conviven en la misma fila a propósito — cuál rinde y cuál conviene.
+      const desempeno = await svc.bySire();
+      const costo = await svc.costBySire();
+      expect(costo.group_size).toBe(desempeno.group_size);
+      expect(costo.sires.map((s) => s.index)).toEqual(desempeno.sires.map((s) => s.index));
+    });
+  });
 });
