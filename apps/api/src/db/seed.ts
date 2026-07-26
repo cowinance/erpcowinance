@@ -275,8 +275,12 @@ export async function seedDemo(db: Queryable) {
       const breedCode = pick(['angus', 'angus', 'hereford', 'brangus', 'braford']);
       // Genealogía: los terneros nacen de una vaca y un toro del rodeo
       const isCalf = d.catCode === 'ternero' || d.catCode === 'ternera';
+      // El NOVILLO también lleva padre, aunque sin parto registrado: nació antes de que la finca
+      // usara el sistema. Sin esto no habría con qué evaluar la genética contra la faena, que es
+      // el último escalón de la cadena — y el que dice qué toro da mejores carcasas.
+      const conocePadre = isCalf || d.catCode === 'novillo';
       const damId = isCalf ? pick(animalIds.filter((a) => a.catCode === 'vaca')).id : null;
-      const sireId = isCalf ? pick(animalIds.filter((a) => a.catCode === 'toro')).id : null;
+      const sireId = conocePadre ? pick(animalIds.filter((a) => a.catCode === 'toro')).id : null;
       const [{ id }] = await q(
         `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, name, birth_date, origin, dam_id, sire_id, current_lot_id, current_paddock_id, status, created_by, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'born',$8,$9,$10,$11,'active',$12,$13) RETURNING id`,
@@ -471,6 +475,58 @@ export async function seedDemo(db: Queryable) {
           userId,
           `plan:demo:${step.label}:${due.toISOString().slice(0, 10)}`,
           step.label,
+        ],
+      );
+    }
+  }
+
+  // ── Faena: novillos terminados (cierra la cadena genética hasta el gancho) ────────────
+  // Es el último escalón: pajuela → vaca → preñez → destete → GANCHO. Sin reses cargadas, la
+  // evaluación por toro se corta en el destete y no puede contestar qué genética rinde en la res,
+  // que es donde se cobra.
+  //
+  // El rendimiento DEPENDE DEL PADRE, igual que el peso al destete: si fuera azar, la comparación
+  // entre toros no tendría señal y la demo enseñaría a leer ruido.
+  {
+    const torosFaena = animalIds.filter((a) => a.catCode === 'toro').map((a) => a.id);
+    const novillos = animalIds.filter((a) => a.catCode === 'novillo').slice(0, 6);
+    // El frigorífico es un CLIENTE: socio de negocio + su satélite `customers`, que es a donde
+    // apunta la FK de la res (no a `business_partners`).
+    const [{ id: socioFrigorifico }] = await q(
+      `INSERT INTO business_partners (tenant_id, company_id, type, name) VALUES ($1,$2,'customer','Frigorífico del Centro') RETURNING id`,
+      [org, company],
+    );
+    const [{ id: frigorifico }] = await q(
+      `INSERT INTO customers (tenant_id, partner_id, segment) VALUES ($1,$2,'slaughterhouse') RETURNING id`,
+      [org, socioFrigorifico],
+    );
+    for (const n of novillos) {
+      const [{ sire_id: padre }] = await q(`SELECT sire_id FROM animals WHERE id = $1`, [n.id]);
+      const efectoPadre = padre ? [1.8, 0, -1.4][torosFaena.indexOf(padre) % 3] : 0;
+      // La res se deriva del ÚLTIMO PESO REAL del animal, no de uno inventado aparte. El novillo ya
+      // tiene pesajes del seed general, y crear otro peso vivo solo para la faena daba dos verdades
+      // del mismo número: el rendimiento salía 78%, que es imposible (lo normal es 55-58%).
+      const [{ weight_kg: ultimo, weighed_at: fechaPeso }] = await q(
+        `SELECT weight_kg::float AS weight_kg, weighed_at FROM weighings WHERE animal_id = $1 ORDER BY weighed_at DESC LIMIT 1`,
+        [n.id],
+      );
+      const vivo = Number(ultimo);
+      // La faena va DESPUÉS del último pesaje. Si fuera antes, la consulta tomaría un pesaje más
+      // viejo y liviano, y el rendimiento saldría inflado (daba 60-65%, imposible para novillo).
+      const faenaEn = new Date(new Date(fechaPeso).getTime() + 2 * 86400000);
+      const rinde = between(55, 58) + efectoPadre;
+      await q(
+        `INSERT INTO carcass_records (tenant_id, animal_id, slaughter_date, slaughterhouse_id, hot_carcass_weight_kg, fat_grade, conformation, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          org,
+          n.id,
+          faenaEn.toISOString().slice(0, 10),
+          frigorifico,
+          +((vivo * rinde) / 100).toFixed(1),
+          pick(['1', '2', '2', '3']),
+          pick(['R', 'R', 'U', 'O']),
+          userId,
         ],
       );
     }

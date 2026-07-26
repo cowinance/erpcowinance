@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { adjustWeaningWeight, sireIndexes, type AnimalSex, type ContemporaryMember } from '@cowinance/domain';
+import { adjustWeaningWeight, computeDressingPct, confidenceFor, sireIndexes, type AnimalSex, type ContemporaryMember } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -96,6 +96,85 @@ export class SireEvaluationService {
       /** Destetes con datos imposibles, descartados. Se informa en vez de esconderse. */
       discarded: descartadas,
       sires: sireIndexes(miembros).map((s) => ({ ...s, sire_name: nombres.get(s.sireId) ?? 'Sin identificar' })),
+    };
+  }
+
+  /**
+   * Rendimiento en el gancho por toro (Fase 2.4) — el último escalón de la cadena.
+   *
+   * El destete dice cuánto creció el ternero; la res dice cuánto de eso se cobra. Un toro puede dar
+   * terneros pesados que rinden mal, y ahí el índice de destete solo cuenta media historia.
+   *
+   * El rendimiento se DERIVA (`computeDressingPct`: res ÷ último peso vivo) y no se lee de la
+   * columna `dressing_pct`, aunque exista: una columna guardada y un cálculo son dos fuentes del
+   * mismo número, y el día que difieran nadie sabrá cuál creer. Es la misma regla que usa el módulo
+   * de Faena, así que los dos muestran lo mismo por construcción.
+   *
+   * Sin peso vivo registrado no hay rendimiento posible: esas reses se cuentan aparte en vez de
+   * asumir un peso típico, que sesgaría al toro cuyos animales se pesaron menos.
+   */
+  async carcassBySire() {
+    const t = this.db.tenant;
+    const reses = await this.db.query<any>(
+      `SELECT cr.id, cr.hot_carcass_weight_kg::float AS res_kg, cr.slaughter_date,
+              a.sire_id, COALESCE(sa.name, si.value, 'Sin identificar') AS sire_name,
+              w.weight_kg::float AS vivo_kg
+         FROM carcass_records cr
+         JOIN animals a ON a.id = cr.animal_id AND a.deleted_at IS NULL AND a.sire_id IS NOT NULL
+         LEFT JOIN animals sa ON sa.id = a.sire_id AND sa.deleted_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT value FROM animal_identifiers x
+            WHERE x.animal_id = a.sire_id AND x.type = 'visual' AND x.deleted_at IS NULL
+            ORDER BY x.created_at DESC LIMIT 1) si ON true
+         -- Último peso vivo ANTES de la faena: pesar después no existe, y tomar el más reciente sin
+         -- esa condición podría agarrar una carga posterior mal fechada.
+         LEFT JOIN LATERAL (
+           SELECT weight_kg FROM weighings ww
+            WHERE ww.animal_id = a.id AND ww.deleted_at IS NULL AND ww.weighed_at::date <= cr.slaughter_date
+            ORDER BY ww.weighed_at DESC LIMIT 1) w ON true
+        WHERE cr.tenant_id = $1 AND cr.deleted_at IS NULL AND cr.hot_carcass_weight_kg IS NOT NULL`,
+      [t],
+    );
+
+    interface AcumToro {
+      nombre: string;
+      rindes: number[];
+      resKg: number[];
+      sinPesoVivo: number;
+    }
+    const porToro = new Map<string, AcumToro>();
+    for (const r of reses) {
+      const acc: AcumToro = porToro.get(r.sire_id) ?? { nombre: r.sire_name, rindes: [], resKg: [], sinPesoVivo: 0 };
+      acc.resKg.push(Number(r.res_kg));
+      let rinde: number | null = null;
+      try {
+        rinde = computeDressingPct(Number(r.res_kg), r.vivo_kg ?? null);
+      } catch {
+        // Res más pesada que el animal vivo: dato imposible. Se descarta como «sin rendimiento» en
+        // vez de propagar el error y dejar la pantalla entera en blanco por una fila mal cargada.
+        rinde = null;
+      }
+      if (rinde == null) acc.sinPesoVivo++;
+      else acc.rindes.push(rinde);
+      porToro.set(r.sire_id, acc);
+    }
+
+    const media = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 100) / 100 : null);
+
+    return {
+      total: reses.length,
+      sires: [...porToro.entries()]
+        .map(([sireId, v]) => ({
+          sireId,
+          sire_name: v.nombre,
+          n: v.resKg.length,
+          avg_carcass_kg: media(v.resKg),
+          avg_dressing_pct: media(v.rindes),
+          /** Reses sin peso vivo con el que derivar el rendimiento. Se informan, no se rellenan. */
+          without_live_weight: v.sinPesoVivo,
+          confidence: confidenceFor(v.rindes.length),
+        }))
+        .sort((a, b) => (b.avg_dressing_pct ?? 0) - (a.avg_dressing_pct ?? 0)),
     };
   }
 }

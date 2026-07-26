@@ -169,4 +169,73 @@ describe('genética — evaluación de toros por la progenie', () => {
     // Con 300 kg ese ternero habría disparado el índice de A si se hubiera colado.
     expect(despues.sires.find((s) => s.sireId === toroA)!.index).toBeLessThan(130);
   });
+
+  describe('rendimiento en el gancho', () => {
+    it('sin reses no inventa nada', async () => {
+      const r = await svc.carcassBySire();
+      expect(r.total).toBe(0);
+      expect(r.sires).toEqual([]);
+    });
+
+    it('el rendimiento se DERIVA del último peso vivo, no de la columna guardada', async () => {
+      // Se carga `dressing_pct` con un valor ABSURDO a propósito: si el servicio lo leyera de ahí,
+      // el test lo delata. Una columna guardada y un cálculo son dos fuentes del mismo número.
+      const novillo = (
+        await db.query<any>(
+          `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, birth_date, sire_id)
+           VALUES ($1,$2,$3,'M','active', CURRENT_DATE - 900, $4) RETURNING id`,
+          [db.tenant, farmId, speciesId, toroA],
+        )
+      )[0].id;
+      await db.query(`INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg) VALUES ($1,$2, CURRENT_DATE - 20, 400)`, [db.tenant, novillo]);
+      await db.query(
+        `INSERT INTO carcass_records (tenant_id, animal_id, slaughter_date, hot_carcass_weight_kg, dressing_pct)
+         VALUES ($1,$2, CURRENT_DATE - 10, 220, 99)`,
+        [db.tenant, novillo],
+      );
+      const r = await svc.carcassBySire();
+      const a = r.sires.find((x) => x.sireId === toroA)!;
+      expect(a.avg_dressing_pct).toBe(55); // 220 / 400, NO el 99 de la columna
+    });
+
+    it('una res sin peso vivo se cuenta aparte en vez de rellenarse', async () => {
+      // Asumir un peso típico sesgaría al toro cuyos animales se pesaron menos.
+      const sinPeso = (
+        await db.query<any>(
+          `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, birth_date, sire_id)
+           VALUES ($1,$2,$3,'M','active', CURRENT_DATE - 900, $4) RETURNING id`,
+          [db.tenant, farmId, speciesId, toroB],
+        )
+      )[0].id;
+      await db.query(`INSERT INTO carcass_records (tenant_id, animal_id, slaughter_date, hot_carcass_weight_kg) VALUES ($1,$2, CURRENT_DATE - 5, 230)`, [db.tenant, sinPeso]);
+      const r = await svc.carcassBySire();
+      const b = r.sires.find((x) => x.sireId === toroB)!;
+      expect(b.without_live_weight).toBe(1);
+      expect(b.avg_dressing_pct).toBeNull(); // no hay con qué derivarlo
+      expect(b.avg_carcass_kg).toBe(230); // el peso de res sí se conoce
+    });
+
+    it('una res más pesada que el animal vivo no rompe la pantalla entera', async () => {
+      // Dato imposible. Propagar el error dejaría la evaluación en blanco por UNA fila mal cargada.
+      const raro = (
+        await db.query<any>(
+          `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, birth_date, sire_id)
+           VALUES ($1,$2,$3,'M','active', CURRENT_DATE - 900, $4) RETURNING id`,
+          [db.tenant, farmId, speciesId, toroB],
+        )
+      )[0].id;
+      await db.query(`INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg) VALUES ($1,$2, CURRENT_DATE - 20, 300)`, [db.tenant, raro]);
+      await db.query(`INSERT INTO carcass_records (tenant_id, animal_id, slaughter_date, hot_carcass_weight_kg) VALUES ($1,$2, CURRENT_DATE - 10, 500)`, [db.tenant, raro]);
+      const r = await svc.carcassBySire();
+      expect(r.sires.length).toBeGreaterThan(0); // sigue respondiendo
+      expect(r.sires.find((x) => x.sireId === toroB)!.without_live_weight).toBe(2);
+    });
+
+    it('ordena por rendimiento: lo primero que se quiere ver', async () => {
+      const r = await svc.carcassBySire();
+      const conRinde = r.sires.filter((s) => s.avg_dressing_pct != null);
+      for (let i = 1; i < conRinde.length; i++)
+        expect(conRinde[i - 1].avg_dressing_pct!).toBeGreaterThanOrEqual(conRinde[i].avg_dressing_pct!);
+    });
+  });
 });
