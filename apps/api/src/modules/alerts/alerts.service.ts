@@ -126,6 +126,12 @@ interface Desired {
   /** Datos estructurados que la agenda (P4) reutiliza; `evaluate()` los ignora. */
   due_at?: string | null;
   tag?: string | null;
+  /**
+   * Clave de agrupación para alertas que son UN SOLO TRABAJO (misma tarea sanitaria, misma fecha).
+   * `undefined` = no agrupa, que es lo correcto para todo lo único por entidad. La calcula quien
+   * genera la alerta: parsear el título después se rompería en silencio al cambiar un texto.
+   */
+  group_key?: string | null;
 }
 
 /** Ítem de la agenda diaria (P4-1): hecho accionable estructurado del hato. */
@@ -202,18 +208,22 @@ export class AlertsService {
       seen.add(k);
       const ex = active.get(k);
       if (ex) {
+        // `group_key` también se refresca acá, y no es un detalle: si solo se fijara al INSERTAR,
+        // las alertas que ya estaban abiertas al desplegar se quedarían sin agrupar PARA SIEMPRE —
+        // hasta que la condición desapareciera y volviera a dispararse. Se vería como que el
+        // agrupado «no funciona», justo en la instalación que más alertas acumuladas tiene.
         await this.db.query(
-          `UPDATE alerts SET severity = $2, title = $3, message = $4, category = $5, updated_at = now() WHERE id = $1`,
-          [ex.id, d.severity, d.title, d.message, d.category],
+          `UPDATE alerts SET severity = $2, title = $3, message = $4, category = $5, group_key = $6, updated_at = now() WHERE id = $1`,
+          [ex.id, d.severity, d.title, d.message, d.category, d.group_key ?? null],
         );
         updated++;
       } else if (muted.has(k)) {
         // la PERSONA ya la resolvió/descartó hace poco: no la recreamos
       } else {
         await this.db.query(
-          `INSERT INTO alerts (tenant_id, rule_id, category, severity, title, message, related_type, related_id, status, triggered_at, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',now(),$9)`,
-          [t, ruleIds[d.code], d.category, d.severity, d.title, d.message, d.related_type, d.related_id, this.db.user],
+          `INSERT INTO alerts (tenant_id, rule_id, category, severity, title, message, related_type, related_id, status, triggered_at, created_by, group_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',now(),$9,$10)`,
+          [t, ruleIds[d.code], d.category, d.severity, d.title, d.message, d.related_type, d.related_id, this.db.user, d.group_key ?? null],
         );
         created++;
       }
@@ -290,9 +300,9 @@ export class AlertsService {
     const params: unknown[] = [t];
     if (status !== 'all' && status !== 'active') params.push(status);
 
-    return this.db.query(
+    const filas = await this.db.query<any>(
       `SELECT al.id, al.category, al.severity, al.title, al.message, al.related_type, al.related_id,
-              al.status, al.triggered_at, ai.value AS tag
+              al.status, al.triggered_at, al.group_key, ai.value AS tag
        FROM alerts al
        LEFT JOIN LATERAL (
          SELECT value FROM animal_identifiers x
@@ -303,6 +313,39 @@ export class AlertsService {
        LIMIT 300`,
       params,
     );
+
+    /**
+     * Agrupación de LECTURA: las alertas que son un solo trabajo se colapsan en una línea.
+     *
+     * Se hace acá y no en el motor a propósito. En la base siguen existiendo una por entidad, y eso
+     * es lo correcto: la agenda diaria marca animal por animal y la manga necesita saber de cuál se
+     * trata. Lo que sobra no son las alertas, es la LISTA que las repite veinte veces.
+     *
+     * El detalle no se pierde: `items` lleva las agrupadas para poder desplegarlas.
+     */
+    const grupos = new Map<string, any>();
+    const salida: any[] = [];
+    for (const f of filas) {
+      if (!f.group_key) {
+        salida.push({ ...f, count: 1, items: null });
+        continue;
+      }
+      const g = grupos.get(f.group_key);
+      if (!g) {
+        // La primera manda el encabezado; las siguientes solo suman. Como vienen ordenadas por
+        // severidad, la que encabeza es la más grave del grupo — que es la que hay que mirar.
+        const nuevo = { ...f, count: 1, items: [f] };
+        grupos.set(f.group_key, nuevo);
+        salida.push(nuevo);
+        continue;
+      }
+      g.count++;
+      g.items.push(f);
+    }
+    // El título del grupo dice cuántos son: «Desparasitación de destete · 10 animales» es una
+    // decisión; diez líneas iguales son ruido.
+    for (const g of grupos.values()) if (g.count > 1) g.title = `${g.title} · ${g.count} animales`;
+    return salida;
   }
 
   /** KPIs con evaluación read-through (mantiene alertas y badge frescos). */
@@ -549,6 +592,8 @@ export class AlertsService {
         related_id: tk.rid,
         due_at: iso(tk.due_date),
         tag: null,
+        // Diez terneros desparasitados el mismo día son UN trabajo, no diez decisiones.
+        group_key: `health_task_due|${tk.title}|${String(tk.due_date).slice(0, 10)}`,
       });
     }
 
