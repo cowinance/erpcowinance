@@ -251,13 +251,17 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
 
   async function run() {
     if (action === 'celo') {
-      await post(`/animals/${animal.id}/heats`, { occurred_at: new Date().toISOString().slice(0, 10) });
+      // Sin fecha: la pone el servidor, que la calcula en la zona de la finca. Mandarla desde acá
+      // era peor de dos maneras: se computaba en UTC (después de las 20:00 quedaba el día
+      // siguiente) y además DEGRADABA el instante real del celo a una fecha suelta.
+      await post(`/animals/${animal.id}/heats`, {});
       onSaved({ action: 'Celo', detail: 'registrado' });
     } else if (action === 'servicio') {
       await post(`/animals/${animal.id}/services`, { method, sire_id: sireId || undefined });
       onSaved({ action: 'Servicio', detail: method === 'ai' ? 'IA' : 'monta' });
     } else if (action === 'diagnostico') {
-      await post(`/pregnancy-diagnoses`, { animal_id: animal.id, result, method: 'palpation', diagnosis_date: new Date().toISOString().slice(0, 10) }, false);
+      // Idem: la fecha del diagnóstico la pone el servidor en hora de finca.
+      await post(`/pregnancy-diagnoses`, { animal_id: animal.id, result, method: 'palpation' }, false);
       onSaved({ action: 'Diagnóstico', detail: result === 'pregnant' ? 'preñada' : result === 'empty' ? 'vacía' : 'dudosa' });
     }
   }

@@ -60,7 +60,7 @@ export class GuidesService {
     const farmId = body?.from_farm_id ?? (await this.db.defaultFarm());
     await this.requireFarm(farmId);
     await this.requirePartner(body?.to_partner_id);
-    const issuedAt = body?.issued_at ?? new Date().toISOString().slice(0, 10);
+    const issuedAt = body?.issued_at ?? await this.db.today();
     const animalCount = body?.animal_count != null ? Number(body.animal_count) : null;
     if (animalCount != null && (!Number.isInteger(animalCount) || animalCount < 0)) throw new BadRequestException({ code: 'traceability.invalid_count', title: 'animal_count debe ser un entero ≥ 0' });
     return this.db.one(

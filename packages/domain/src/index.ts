@@ -48,3 +48,5 @@ export * from './machinery';
 export * from './inventory';
 // Agricultura — rinde por hectárea derivado, índice por cultivo y margen con precio real (Fase 4).
 export * from './agriculture';
+// Tiempo — fecha calendario en la zona de la finca (el día de trabajo no es el de UTC).
+export * from './time';

@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 import { Field } from '@/components/Field';
+import { farmToday } from '@/lib/date';
 
 interface Station {
   id: string;
@@ -67,7 +68,7 @@ export function ClimaView({ summary, stations }: { summary: Summary; stations: S
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [stationId, setStationId] = useState(stations[0]?.id ?? '');
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(farmToday());
   const [valores, setValores] = useState<Record<string, string>>({});
   const [nuevaEstacion, setNuevaEstacion] = useState({ name: '', serial_number: '' });
 

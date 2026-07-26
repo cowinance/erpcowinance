@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import {
+import { addFarmDays,
   type DailyWeather,
   type ProductionSystem,
   dailyThi,
@@ -197,7 +197,7 @@ export class WeatherService {
 
   /** Serie diaria: una fila por día con cada métrica agregada según corresponda. */
   async daily(params: RangeParams = {}): Promise<(DailyWeather & { thi: number | null; heat_stress: string | null })[]> {
-    const { from, to } = this.range(params);
+    const { from, to } = await this.range(params);
     const agregados = METRIC_LIST.map(
       (m) => `${sqlAggregate(DAILY_AGGREGATE[m])}(value) FILTER (WHERE metric = '${m}') AS ${m}`,
     ).join(',\n              ');
@@ -225,7 +225,7 @@ export class WeatherService {
 
   /** Indicadores del período (los cuatro que pide el catálogo) + la serie que los sustenta. */
   async summary(params: RangeParams = {}) {
-    const { from, to } = this.range(params);
+    const { from, to } = await this.range(params);
     const days = await this.daily({ ...params, from, to });
     const summary = summarizeWeather(days, from, to, {
       system: params.system,
@@ -269,8 +269,8 @@ export class WeatherService {
     // Se mira una ventana de 2 días y se toma el último con datos: una estación que vuelca a la
     // madrugada dejaría "hoy" vacío hasta el mediodía, y una alerta de calor que aparece a las
     // 14 h llega tarde.
-    const hoy = new Date().toISOString().slice(0, 10);
-    const ayer = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const hoy = await this.db.today();
+    const ayer = addFarmDays(await this.db.today(), -1);
     const dias = await this.daily({ from: ayer, to: hoy, system });
     const ultimo = dias.at(-1);
     if (!ultimo) return null;
@@ -286,9 +286,9 @@ export class WeatherService {
   }
 
   /** Rango por defecto: los últimos 30 días. */
-  private range(params: RangeParams): { from: string; to: string } {
-    const to = params.to ?? new Date().toISOString().slice(0, 10);
-    const from = params.from ?? new Date(new Date(to).getTime() - 29 * 86400000).toISOString().slice(0, 10);
+  private async range(params: RangeParams): Promise<{ from: string; to: string }> {
+    const to = params.to ?? (await this.db.today());
+    const from = params.from ?? addFarmDays(to, -29);
     if (from > to)
       throw new BadRequestException({ code: 'weather.invalid_range', title: 'La fecha inicial es posterior a la final' });
     return { from, to };

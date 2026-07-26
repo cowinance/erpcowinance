@@ -39,7 +39,7 @@ export class InvoicesService {
     const partnerId = kind === 'sale' ? doc.customer_partner_id : doc.supplier_partner_id;
     const t = this.db.tenant;
     const companyId = await this.companyId();
-    const issueDate = body?.issue_date ?? new Date().toISOString().slice(0, 10);
+    const issueDate = body?.issue_date ?? await this.db.today();
 
     // D4: una sola factura vigente (no anulada) por documento y dirección.
     const col = kind === 'sale' ? 'sale_id' : 'purchase_id';

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { computeMachineCost, groupMachinesByMeter } from '@cowinance/domain';
+import { addFarmDays, computeMachineCost, groupMachinesByMeter } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 const TYPES = ['tractor', 'harvester', 'truck', 'atv', 'mixer', 'implement', 'other'];
@@ -116,8 +116,8 @@ export class MachineryService {
    * verdad sobre el mismo litro.
    */
   async costs(params: { from?: string; to?: string } = {}) {
-    const to = params.to ?? new Date().toISOString().slice(0, 10);
-    const from = params.from ?? new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const to = params.to ?? await this.db.today();
+    const from = params.from ?? addFarmDays(to, -365);
     const t = this.db.tenant;
 
     const rows = await this.db.query<any>(

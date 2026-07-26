@@ -50,7 +50,10 @@ export class AuthInterceptor implements NestInterceptor {
 
     return from(
       this.db.tx(async (q) => {
-        await q.query(`SELECT set_config('app.tenant_id', $1, true)`, [payload.ten]);
+        // Aislamiento (RLS) + zona horaria de la finca, juntos. La zona es lo que hace que
+        // `CURRENT_DATE` y los casts a fecha del sistema entero hablen del día de la finca y no del
+        // de UTC: sin esto, después de las 20:00 en Venezuela «hoy» era mañana.
+        await this.db.applyTenantContext(q, payload.ten);
         return requestContext.run(
           { userId: payload.sub, tenantId: payload.ten, role: payload.role, email: payload.email, name: payload.name, q },
           () => lastValueFrom(next.handle()),

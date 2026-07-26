@@ -28,7 +28,7 @@ export class TaskRulesService {
     const lotReviewDays = opts.lotReviewDays ?? 30;
     const t = this.db.tenant;
     const ctx: TaskContext = { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user };
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await this.db.today();
 
     return this.db.tx(async (q) => {
       const created: Record<string, number> = {};
@@ -178,7 +178,7 @@ export class TaskRulesService {
     const interval = Number(body?.interval_days);
     if (!Number.isFinite(interval) || interval <= 0) throw new BadRequestException({ code: 'recurrence.invalid_interval', title: 'interval_days debe ser > 0' });
     const anchor = body?.anchor === 'completed_at' ? 'completed_at' : 'due_date';
-    const nextDue = (body?.next_due ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const nextDue = (body?.next_due ?? await this.db.today()).slice(0, 10);
     const ctx: TaskContext = { origin: 'rest', emitServerOrigin: true, actorUserId: this.db.user };
 
     return this.db.tx(async (q) => {

@@ -69,7 +69,9 @@ export class LedgerService {
       );
       if (!entry) throw new NotFoundException({ code: 'finance.entry_not_found', title: 'Asiento no encontrado' });
       if (entry.status === 'reversed') throw new ConflictException({ code: 'finance.already_reversed', title: 'El asiento ya fue reversado' });
-      const entryDate = body?.entry_date ?? new Date().toISOString().slice(0, 10);
+      // `q`: estamos DENTRO de la transacción. Sin pasarlo, en PGlite la consulta de la zona
+      // espera a que la tx cierre y la tx espera a la consulta.
+      const entryDate = body?.entry_date ?? (await this.db.today(q));
       const periodId = await this.requireOpenPeriod(q, entry.company_id, entryDate);
       const lines = await q.query<{ account_id: string; debit: number; credit: number; cost_center_id: string | null; description: string | null }>(
         `SELECT account_id, debit::float AS debit, credit::float AS credit, cost_center_id, description FROM journal_lines WHERE entry_id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,

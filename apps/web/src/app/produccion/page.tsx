@@ -8,16 +8,16 @@ import { ProduccionView } from './ProduccionView';
  * manga offline). Server Component para la carga inicial (período 12m, todos los lotes); los
  * filtros y el re-fetch viven en ProduccionView. Comparte endpoints con la pestaña de Reportes.
  */
-const today = () => new Date().toISOString().slice(0, 10);
-const monthsAgo = (n: number) => new Date(Date.now() - n * 30.44 * 86400000).toISOString().slice(0, 10);
+// El rango por defecto lo decide la API, que sabe en qué zona empieza el día de la finca; acá se
+// lee el que efectivamente usó (viene en la respuesta). Calcularlo en el servidor web daba la fecha
+// de ESA máquina —UTC en producción—, así que después de las 20:00 el período arrancaba un día
+// adelantado.
 
 export default async function ProduccionPage() {
-  const from = monthsAgo(12);
-  const to = today();
   const [lots, production, series, condition] = await Promise.all([
     apiSafe<any[]>('/lots'),
-    apiSafe<any>(`/reports/production?from=${from}&to=${to}`),
-    apiSafe<any>(`/reports/production-weight-series?from=${from}&to=${to}`),
+    apiSafe<any>('/reports/production'),
+    apiSafe<any>('/reports/production-weight-series'),
     apiSafe<any>('/reports/condition-distribution'),
   ]);
 
@@ -33,7 +33,7 @@ export default async function ProduccionPage() {
       </div>
       <ProduccionView
         lots={lots ?? []}
-        initial={{ from, to, production, series, condition }}
+        initial={{ from: production?.from, to: production?.to, production, series, condition }}
       />
     </div>
   );

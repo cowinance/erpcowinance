@@ -124,7 +124,10 @@ export class AuthService {
 
   async me() {
     const ctx = requestContext.getStore()!;
-    const org = await this.db.one<any>(`SELECT id, name FROM organizations WHERE id = $1`, [ctx.tenantId]);
+    // `timezone` viaja acá porque la web necesita saber en qué zona empieza el día de la finca:
+    // los selectores de fecha y los «hoy» del cliente se calculaban en UTC y después de las 20:00
+    // proponían el día siguiente.
+    const org = await this.db.one<any>(`SELECT id, name, timezone FROM organizations WHERE id = $1`, [ctx.tenantId]);
     // Estado de verificación de email (P1.2/P1.3): informativo, no bloquea el
     // acceso (ADR-0011 C). La UI lo usa para el banner "verificá tu email".
     const user = await this.db.one<{ email_verified_at: string | null }>(

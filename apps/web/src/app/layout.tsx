@@ -36,6 +36,7 @@ async function sessionContext() {
     return {
       userName: me.name as string,
       orgName: me.organization?.name as string,
+      farmTimeZone: (me.organization?.timezone as string) ?? null,
       farmName: farms?.[0]?.name as string,
       openAlerts: (alertKpis?.open ?? 0) as number,
       criticalAlerts: (alertKpis?.critical ?? 0) as number,
@@ -68,7 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     );
 
   return (
-    <html lang="es" data-density="standard" className={inter.variable}>
+    <html lang="es" data-density="standard" data-farm-tz={session?.farmTimeZone ?? undefined} className={inter.variable}>
       <body className="font-sans text-[14px] leading-5">
         <div className="flex min-h-screen">
           <Sidebar

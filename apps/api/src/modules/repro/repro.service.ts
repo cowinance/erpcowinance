@@ -212,7 +212,7 @@ export class ReproService {
     if (!['pregnant', 'empty', 'doubtful'].includes(body.result))
       throw new BadRequestException({ code: 'diagnosis.invalid_result', title: "result debe ser 'pregnant', 'empty' o 'doubtful'" });
     const animal = await this.requireFemale(body.animal_id);
-    const diagnosisDate = (body.diagnosis_date ?? new Date().toISOString()).slice(0, 10);
+    const diagnosisDate = (body.diagnosis_date ? String(body.diagnosis_date).slice(0, 10) : await this.db.today());
 
     if (body.result === 'doubtful') {
       // Dudosa: no crea/cierra preñez; deja traza y agenda un RECONTROL (tarea) a los 14 días.
@@ -294,7 +294,7 @@ export class ReproService {
   async abortion(body: any, idempotencyKey?: string) {
     if (!body?.animal_id) throw new BadRequestException({ code: 'abortion.missing_fields', title: 'animal_id es obligatorio' });
     const animal = await this.requireFemale(body.animal_id);
-    const occurredAt = (body.occurred_at ?? new Date().toISOString()).slice(0, 10);
+    const occurredAt = (body.occurred_at ? String(body.occurred_at).slice(0, 10) : await this.db.today());
     return this.db.tx(async (q) => {
       const open = await q.one<any>(
         `UPDATE pregnancies SET status = 'aborted', closed_at = $3, loss_cause = $4, loss_gestational_days = $5, updated_at = now()
@@ -317,7 +317,7 @@ export class ReproService {
     if (!body?.dam_id)
       throw new BadRequestException({ code: 'calving.missing_fields', title: 'dam_id es obligatorio' });
     const dam = await this.requireFemale(body.dam_id);
-    const calvingDate = (body.calving_date ?? new Date().toISOString()).slice(0, 10);
+    const calvingDate = (body.calving_date ? String(body.calving_date).slice(0, 10) : await this.db.today());
     const offspring: any[] = Array.isArray(body.offspring) && body.offspring.length ? body.offspring : [{ sex: 'F', vitality: 'live' }];
     const calvingId = idempotencyKey ? this.deriveId(idempotencyKey, body.dam_id) : randomUUID();
     const config = await this.reproConfig();
@@ -577,7 +577,7 @@ export class ReproService {
     }
     const rows = await this.db.query<any>(`${this.reproFactsSql(lotFilter)} ORDER BY ai.value NULLS LAST`, params);
     const config = await this.reproConfig();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await this.db.today();
 
     const counts: Record<string, number> = { total: rows.length };
     const out = rows.map((r) => {
@@ -603,7 +603,7 @@ export class ReproService {
     const rows = await this.db.query<any>(`${this.reproFactsSql(' AND a.id = $2')}`, [this.db.tenant, animalId]);
     if (!rows.length) return null;
     const config = await this.reproConfig();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await this.db.today();
     const r = rows[0];
     const state = computeReproStatus(this.factsOf(r), config, today);
     return {
@@ -628,7 +628,7 @@ export class ReproService {
   async toPrepare(withinDays = 7) {
     const rows = await this.db.query<any>(this.reproFactsSql(), [this.db.tenant]);
     const config = await this.reproConfig();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await this.db.today();
     const out = rows
       .map((r) => ({ r, state: computeReproStatus(this.factsOf(r), config, today) }))
       .filter(({ state }) => state.daysPostpartum != null && state.expectedDueDate == null
@@ -659,7 +659,7 @@ export class ReproService {
     const rows = await this.db.query<any>(this.reproFactsSql(), [this.db.tenant]);
     const config = await this.reproConfig();
     const prepDays = await this.ruleDays('service_prep_due', 7);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await this.db.today();
     const out: any[] = [];
     let vwpReady = 0;
     let prepDue = 0;
@@ -863,7 +863,7 @@ export class ReproService {
       `SELECT animal_id, eligibility FROM repro_protocol_assignment_animals WHERE assignment_id=$1 AND tenant_id=$2`,
       [assignmentId, t],
     );
-    const occurredAt = (body.occurred_at ?? new Date().toISOString()).slice(0, 10);
+    const occurredAt = (body.occurred_at ? String(body.occurred_at).slice(0, 10) : await this.db.today());
     const kind = step.kind ?? 'other';
 
     let eventsCreated = 0;

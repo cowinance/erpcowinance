@@ -4,6 +4,7 @@ import { PGliteDriver, PostgresDriver, type SqlDriver, type TxHandle } from './d
 import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { bootstrapCatalogs, seedDemo } from './seed';
+import { farmToday, safeTimeZone } from '@cowinance/domain';
 import { requestContext } from '../common/request-context';
 import { RLS_TABLES, rlsMigration } from './rls';
 import { checksumOf, loadMigrations, recordBaseline, resolveDbPath, runMigrations } from './migrations';
@@ -233,6 +234,81 @@ export class DbService implements OnModuleInit {
     if (!farm) throw new Error(`El tenant ${t} no tiene fincas`);
     this.farmCache.set(t, farm.id);
     return farm.id;
+  }
+
+  private tzCache = new Map<string, string>();
+
+  /**
+   * Zona horaria de la organización: la que define cuándo empieza y termina el día de trabajo.
+   *
+   * Se cachea en memoria por tenant como `defaultFarm`. La alternativa —una consulta por request—
+   * sería un round-trip extra en TODAS las requests para un dato que cambia una vez en la vida de
+   * la finca; la otra —meterla en el JWT— la dejaría vieja en los tokens ya emitidos y no hay forma
+   * de invalidarlos.
+   *
+   * Si la organización no tiene una zona usable, cae a UTC en vez de lanzar: una zona mal cargada
+   * no puede impedir que la app funcione.
+   */
+  async timeZone(q?: Q): Promise<string> {
+    const t = this.tenant;
+    const cached = this.tzCache.get(t);
+    if (cached) return cached;
+    // `q` cuando el llamador ya está DENTRO de una transacción. En PGlite la conexión es única: una
+    // consulta suelta mientras hay una tx abierta se queda esperando a que cierre, y la tx espera a
+    // la consulta. Se descubrió como siete tests colgados a los 5 segundos.
+    const org = q
+      ? await q.one<{ timezone: string | null }>(`SELECT timezone FROM organizations WHERE id = $1`, [t])
+      : await this.one<{ timezone: string | null }>(`SELECT timezone FROM organizations WHERE id = $1`, [t]);
+    const tz = safeTimeZone(org?.timezone);
+    this.tzCache.set(t, tz);
+    return tz;
+  }
+
+  /**
+   * HOY en la finca (`YYYY-MM-DD`).
+   *
+   * Es el reemplazo de `new Date().toISOString().slice(0, 10)`, que es UTC siempre: en Venezuela
+   * fechaba al día siguiente todo lo cargado después de las 20:00. Cualquier servicio que necesite
+   * "hoy" para un dato de negocio tiene que pedirlo acá, no calcularlo.
+   */
+  async today(q?: Q): Promise<string> {
+    return farmToday(await this.timeZone(q));
+  }
+
+  /**
+   * Fija el contexto del tenant en la transacción: aislamiento (RLS) y zona horaria.
+   *
+   * Las dos cosas juntas y en un solo lugar a propósito. Iban separadas —el `set_config` de
+   * `app.tenant_id` estaba copiado en el interceptor, el importador y el registro— y la zona no se
+   * fijaba en ninguno, así que los 95 `CURRENT_DATE` del sistema corrían en la del servidor. Con un
+   * único punto, agregar contexto de sesión deja de ser "acordarse de tres lugares".
+   *
+   * `set_config('TimeZone', …)` y no `SET LOCAL TIME ZONE`: el segundo no admite parámetros y
+   * habría que interpolar la cadena en el SQL. El valor viene de la base, pero interpolar lo que
+   * salió de una columna editable es exactamente el hábito que después se copia donde sí importa.
+   */
+  async applyTenantContext(q: Q, tenantId: string): Promise<void> {
+    await q.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantId]);
+    // La zona se resuelve DENTRO de la misma transacción, con el handle: ver `timeZoneOf`.
+    await q.query(`SELECT set_config('TimeZone', $1, true)`, [await this.timeZoneOf(q, tenantId)]);
+  }
+
+  /**
+   * Zona de un tenant que todavía NO es el de la request.
+   *
+   * La usa el interceptor, que corre antes de que exista `requestContext`. **`q` es obligatorio**:
+   * en ese momento la transacción de la request ya está abierta, y en PGlite la conexión es única,
+   * así que una consulta suelta esperaría a que la tx cierre mientras la tx espera a la consulta.
+   * Colgaba TODAS las requests autenticadas y ningún test lo vio: los tests no pasan por el
+   * interceptor. Lo encontró levantar la app.
+   */
+  async timeZoneOf(q: Q, tenantId: string): Promise<string> {
+    const cached = this.tzCache.get(tenantId);
+    if (cached) return cached;
+    const org = await q.one<{ timezone: string | null }>(`SELECT timezone FROM organizations WHERE id = $1`, [tenantId]);
+    const tz = safeTimeZone(org?.timezone);
+    this.tzCache.set(tenantId, tz);
+    return tz;
   }
 
   async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {

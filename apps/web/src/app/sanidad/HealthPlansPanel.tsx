@@ -14,6 +14,7 @@ import { CalendarClock, Check, ChevronRight, Loader2, ClipboardList } from 'luci
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
+import { farmToday } from '@/lib/date';
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 
@@ -23,7 +24,7 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
   const [tasks, setTasks] = useState<any[]>([]);
   const [openPlan, setOpenPlan] = useState<string | null>(null);
   const [target, setTarget] = useState('all');
-  const [anchor, setAnchor] = useState(new Date().toISOString().slice(0, 10));
+  const [anchor, setAnchor] = useState(farmToday());
   const [applying, setApplying] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);

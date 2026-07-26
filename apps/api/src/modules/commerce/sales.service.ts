@@ -84,7 +84,7 @@ export class SalesService {
     const { lines, totals } = this.parseLines(body?.lines);
     const company = await this.resolveCompany();
     const currency = (body?.currency ?? company.currency) as string;
-    const saleDate = body?.sale_date ?? new Date().toISOString().slice(0, 10);
+    const saleDate = body?.sale_date ?? await this.db.today();
     const t = this.db.tenant;
 
     return this.db.tx(async (q) => {

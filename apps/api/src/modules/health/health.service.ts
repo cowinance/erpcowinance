@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
-import { HealthApplicationError } from '@cowinance/domain';
+import { addFarmDays, asFarmDate, HealthApplicationError } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
 import { InventoryService } from '../inventory/inventory.service';
@@ -110,7 +110,7 @@ export class HealthService {
       throw new BadRequestException({ code: 'vaccination.missing_fields', title: 'animal_id(s) y product_id son obligatorios' });
     const appliedAt = body.applied_at ?? new Date().toISOString();
     const nextDue = body.next_due_days
-      ? new Date(new Date(appliedAt).getTime() + Number(body.next_due_days) * 86400000).toISOString().slice(0, 10)
+      ? addFarmDays(asFarmDate(appliedAt, await this.db.timeZone()), Number(body.next_due_days))
       : (body.next_due_date ?? null);
     const baseKey = idempotencyKey ?? randomUUID();
 
@@ -178,7 +178,7 @@ export class HealthService {
     await this.requireDiagnosisOrProductValid('vaccine', body.product_id);
     const appliedAt = body.applied_at ?? new Date().toISOString();
     const nextDue = body.next_due_days
-      ? new Date(new Date(appliedAt).getTime() + Number(body.next_due_days) * 86400000).toISOString().slice(0, 10)
+      ? addFarmDays(asFarmDate(appliedAt, await this.db.timeZone()), Number(body.next_due_days))
       : (body.next_due_date ?? null);
     const animals = await this.resolveTargetAnimals(body);
     const baseKey = idempotencyKey ?? randomUUID();

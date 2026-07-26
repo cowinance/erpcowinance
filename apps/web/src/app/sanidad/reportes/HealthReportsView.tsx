@@ -13,6 +13,7 @@ import { formatDate } from '@/lib/format';
 import { ArrowLeft, Download, Loader2 } from 'lucide-react';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
+import { farmToday, addFarmDays } from '@/lib/date';
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 const money = (n: number) => (n ?? 0).toLocaleString('es-AR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -27,9 +28,12 @@ const TABS: [Tab, string][] = [
   ['effectiveness', 'Efectividad'],
 ];
 
-export function HealthReportsView({ today }: { today: string }) {
+export function HealthReportsView() {
+  // El hoy lo calcula el cliente, que tiene la zona de la finca en el <html>. Venía del Server
+  // Component, donde se computaba en la zona de ESA máquina (UTC en producción).
+  const today = farmToday();
   const [tab, setTab] = useState<Tab>('incidence');
-  const [from, setFrom] = useState(iso(new Date(new Date(today).getTime() - 90 * 86400000)));
+  const [from, setFrom] = useState(addFarmDays(today, -90));
   const [to, setTo] = useState(today);
   const [mortBy, setMortBy] = useState<'cause' | 'lot' | 'period'>('cause');
   const [data, setData] = useState<any>(null);

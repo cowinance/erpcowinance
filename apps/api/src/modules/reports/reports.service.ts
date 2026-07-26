@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 // El resumen de la finca (Fase 5) COMPONE estos servicios, no repite sus consultas: cada número
 // tiene un solo dueño y acá se lo pide, para que el margen de este reporte y el de Costos no puedan
@@ -54,8 +55,15 @@ const promedioPonderado = (pares: { valor: number | null | undefined; peso: numb
   return Math.round((hay.reduce((s, p) => s + (p.valor as number) * p.peso, 0) / peso) * 1000) / 1000;
 };
 
-const isoDate = (s?: string): string => {
-  const d = s ? new Date(s) : new Date();
+/**
+ * Valida y normaliza una fecha del request. El `fallback` es obligatorio a propósito: la versión
+ * anterior caía en `new Date()` —UTC— cuando no venía nada, así que después de las 20:00 en la
+ * finca los reportes arrancaban en el día siguiente. Ahora quien llama pasa el hoy de la finca y
+ * no hay forma de olvidarse.
+ */
+const isoDate = (s: string | undefined, fallback: string): string => {
+  if (!s) return fallback;
+  const d = new Date(s);
   if (isNaN(d.getTime())) throw new BadRequestException({ code: 'reports.invalid_date', title: `Fecha inválida: ${s}` });
   return d.toISOString().slice(0, 10);
 };
@@ -89,8 +97,9 @@ export class ReportsService {
    * lo dice. Un cierre de ejercicio que no abre porque Maquinaria está vacía sería inservible.
    */
   async farmSummary(params: { from?: string; to?: string } = {}) {
-    const to = isoDate(params.to);
-    const from = isoDate(params.from ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
+    const hoy = await this.db.today();
+    const to = isoDate(params.to, hoy);
+    const from = isoDate(params.from, addFarmDays(to, -365));
     const rango = { from, to };
 
     /** Un bloque que falla se informa como ausente; no tumba el resumen entero. */
@@ -202,7 +211,8 @@ export class ReportsService {
    * fechas del ciclo de vida — el mismo número que daría reproyectar eventos.
    */
   async herdInventory(atRaw?: string, groupBy: 'category' | 'lot' | 'sex' = 'category') {
-    const at = isoDate(atRaw);
+    const hoy = await this.db.today();
+    const at = isoDate(atRaw, hoy);
     const dimension =
       groupBy === 'lot'
         ? { col: 'COALESCE(l.name, $3)', join: 'LEFT JOIN lots l ON l.id = a.current_lot_id', label: 'Lote', fallback: 'Sin lote' }
@@ -230,8 +240,9 @@ export class ReportsService {
 
   /** Altas y bajas del período, reconstruidas por el ciclo de vida. */
   async herdMovements(fromRaw?: string, toRaw?: string) {
-    const to = isoDate(toRaw);
-    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
+    const hoy = await this.db.today();
+    const to = isoDate(toRaw, hoy);
+    const from = isoDate(fromRaw, addFarmDays(to, -365));
     const t = this.db.tenant;
 
     const [births, purchases, exits] = await Promise.all([
@@ -278,8 +289,9 @@ export class ReportsService {
 
   /** Producción del período: pesajes y GDP por lote. */
   async production(fromRaw?: string, toRaw?: string) {
-    const to = isoDate(toRaw);
-    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 90 * 86400000).toISOString());
+    const hoy = await this.db.today();
+    const to = isoDate(toRaw, hoy);
+    const from = isoDate(fromRaw, addFarmDays(to, -90));
     const rows = await this.db.query<any>(
       `SELECT COALESCE(l.name, 'Sin lote') AS lote,
               count(*)::int AS pesajes,
@@ -305,8 +317,9 @@ export class ReportsService {
    * base. Todo excluye `deleted_at` y acota por fecha.
    */
   async health(fromRaw?: string, toRaw?: string) {
-    const to = isoDate(toRaw);
-    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 90 * 86400000).toISOString());
+    const hoy = await this.db.today();
+    const to = isoDate(toRaw, hoy);
+    const from = isoDate(fromRaw, addFarmDays(to, -90));
     const t = this.db.tenant;
     const [vac, vacByProduct, treat, treatByRoute, mort, activos] = await Promise.all([
       this.db.one<any>(
@@ -369,8 +382,9 @@ export class ReportsService {
    * pesajes capturados offline por el móvil.
    */
   async productionWeightSeries(fromRaw?: string, toRaw?: string, lotId?: string) {
-    const to = isoDate(toRaw);
-    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
+    const hoy = await this.db.today();
+    const to = isoDate(toRaw, hoy);
+    const from = isoDate(fromRaw, addFarmDays(to, -365));
     const params: unknown[] = [this.db.tenant, from, to];
     let lotFilter = '';
     if (lotId) {
@@ -395,7 +409,8 @@ export class ReportsService {
    * predicado de "animal presente a fecha" del inventario. Animales sin CC no cuentan.
    */
   async conditionDistribution(atRaw?: string, lotId?: string) {
-    const at = isoDate(atRaw);
+    const hoy = await this.db.today();
+    const at = isoDate(atRaw, hoy);
     const params: unknown[] = [this.db.tenant, at];
     let lotFilter = '';
     if (lotId) {
@@ -450,8 +465,9 @@ export class ReportsService {
    * eliminados, fechas fuera de rango o datos importados sin historial completo quedan fuera.
    */
   async reproduction(fromRaw?: string, toRaw?: string) {
-    const to = isoDate(toRaw);
-    const from = isoDate(fromRaw ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
+    const hoy = await this.db.today();
+    const to = isoDate(toRaw, hoy);
+    const from = isoDate(fromRaw, addFarmDays(to, -365));
     const t = this.db.tenant;
     const [services, diagnoses, negatives, calvings, weanings, iep] = await Promise.all([
       this.db.one<any>(

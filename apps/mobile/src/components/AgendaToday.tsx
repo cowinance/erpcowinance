@@ -12,6 +12,7 @@ import { Card } from './ui';
 import { useSync, type AgendaItem } from '@/sync/SyncContext';
 import { relativeTime } from '@/lib/relative-time';
 import { T } from '@/theme';
+import { farmToday } from '../lib/date';
 
 const GROUPS: { key: 'overdue' | 'today' | 'upcoming'; label: string }[] = [
   { key: 'overdue', label: 'Vencidos' },
@@ -38,7 +39,7 @@ export function AgendaToday() {
   const sync = useSync();
   const [, setTick] = useState(0); // fuerza re-lectura tras completar una tarea offline
   const agendaAt = sync.agendaAt;
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = farmToday();
 
   // Cross-ref con el store LOCAL (P6-3.c): el snapshot cacheado no se refresca offline, así
   // que se ocultan los ítems de tarea que ya están completadas/canceladas localmente (el put

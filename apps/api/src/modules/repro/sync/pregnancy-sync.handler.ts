@@ -75,7 +75,7 @@ export class PregnancySyncHandler implements SyncHandler, OnModuleInit {
     const touchesExpectedDue = !existing ? 'expected_due_date' in op.fields : changed.includes('expected_due_date');
     if (touchesExpectedDue) {
       const animalId = (existing?.animal_id ?? op.fields['animal_id']) as string | undefined;
-      const diagnosisDate = ((op.fields['diagnosis_date'] as string) ?? existing?.diagnosis_date ?? new Date().toISOString().slice(0, 10)) as string;
+      const diagnosisDate = ((op.fields['diagnosis_date'] as string) ?? existing?.diagnosis_date ?? (await this.db.today(q))) as string;
       if (typeof animalId === 'string') {
         const lastService = await q.one<any>(
           `SELECT occurred_at FROM breeding_events
@@ -130,7 +130,7 @@ export class PregnancySyncHandler implements SyncHandler, OnModuleInit {
           op.rowId,
           t,
           animalId,
-          (op.fields['diagnosis_date'] as string) ?? new Date().toISOString().slice(0, 10),
+          (op.fields['diagnosis_date'] as string) ?? (await this.db.today(q)),
           op.fields['method'] ?? 'ultrasound',
           expectedDueToWrite,
           op.fields['status'] ?? 'open',

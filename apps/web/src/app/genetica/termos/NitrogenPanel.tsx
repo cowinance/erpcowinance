@@ -6,6 +6,7 @@ import { API_URL, authHeaders } from '@/lib/api';
 import { Card, CardTitle } from '@/components/ui';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
+import { farmToday } from '@/lib/date';
 
 interface Estado {
   level_cm: number | null;
@@ -52,7 +53,7 @@ export function NitrogenPanel({ data }: { data: Nitrogeno }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [nivel, setNivel] = useState('');
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(farmToday());
   const [litros, setLitros] = useState('');
   const [nivelPost, setNivelPost] = useState('');
   const [lead, setLead] = useState(String(data.lead_days));
@@ -164,7 +165,7 @@ export function NitrogenPanel({ data }: { data: Nitrogeno }) {
                 call(
                   'POST',
                   `/genetics/cryo/tanks/${data.tank_id}/nitrogen/refills`,
-                  { refill_date: new Date().toISOString().slice(0, 10), liters: litros, level_after_cm: nivelPost },
+                  { refill_date: farmToday(), liters: litros, level_after_cm: nivelPost },
                   () => {
                     setLitros('');
                     setNivelPost('');

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { computeBreedingKpis } from '@cowinance/domain';
+import { addFarmDays, computeBreedingKpis } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /** Tipos de evento que cuentan como servicio/entore (excluye celo y sincronización). */
@@ -17,8 +17,8 @@ export class BreedingService {
   constructor(private readonly db: DbService) {}
 
   async summary(fromRaw?: string, toRaw?: string) {
-    const to = toRaw ?? new Date().toISOString().slice(0, 10);
-    const from = fromRaw ?? new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const to = toRaw ?? await this.db.today();
+    const from = fromRaw ?? addFarmDays(to, -365);
     const placeholders = SERVICE_TYPES.map((_, i) => `$${i + 4}`).join(',');
     const rows = await this.db.query<any>(
       `WITH serviced AS (

@@ -60,7 +60,7 @@ export class PaymentsService {
     const t = this.db.tenant;
     const companyId = await this.companyId();
     const currency = await this.currency(companyId);
-    const paymentDate = body?.payment_date ?? new Date().toISOString().slice(0, 10);
+    const paymentDate = body?.payment_date ?? await this.db.today();
 
     return this.db.tx(async (q) => {
       const payment = await q.one<{ id: string }>(

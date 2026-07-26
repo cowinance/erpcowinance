@@ -7,6 +7,7 @@ import { Card, CardTitle } from '@/components/ui';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
+import { farmToday } from '@/lib/date';
 
 interface Employee {
   id: string;
@@ -37,7 +38,7 @@ interface SummaryRow {
   entries: number;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => farmToday();
 
 export function WorkLogsView({ logs, summary, employees, tasks, farms }: { logs: Log[]; summary: SummaryRow[]; employees: Employee[]; tasks: Task[]; farms: Farm[] }) {
   const router = useRouter();

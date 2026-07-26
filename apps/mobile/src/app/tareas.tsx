@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSync, TaskRow } from '@/sync/SyncContext';
 import { Button } from '@/components/ui';
 import { T } from '@/theme';
+import { farmToday, addFarmDays } from '../lib/date';
 
 const PRIORITIES: [string, string][] = [
   ['low', 'Baja'],
@@ -50,7 +51,7 @@ const RESCHEDULE: { label: string; days: number | null }[] = [
   { label: '+7 d', days: 7 },
   { label: 'Sin fecha', days: null },
 ];
-const dateIn = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+const dateIn = (days: number) => addFarmDays(farmToday(), days);
 
 export default function TareasScreen() {
   const sync = useSync();
@@ -67,7 +68,7 @@ export default function TareasScreen() {
   const open = all.filter((t) => t.status === 'pending' || t.status === 'in_progress');
   const visible = mineOnly && myId ? open.filter((t) => t.assigned_to === myId) : open;
   const doneSession = all.filter((t) => t.status === 'done');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = farmToday();
   const mineCount = myId ? open.filter((t) => t.assigned_to === myId).length : 0;
 
   function create() {

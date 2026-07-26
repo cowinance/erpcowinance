@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { computeGrazingMetrics, computePaddockPerformance, summarizeWeather } from '@cowinance/domain';
+import { addFarmDays, computeGrazingMetrics, computePaddockPerformance, summarizeWeather } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { WeatherService } from '../weather/weather.service';
 
@@ -63,7 +63,7 @@ export class GrazingService {
     if (!paddockId || !lotId) throw new BadRequestException({ code: 'grazing.missing_fields', title: 'paddock_id y lot_id son obligatorios' });
     await this.requirePaddock(paddockId);
     await this.requireLot(lotId);
-    const entryDate = body?.entry_date ?? new Date().toISOString().slice(0, 10);
+    const entryDate = body?.entry_date ?? await this.db.today();
 
     const occupied = await this.db.one<{ id: string }>(`SELECT id FROM grazing_records WHERE paddock_id=$1 AND tenant_id=$2 AND exit_date IS NULL AND deleted_at IS NULL`, [paddockId, t]);
     if (occupied) throw new ConflictException({ code: 'grazing.paddock_occupied', title: 'El potrero ya tiene un pastoreo abierto' });
@@ -84,7 +84,7 @@ export class GrazingService {
     const g = await this.db.one<{ id: string; entry_date: string; exit_date: string | null }>(`SELECT id, entry_date::text AS entry_date, exit_date::text AS exit_date FROM grazing_records WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
     if (!g) throw new NotFoundException({ code: 'grazing.not_found', title: 'Pastoreo no encontrado' });
     if (g.exit_date) throw new ConflictException({ code: 'grazing.already_closed', title: 'El pastoreo ya está cerrado' });
-    const exitDate = body?.exit_date ?? new Date().toISOString().slice(0, 10);
+    const exitDate = body?.exit_date ?? await this.db.today();
     if (String(exitDate) < String(g.entry_date)) throw new BadRequestException({ code: 'grazing.invalid_exit', title: 'exit_date no puede ser anterior a entry_date' });
     await this.db.query(`UPDATE grazing_records SET exit_date=$1, post_grazing_kg_dm_ha=$2, updated_at=now() WHERE id=$3 AND tenant_id=$4`, [exitDate, body?.post_grazing_kg_dm_ha ?? null, id, t]);
     return this.get(id);
@@ -137,8 +137,8 @@ export class GrazingService {
   async performance(params: { from?: string; to?: string } = {}) {
     const t = this.db.tenant;
     const hoy = new Date();
-    const to = params.to ?? hoy.toISOString().slice(0, 10);
-    const from = params.from ?? new Date(hoy.getTime() - 365 * 86400000).toISOString().slice(0, 10);
+    const to = params.to ?? (await this.db.today());
+    const from = params.from ?? addFarmDays(to, -365);
 
     const ventanas = await this.db.query<any>(
       `WITH cerrados AS (

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { AlertTriangle, Syringe, Heart, PawPrint, CheckSquare, ArrowRight } from 'lucide-react';
 import { TaskCompleteButton } from './TaskCompleteButton';
+import { farmToday } from '@/lib/date';
 
 /** Ítem de la agenda (P4), espejo del AgendaItemDto del servidor. */
 interface AgendaItem {
@@ -45,7 +46,7 @@ function urgency(item: AgendaItem, today: string): 'overdue' | 'today' | 'upcomi
 export function AgendaAttention({ items }: { items: AgendaItem[] }) {
   if (!items.length) return <p className="py-6 text-center text-body text-ink-3">Todo en orden — sin pendientes hoy.</p>;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = farmToday();
   const grouped = GROUPS.map((g) => ({ ...g, list: items.filter((i) => urgency(i, today) === g.key) })).filter((g) => g.list.length);
 
   return (

@@ -13,6 +13,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 import { formatDate } from '@/lib/format';
+import { farmToday } from '@/lib/date';
 
 interface Task {
   id: string;
@@ -64,7 +65,7 @@ const CLOSED_TABS = [
 /** Bucket al que cae una fecha (espeja la derivación del backend; acá solo sirve para navegar). */
 function bucketForDue(due: string | null): string {
   if (!due) return 'nodate';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = farmToday();
   const d = due.slice(0, 10);
   if (d < today) return 'overdue';
   if (d === today) return 'today';

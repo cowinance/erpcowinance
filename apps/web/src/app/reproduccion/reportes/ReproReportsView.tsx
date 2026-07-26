@@ -12,6 +12,7 @@ import { downloadCsv } from '@/lib/csv';
 import { formatDate } from '@/lib/format';
 import { ArrowLeft, Download, Loader2 } from 'lucide-react';
 import { Input } from '@/components/Input';
+import { farmToday, addFarmDays } from '@/lib/date';
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -29,9 +30,12 @@ const TABS: [Tab, string][] = [
 const th = 'h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.04em] text-ink-3 uppercase';
 const td = 'h-8 border-b border-subtle/60 last:border-0';
 
-export function ReproReportsView({ today }: { today: string }) {
+export function ReproReportsView() {
+  // El hoy lo calcula el cliente, que tiene la zona de la finca en el <html>. Venía del Server
+  // Component, donde se computaba en la zona de ESA máquina (UTC en producción).
+  const today = farmToday();
   const [tab, setTab] = useState<Tab>('summary');
-  const [from, setFrom] = useState(iso(new Date(new Date(today).getTime() - 365 * 86400000)));
+  const [from, setFrom] = useState(addFarmDays(today, -365));
   const [to, setTo] = useState(today);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);

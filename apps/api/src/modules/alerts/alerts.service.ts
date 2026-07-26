@@ -544,7 +544,7 @@ export class AlertsService {
        ORDER BY v.animal_id, v.next_due_date ASC`,
       [t, cfg.get('vaccination_due')!.days],
     );
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = await this.db.today();
     for (const v of vaccinations) {
       const overdue = v.due < todayStr;
       out.push({

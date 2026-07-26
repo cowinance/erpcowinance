@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -12,15 +13,16 @@ import { DbService } from '../../db/db.service';
 export class HealthReportsService {
   constructor(private readonly db: DbService) {}
 
-  private range(from?: string, to?: string): [string, string] {
-    const toD = (to ?? new Date().toISOString()).slice(0, 10);
-    const fromD = (from ?? new Date(new Date(toD).getTime() - 90 * 86400000).toISOString()).slice(0, 10);
+  /** Rango por defecto contado desde HOY EN LA FINCA, sobre el calendario (sin husos ni verano). */
+  private async range(from?: string, to?: string): Promise<[string, string]> {
+    const toD = to ? String(to).slice(0, 10) : await this.db.today();
+    const fromD = from ? String(from).slice(0, 10) : addFarmDays(toD, -90);
     return [fromD, toD];
   }
 
   /** Incidencia por diagnóstico: eventos y animales afectados (casos + eventos clínicos + tratamientos + muertes). */
   async incidence(fromRaw?: string, toRaw?: string) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     return this.db.query(
       `WITH diag_events AS (
          SELECT diagnosis_id, animal_id FROM clinical_cases WHERE tenant_id = $1 AND deleted_at IS NULL AND diagnosis_id IS NOT NULL AND started_at::date BETWEEN $2 AND $3
@@ -39,7 +41,7 @@ export class HealthReportsService {
 
   /** Mortalidad agrupada por causa (diagnóstico), lote o período (mes). */
   async mortality(fromRaw?: string, toRaw?: string, by: 'cause' | 'lot' | 'period' = 'cause') {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     const t = this.db.tenant;
     if (by === 'lot') {
       return this.db.query(
@@ -66,7 +68,7 @@ export class HealthReportsService {
 
   /** Animales reincidentes: con ≥ `min` casos clínicos en el período. */
   async recurrent(fromRaw?: string, toRaw?: string, min = 2) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     return this.db.query(
       `SELECT a.id AS animal_id, ai.value AS tag, c.name AS category, l.name AS lot_name,
               count(*)::int AS cases,
@@ -87,7 +89,7 @@ export class HealthReportsService {
 
   /** Productos veterinarios más usados (tratamientos + vacunaciones) en el período. */
   async products(fromRaw?: string, toRaw?: string) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     return this.db.query(
       `WITH apps AS (
          SELECT product_id, animal_id, 'treatment' AS kind, COALESCE(cost,0)::float AS cost FROM treatments
@@ -107,7 +109,7 @@ export class HealthReportsService {
 
   /** Efectividad: desenlace de los casos clínicos iniciados en el período + tasa de recuperación. */
   async effectiveness(fromRaw?: string, toRaw?: string) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     const row = await this.db.one<any>(
       `SELECT count(*)::int AS total,
               count(*) FILTER (WHERE status = ANY('{open,in_treatment,observation}'))::int AS open,

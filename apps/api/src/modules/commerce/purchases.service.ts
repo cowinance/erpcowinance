@@ -76,7 +76,7 @@ export class PurchasesService {
     const { lines, totals } = this.parseLines(body?.lines);
     const currency = (body?.currency ?? (await this.defaultCurrency())) as string;
     const companyId = await this.resolveCompany();
-    const purchaseDate = body?.purchase_date ?? new Date().toISOString().slice(0, 10);
+    const purchaseDate = body?.purchase_date ?? await this.db.today();
     const t = this.db.tenant;
 
     return this.db.tx(async (q) => {

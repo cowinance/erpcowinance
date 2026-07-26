@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { computeAging, AgingItem } from '@cowinance/domain';
+import { addFarmDays, computeAging, AgingItem } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -15,8 +15,8 @@ export class TreasuryService {
   constructor(private readonly db: DbService) {}
 
   async summary(fromRaw?: string, toRaw?: string) {
-    const to = toRaw ?? new Date().toISOString().slice(0, 10);
-    const from = fromRaw ?? new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const to = toRaw ?? await this.db.today();
+    const from = fromRaw ?? addFarmDays(to, -365);
     const t = this.db.tenant;
 
     // 1. Posición de liquidez: saldo por cuenta bancaria (entradas − salidas de sus pagos).

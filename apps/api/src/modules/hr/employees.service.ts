@@ -92,7 +92,7 @@ export class EmployeesService {
 
   /** Terminación laboral: fija termination_date y desactiva (fin de la relación). */
   async terminate(id: string, body: any) {
-    const date = body?.termination_date ?? new Date().toISOString().slice(0, 10);
+    const date = body?.termination_date ?? await this.db.today();
     return this.persist(id, ['termination_date = $1', 'is_active = false'], [date]);
   }
 

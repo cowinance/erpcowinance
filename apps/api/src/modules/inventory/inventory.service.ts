@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { computeStockRotation, DEFAULT_LEAD_TIME_DAYS } from '@cowinance/domain';
+import { addFarmDays, computeStockRotation, DEFAULT_LEAD_TIME_DAYS } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 
 const CATEGORY_KINDS = ['feed', 'veterinary', 'agrochemical', 'seed', 'fuel', 'spare_part', 'supply', 'product'];
@@ -309,8 +309,8 @@ export class InventoryService {
    * repartido en dos galpones no es faltante.
    */
   async rotation(params: { from?: string; to?: string; leadTimeDays?: number } = {}) {
-    const to = params.to ?? new Date().toISOString().slice(0, 10);
-    const from = params.from ?? new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10);
+    const to = params.to ?? await this.db.today();
+    const from = params.from ?? addFarmDays(to, -180);
     const periodDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
     const leadTimeDays = Number(params.leadTimeDays) > 0 ? Number(params.leadTimeDays) : DEFAULT_LEAD_TIME_DAYS;
 

@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
+import { farmToday } from '@/lib/date';
 
 export function ReproCapture({ bulls }: { bulls: any[] }) {
   const router = useRouter();
@@ -104,7 +105,7 @@ export function ReproCapture({ bulls }: { bulls: any[] }) {
         </div>
 
         <Field label="Fecha" htmlFor="date">
-          <Input id="date" name="date" type="date" controlSize="md" defaultValue={new Date().toISOString().slice(0, 10)} />
+          <Input id="date" name="date" type="date" controlSize="md" defaultValue={farmToday()} />
         </Field>
 
         {tab === 'Celo' && (

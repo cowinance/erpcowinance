@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { computeCropYields } from '@cowinance/domain';
+import { addFarmDays, computeCropYields } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 // La regla de QUÉ VENTA CUENTA vive en Comercial y se importa: si acá se repitiera el filtro, el
 // día que cambie allá el precio de referencia quedaría calculado sobre otro universo de ventas.
@@ -124,8 +124,8 @@ export class CropsService {
    */
   async yields(params: { from?: string; to?: string } = {}) {
     const t = this.db.tenant;
-    const to = params.to ?? new Date().toISOString().slice(0, 10);
-    const from = params.from ?? new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const to = params.to ?? await this.db.today();
+    const from = params.from ?? addFarmDays(to, -365);
 
     const rows = await this.db.query<any>(
       `SELECT c.id, c.crop_type, c.variety, c.status, c.planting_date::text AS planting_date,

@@ -85,7 +85,7 @@ export class WeaningService {
     );
     if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
 
-    const weaningDate = (input.weaningDate ?? new Date().toISOString()).slice(0, 10);
+    const weaningDate = (input.weaningDate ? String(input.weaningDate).slice(0, 10) : await this.db.today(q));
     const weightKg = input.weightKg ?? null;
 
     // (1) hecho: fila weanings con id determinista = weaningId.

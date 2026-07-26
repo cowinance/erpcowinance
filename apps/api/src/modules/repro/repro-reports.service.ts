@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
 
@@ -16,15 +17,16 @@ export class ReproReportsService {
     private readonly repro: ReproService,
   ) {}
 
-  private range(from?: string, to?: string): [string, string] {
-    const toD = (to ?? new Date().toISOString()).slice(0, 10);
-    const fromD = (from ?? new Date(new Date(toD).getTime() - 365 * 86400000).toISOString()).slice(0, 10);
+  /** Rango por defecto contado desde HOY EN LA FINCA, sobre el calendario (sin husos ni verano). */
+  private async range(from?: string, to?: string): Promise<[string, string]> {
+    const toD = to ? String(to).slice(0, 10) : await this.db.today();
+    const fromD = from ? String(from).slice(0, 10) : addFarmDays(toD, -365);
     return [fromD, toD];
   }
 
   /** KPIs reproductivos del período: servicios, concepción, partos (vivos/muertos), abortos, destetes, intervalos. */
   async summary(fromRaw?: string, toRaw?: string) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     const t = this.db.tenant;
     const [svc, diag, calv, abort, wean, iep, openAvg] = await Promise.all([
       this.db.one<any>(
@@ -91,7 +93,7 @@ export class ReproReportsService {
 
   /** Desempeño por toro/semen: servicios, concepciones (preñeces del servicio) y tasa de concepción. */
   async byBull(fromRaw?: string, toRaw?: string) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     return this.db.query(
       `SELECT be.sire_id, ai.value AS tag, s.name AS sire_name,
               count(*)::int AS services,
@@ -111,7 +113,7 @@ export class ReproReportsService {
 
   /** Abortos y pérdidas del período con causa y edad gestacional. */
   async abortions(fromRaw?: string, toRaw?: string) {
-    const [from, to] = this.range(fromRaw, toRaw);
+    const [from, to] = await this.range(fromRaw, toRaw);
     return this.db.query(
       `SELECT p.animal_id, ai.value AS tag, l.name AS lot, p.closed_at, p.status, p.loss_cause, p.loss_gestational_days
        FROM pregnancies p

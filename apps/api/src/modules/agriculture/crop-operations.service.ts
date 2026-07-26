@@ -81,7 +81,7 @@ export class CropOperationsService {
     const crop = await this.requireCrop(cropId);
     const yieldQty = round3(Number(body?.yield_quantity));
     if (!Number.isFinite(yieldQty) || yieldQty <= 0) throw new BadRequestException({ code: 'agriculture.invalid_yield', title: 'yield_quantity debe ser positiva' });
-    const harvestDate = body?.harvest_date ?? new Date().toISOString().slice(0, 10);
+    const harvestDate = body?.harvest_date ?? await this.db.today();
     const yieldPerHa = crop.area_ha && crop.area_ha > 0 ? round3(yieldQty / crop.area_ha) : null;
     const destItemId = body?.destination_item_id ?? null;
     const warehouseId = body?.warehouse_id ?? null;

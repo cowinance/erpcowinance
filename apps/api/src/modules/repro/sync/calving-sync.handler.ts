@@ -43,7 +43,7 @@ export class CalvingSyncHandler implements SyncHandler, OnModuleInit {
         t,
         row['pregnancy_id'] ?? null,
         row['dam_id'],
-        (row['calving_date'] as string) ?? new Date().toISOString().slice(0, 10),
+        (row['calving_date'] as string) ?? (await this.db.today(q)),
         row['ease'] ?? null,
         row['offspring_count'] ?? 1,
         row['notes'] ?? null,

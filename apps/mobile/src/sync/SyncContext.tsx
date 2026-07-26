@@ -9,6 +9,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, Op, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
+import { farmToday } from '../lib/date';
 import {
   computeWithdrawal,
   computeExpectedDueDateFromService,
@@ -938,7 +939,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const d = deviceRef.current;
         if (!d) return {};
         const now = new Date();
-        const today = now.toISOString().slice(0, 10);
+        const today = farmToday(now);
 
         // Preñez abierta local (si existe)
         let openId: string | null = null;
@@ -995,7 +996,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const d = deviceRef.current;
         if (!d) return { calfId: '' };
         const now = new Date();
-        const today = now.toISOString().slice(0, 10);
+        const today = farmToday(now);
         const dam = store()?.getRow('animals', damId)?.fields as any;
 
         let pregnancyId: string | null = null;

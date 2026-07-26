@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import {
+import { addFarmDays,
   InvalidStageTransitionError,
   type ContractStatus,
   type OpportunityStage,
@@ -29,8 +29,9 @@ const INTERACTION_KINDS = ['call', 'visit', 'email', 'whatsapp', 'meeting', 'not
 export class CrmService {
   constructor(private readonly db: DbService) {}
 
-  private hoy(): string {
-    return new Date().toISOString().slice(0, 10);
+  /** Hoy en la finca, no en UTC: después de las 20:00 en Venezuela no son el mismo día. */
+  private async hoy(): Promise<string> {
+    return this.db.today();
   }
 
   private async assertPartner(partnerId: string): Promise<string> {
@@ -149,7 +150,7 @@ export class CrmService {
    * día anterior.
    */
   async followUps(params: { until?: string } = {}) {
-    const until = params.until ?? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const until = params.until ?? addFarmDays(await this.hoy(), 7);
     return this.db.query(
       `SELECT i.id, i.partner_id, bp.name AS partner_name, i.next_action, i.next_action_at::text, i.summary
        FROM partner_interactions i
@@ -304,7 +305,7 @@ export class CrmService {
        ORDER BY c.end_date NULLS LAST, c.start_date DESC`,
       [this.db.tenant, params.partnerId ?? null],
     );
-    const hoy = this.hoy();
+    const hoy = await this.hoy();
     return rows.map((c) => ({ ...c, standing: contractStanding(c, hoy, params.expiryWindowDays) }));
   }
 
@@ -385,7 +386,7 @@ export class CrmService {
 
     return {
       pipeline: summarizePipeline(opps),
-      contracts: summarizeContracts(contratos, this.hoy(), params.expiryWindowDays),
+      contracts: summarizeContracts(contratos, await this.hoy(), params.expiryWindowDays),
       activeCustomers: clientes?.n ?? 0,
       pendingFollowUps: seguimientos.length,
     };

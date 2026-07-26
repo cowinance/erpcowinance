@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { computeBudgetVariance, computeMargin, computeUnitCost, summarizeLaborByActivity } from '@cowinance/domain';
+import { addFarmDays, computeBudgetVariance, computeMargin, computeUnitCost, summarizeLaborByActivity } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { SALE_COUNTS } from '../commerce/sales.service';
 
@@ -90,7 +90,7 @@ export class CostingService {
     if (!LEVELS.includes(level))
       throw new BadRequestException({ code: 'costing.invalid_level', title: `Nivel inválido: ${level}. Válidos: ${LEVELS.join(', ')}` });
 
-    const { from, to } = this.range(params);
+    const { from, to } = await this.range(params);
     const t = this.db.tenant;
     const [rows, labor] = await Promise.all([
       this.db.query<any>(this.sqlFor(level), [t, from, to]),
@@ -163,7 +163,7 @@ export class CostingService {
    * la práctica significa "falta clasificar algo", no "es gratis".
    */
   async unitCosts(params: { from?: string; to?: string } = {}) {
-    const { from, to } = this.range(params);
+    const { from, to } = await this.range(params);
     const t = this.db.tenant;
     const p = [t, from, to];
 
@@ -215,7 +215,7 @@ export class CostingService {
     // líneas presupuestarias, para que los dos lados miren la misma ventana.
     const from = params.from ?? `${fy}-01-01`;
     const to = params.to ?? `${fy}-12-31`;
-    const { from: f, to: tt } = this.range({ from, to });
+    const { from: f, to: tt } = await this.range({ from, to });
     const fromMonth = new Date(f).getUTCFullYear() === fy ? new Date(f).getUTCMonth() + 1 : 1;
     const toMonth = new Date(tt).getUTCFullYear() === fy ? new Date(tt).getUTCMonth() + 1 : 12;
 
@@ -299,7 +299,7 @@ export class CostingService {
     const level = params.level ?? 'lot';
     if (!PROFIT_LEVELS.includes(level))
       throw new BadRequestException({ code: 'costing.invalid_level', title: `Nivel inválido: ${level}. Válidos: ${PROFIT_LEVELS.join(', ')}` });
-    const { from, to } = this.range(params);
+    const { from, to } = await this.range(params);
 
     const rows = level === 'activity' ? await this.profitByActivity(from, to) : await this.profitByCenter(level, from, to);
     const totals = rows.reduce((a, r) => ({ revenue: a.revenue + r.revenue, cost: a.cost + r.cost }), { revenue: 0, cost: 0 });
@@ -462,7 +462,7 @@ export class CostingService {
    * valen cero—, porque si los dos cortes dieran totales distintos ninguno sería creíble.
    */
   async laborByActivity(params: { from?: string; to?: string } = {}) {
-    const { from, to } = this.range(params);
+    const { from, to } = await this.range(params);
     const rows = await this.db.query<any>(
       `SELECT tk.type AS activity,
               COALESCE(sum(wl.hours) FILTER (WHERE e.hourly_rate IS NOT NULL), 0)::float AS priced_hours,
@@ -482,9 +482,12 @@ export class CostingService {
     return { from, to, ...resumen };
   }
 
-  private range(params: { from?: string; to?: string }) {
-    const to = params.to ?? new Date().toISOString().slice(0, 10);
-    const from = params.from ?? new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  /** Rango por defecto: el último año, contado desde HOY EN LA FINCA. */
+  private async range(params: { from?: string; to?: string }) {
+    const to = params.to ?? (await this.db.today());
+    // `addFarmDays` sobre el calendario, no restar milisegundos: el día que cambia el horario de
+    // verano dura 23 o 25 horas y el rango se corría un día.
+    const from = params.from ?? addFarmDays(to, -365);
     if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to)))
       throw new BadRequestException({ code: 'costing.invalid_range', title: 'from/to deben ser fechas válidas' });
     if (from > to) throw new BadRequestException({ code: 'costing.inverted_range', title: 'from no puede ser posterior a to' });

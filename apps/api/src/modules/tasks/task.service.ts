@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { addFarmDays, asFarmDate } from '@cowinance/domain';
 import { randomUUID } from 'crypto';
 import { HlcClock } from '@cowinance/sync-core';
 import type { PutOp } from '@cowinance/sync-core';
@@ -220,8 +221,24 @@ export class TaskService {
         [existing.recurrence_id, t],
       );
       if (rec) {
-        const base = rec.anchor === 'completed_at' ? completedAt : (existing.due_date ?? completedAt);
-        const next = new Date(new Date(base).getTime() + rec.interval_days * 86400000).toISOString().slice(0, 10);
+        /**
+         * De qué fecha se cuenta el próximo vencimiento. El anclaje decide, y NO son la misma clase
+         * de dato:
+         *
+         * - `completed_at` es un INSTANTE de verdad ("se completó a las 20:30"). Se lleva al día de
+         *   la finca: sin eso, completar de noche adelantaba la próxima ocurrencia un día.
+         * - `due_date` es una fecha CALENDARIO que la tabla guarda en una columna `timestamptz`, a
+         *   medianoche UTC. Pasarla por la zona de la finca la leería como las 21:00 del día
+         *   anterior y correría toda la serie hacia atrás. Se toma su parte de fecha tal como se
+         *   escribió, que es lo que significa.
+         *
+         * Es una tensión del modelo —un día guardado como instante—, no de este cálculo. Mientras
+         * la columna sea `timestamptz`, el que sabe cuál de las dos cosas es el valor es el anclaje.
+         */
+        const next =
+          rec.anchor === 'completed_at'
+            ? addFarmDays(asFarmDate(completedAt, await this.db.timeZone()), rec.interval_days)
+            : addFarmDays(new Date(existing.due_date ?? completedAt).toISOString().slice(0, 10), rec.interval_days);
         await q.query(`UPDATE task_recurrences SET next_due = $3, updated_at = now() WHERE id = $1 AND tenant_id = $2`, [existing.recurrence_id, t, next]);
       }
     }

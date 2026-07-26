@@ -3,14 +3,14 @@ import { EmptyState } from '@/components/ui';
 import { FinanceNav } from '../FinanceNav';
 import { TreasuryView } from './TreasuryView';
 
-const today = () => new Date().toISOString().slice(0, 10);
-const monthsAgo = (n: number) => new Date(Date.now() - n * 30.44 * 86400000).toISOString().slice(0, 10);
+// El rango por defecto lo decide la API, que sabe en qué zona empieza el día de la finca; acá se
+// lee el que efectivamente usó (viene en la respuesta). Calcularlo en el servidor web daba la fecha
+// de ESA máquina —UTC en producción—, así que después de las 20:00 el período arrancaba un día
+// adelantado.
 
 /** Finanzas — Tesorería (G3): liquidez por cuenta, flujo de caja, aging de CxC/CxP y días de cobro/pago. */
 export default async function TreasuryPage() {
-  const from = monthsAgo(12);
-  const to = today();
-  const summary = await apiSafe<any>(`/treasury/summary?from=${from}&to=${to}`);
+  const summary = await apiSafe<any>('/treasury/summary');
   if (summary === null) {
     return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
   }
@@ -21,7 +21,7 @@ export default async function TreasuryPage() {
         <p className="mt-0.5 text-body text-ink-3">Tesorería: liquidez, flujo de caja y antigüedad de saldos por cobrar y por pagar.</p>
       </div>
       <FinanceNav />
-      <TreasuryView initial={summary} from={from} to={to} />
+      <TreasuryView initial={summary} from={summary.from} to={summary.to} />
     </div>
   );
 }

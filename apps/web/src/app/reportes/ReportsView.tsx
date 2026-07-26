@@ -7,6 +7,7 @@ import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
+import { farmToday } from '@/lib/date';
 
 type ReportKey = 'summary' | 'inventory' | 'movements' | 'production' | 'reproduction' | 'health';
 
@@ -21,7 +22,7 @@ const REPORTS: { key: ReportKey; label: string }[] = [
   { key: 'health', label: 'Sanidad' },
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => farmToday();
 const monthsAgo = (n: number) => new Date(Date.now() - n * 30.44 * 86400000).toISOString().slice(0, 10);
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';

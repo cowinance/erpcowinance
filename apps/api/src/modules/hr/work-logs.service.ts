@@ -60,7 +60,7 @@ export class WorkLogsService {
     await this.requireTask(body?.task_id);
     await this.requireFarm(body?.farm_id);
     await this.requireCostCenter(body?.cost_center_id);
-    const workDate = body?.work_date ?? new Date().toISOString().slice(0, 10);
+    const workDate = body?.work_date ?? await this.db.today();
     const row = await this.db.one<{ id: string }>(
       `INSERT INTO work_logs (tenant_id, employee_id, work_date, hours, task_id, farm_id, cost_center_id, notes, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
