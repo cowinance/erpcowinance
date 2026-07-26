@@ -201,6 +201,50 @@ export class InventoryService {
   }
 
   /**
+   * ¿De qué depósito SALE el stock cuando el documento no lo dice? — REGLA ÚNICA.
+   *
+   * Todo lo que consume stock sin depósito por línea (ventas C-3, sanidad) tiene que contestar la
+   * misma pregunta, y contestarla mal se ve igual que un error de carga: la venta se rechaza por
+   * «sin saldo» aunque las bolsas estén en el otro galpón, o descuenta del galpón equivocado y el
+   * kardex deja de coincidir con lo que hay en el piso.
+   *
+   * El orden es:
+   *   1. el depósito indicado, si el documento lo trae (nunca se adivina por encima de una decisión
+   *      explícita del usuario);
+   *   2. el depósito con MÁS saldo de ESE ítem. Como la salida no se parte entre depósitos, «el que
+   *      tenga saldo suficiente» y «el que tenga más saldo» son el mismo depósito: si el de más
+   *      saldo no alcanza, ninguno alcanza. Y al no alcanzar, el 403 de `applyToLevel` nombra el
+   *      saldo más grande que existe, que es el número que el productor va a querer ver;
+   *   3. si el ítem no tiene saldo en ninguna parte, el depósito más viejo del tenant — así el error
+   *      que sale es sobre el stock que falta, no sobre un depósito que no se encontró.
+   *
+   * Devuelve `null` solo si el tenant no tiene ningún depósito; qué hacer con eso lo decide quien
+   * llama (ventas corta con 400, sanidad se saltea el efecto de stock).
+   *
+   * Se resuelve en SQL y no en el dominio a propósito: es una pregunta sobre dónde están guardadas
+   * las existencias, no una regla de negocio.
+   */
+  async resolveSourceWarehouseInTx(q: Q, itemId: string, given?: string | null): Promise<string | null> {
+    if (given) return given;
+    const conSaldo = await q.one<{ warehouse_id: string }>(
+      `SELECT sl.warehouse_id
+         FROM stock_levels sl JOIN warehouses w ON w.id = sl.warehouse_id AND w.deleted_at IS NULL
+        WHERE sl.tenant_id = $1 AND sl.item_id = $2 AND sl.deleted_at IS NULL
+        GROUP BY sl.warehouse_id
+       HAVING sum(sl.quantity) > 0
+        ORDER BY sum(sl.quantity) DESC, sl.warehouse_id
+        LIMIT 1`,
+      [this.db.tenant, itemId],
+    );
+    if (conSaldo) return conSaldo.warehouse_id;
+    const cualquiera = await q.one<{ id: string }>(
+      `SELECT id FROM warehouses WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1`,
+      [this.db.tenant],
+    );
+    return cualquiera?.id ?? null;
+  }
+
+  /**
    * Transferencia entre depósitos (INV-2b): par de movimientos `transfer` (−q origen, +q destino)
    * atómico; el costo VIAJA (el destino pondera con el avg_cost del origen); bloquea si el origen no
    * alcanza. Comparten `reference_id`.

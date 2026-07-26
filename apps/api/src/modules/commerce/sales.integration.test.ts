@@ -82,14 +82,8 @@ describe('commerce — ventas', () => {
   });
 
   it('entrega de ítem → `out` de stock; idempotente; sin saldo → 403', async () => {
-    // `SalesService.deliver` descuenta del depósito MÁS VIEJO del tenant (limitación documentada:
-    // las ventas no tienen depósito por línea). Este test antes suponía que el suyo era el único,
-    // y se rompió cuando el demo pasó a traer un galpón propio — la suposición estaba en el test,
-    // no en el código. Se stockea el depósito que la venta va a usar de verdad.
-    const usado = (await db.query<{ id: string }>(`SELECT id FROM warehouses WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`, [tenantId]))[0].id;
-    if (usado !== whId) await inv.recordMovement({ item_id: itemId, warehouse_id: usado, movement_type: 'in', quantity: 100, unit_cost: 10 });
-    whId = usado;
-
+    // El depósito de este test NO es el más viejo del tenant (el demo trae «Galpón Central» antes),
+    // pero es el único con saldo de este ítem: la entrega tiene que descontar de acá.
     const before: any[] = await inv.listStock(whId, itemId);
     const q0 = before[0].quantity;
     const s: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemId, quantity: 10, unit_price: 25 }] });
@@ -104,6 +98,67 @@ describe('commerce — ventas', () => {
     const huge: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemId, quantity: 100000, unit_price: 25 }] });
     await expect(sales.updateStatus(huge.id, 'delivered')).rejects.toMatchObject({ status: 403 });
     expect((await sales.get(huge.id) as any).status).toBe('draft');
+  });
+
+  /**
+   * De qué depósito sale el stock de una venta (Fase 4).
+   *
+   * La venta no tiene depósito por línea, así que el sistema lo elige. Elegía el más VIEJO del
+   * tenant, y con más de un galpón eso rompía dos veces: una venta perfectamente vendible se
+   * rechazaba con 403 «sin saldo» porque las bolsas estaban en el otro galpón, y cuando sí había
+   * saldo en el viejo descontaba de ahí aunque la mercadería hubiera salido del otro — el kardex
+   * dejaba de coincidir con el piso. Quedó latente mientras el demo no tenía depósitos.
+   *
+   * Lo que se fija acá es que la elección se hace por SALDO, no por antigüedad.
+   */
+  describe('de qué depósito sale el stock', () => {
+    let itemDos: string;
+    let whA: string;
+    let whB: string;
+
+    beforeAll(async () => {
+      const it2: any = await inv.createItem({ name: 'Sal mineral', unit: 'kg' });
+      itemDos = it2.id;
+      whA = ((await inv.createWarehouse({ name: 'Galpón A' })) as any).id;
+      whB = ((await inv.createWarehouse({ name: 'Galpón B' })) as any).id;
+    });
+
+    it('el saldo está en el SEGUNDO galpón: la venta se entrega (antes 403)', async () => {
+      // Nada en A, todo en B. Con la selección por antigüedad esta venta no se podía entregar.
+      await inv.recordMovement({ item_id: itemDos, warehouse_id: whB, movement_type: 'in', quantity: 40, unit_cost: 5 });
+
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemDos, quantity: 25, unit_price: 8 }] });
+      const del: any = await sales.updateStatus(s.id, 'delivered');
+      expect(del.status).toBe('delivered');
+
+      expect((await inv.listStock(whB, itemDos))[0].quantity).toBe(15);
+      expect(await inv.listStock(whA, itemDos)).toHaveLength(0); // A no se tocó: nunca tuvo nada
+      const mov = await db.query<any>(`SELECT warehouse_id FROM stock_movements WHERE reference_type='sale' AND reference_id=$1`, [s.id]);
+      expect(mov).toHaveLength(1);
+      expect(mov[0].warehouse_id).toBe(whB);
+    });
+
+    it('con saldo en los dos, sale del que puede cubrir la venta', async () => {
+      // A queda con poco y B con bastante: partir la salida entre depósitos no es algo que la venta
+      // haga, así que el único depósito servible es el que cubre la cantidad entera.
+      await inv.recordMovement({ item_id: itemDos, warehouse_id: whA, movement_type: 'in', quantity: 6, unit_cost: 5 });
+      await inv.recordMovement({ item_id: itemDos, warehouse_id: whB, movement_type: 'in', quantity: 85, unit_cost: 5 }); // B: 15 + 85 = 100
+
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemDos, quantity: 20, unit_price: 8 }] });
+      await sales.updateStatus(s.id, 'delivered');
+
+      expect((await inv.listStock(whA, itemDos))[0].quantity).toBe(6); // intacto
+      expect((await inv.listStock(whB, itemDos))[0].quantity).toBe(80);
+    });
+
+    it('si NINGÚN depósito alcanza → 403 y la venta queda en borrador', async () => {
+      // 6 en A y 80 en B: 90 no sale de ninguno. El faltante es real, no un error de elección.
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemDos, quantity: 90, unit_price: 8 }] });
+      await expect(sales.updateStatus(s.id, 'delivered')).rejects.toMatchObject({ status: 403 });
+      expect((await sales.get(s.id) as any).status).toBe('draft');
+      expect((await inv.listStock(whA, itemDos))[0].quantity).toBe(6);
+      expect((await inv.listStock(whB, itemDos))[0].quantity).toBe(80);
+    });
   });
 
   it('entrega de animal → `sold` convergente: status, versión LWW, timeline y changeset server-origin', async () => {

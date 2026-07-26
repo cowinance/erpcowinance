@@ -137,12 +137,13 @@ export class SalesService {
     for (const l of lines) {
       if (l.item_id) {
         if (stockDone) continue; // ya entregada: no duplicar el out de stock
-        // Sin warehouse por línea en ventas: se descuenta del depósito por defecto del tenant.
-        const wh = await q.one<{ id: string }>(`SELECT id FROM warehouses WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`, [t]);
-        if (!wh) throw new BadRequestException({ code: 'commerce.no_warehouse', title: 'No hay depósito para descontar el stock' });
+        // La venta todavía no tiene depósito por línea: de DÓNDE sale el stock lo contesta la regla
+        // única de inventario (el depósito con saldo del ítem), no un «depósito por defecto».
+        const whId = await this.inventory.resolveSourceWarehouseInTx(q, l.item_id);
+        if (!whId) throw new BadRequestException({ code: 'commerce.no_warehouse', title: 'No hay depósito para descontar el stock' });
         await this.inventory.recordMovementInTx(q, {
           item_id: l.item_id,
-          warehouse_id: wh.id,
+          warehouse_id: whId,
           movement_type: 'out',
           quantity: -Math.abs(l.quantity),
           reference_type: 'sale',
