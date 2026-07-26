@@ -523,6 +523,52 @@ export async function seedDemo(db: Queryable) {
     }
   }
 
+  // ── Laboratorio: muestras y resultados (Fase 3.1) ────────────────────────────────────
+  //
+  // Sin esto la pantalla de Laboratorio arranca vacía y el lazo con Sanidad es invisible: nadie
+  // descubre que un resultado puede abrir un caso clínico si no hay un resultado que mirar.
+  //
+  // Se siembran las TRES ramas de la regla a propósito, porque la que se entiende mal es la del
+  // medio:
+  //
+  //   1. Normal            → no pasa nada.
+  //   2. Anormal SIN diagnóstico → no abre caso; queda el botón «Abrir caso» para el veterinario.
+  //   3. Anormal sin animal (suelo) → no corresponde caso, y la pantalla lo dice.
+  //
+  // La rama que abre el caso sola NO se siembra: crear el caso acá significaría repetir en el seed
+  // lo que hace `ClinicalCaseService` (caso + evento del caso + evento del animal + máquina de
+  // estados), y una regla escrita dos veces se desincroniza. Queda a un clic desde la rama 2, que
+  // además es la forma en que el productor la va a descubrir.
+  {
+    const [{ id: labVet }] = await q(
+      `INSERT INTO labs (tenant_id, name, type, contact, created_by) VALUES ($1,'Laboratorio Veterinario del Centro','pathology',$2,$3) RETURNING id`,
+      [org, JSON.stringify({ email: 'lab@vetcentro.test', phone: '+58 212 555 0134' }), userId],
+    );
+
+    /** Muestra ya enviada al laboratorio, con su resultado. */
+    const muestra = async (o: { tipo: string; animal?: string | null; potrero?: string | null; test: string; valor: string; rango?: string | null; anormal: boolean; diasAtras: number }) => {
+      const tomada = daysAgo(o.diasAtras);
+      const [{ id: sid }] = await q(
+        `INSERT INTO lab_samples (tenant_id, lab_id, sample_type, animal_id, paddock_id, collected_at, sent_at, status, barcode, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'completed',$8,$9) RETURNING id`,
+        [org, labVet, o.tipo, o.animal ?? null, o.potrero ?? null, tomada.toISOString(), new Date(tomada.getTime() + 86400000).toISOString(), `MB-${Math.round(between(10000, 99999))}`, userId],
+      );
+      await q(
+        `INSERT INTO lab_results (tenant_id, sample_id, test_code, result_value, reference_range, is_abnormal, reported_at, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [org, sid, o.test, o.valor, o.rango ?? null, o.anormal, new Date(tomada.getTime() + 3 * 86400000).toISOString(), userId],
+      );
+    };
+
+    // El novillo que ya venía con cuadro respiratorio: el hemograma da alterado y NADIE decidió
+    // todavía qué es. Es el caso que la Fase 3.1 vino a resolver.
+    await muestra({ tipo: 'blood', animal: sick.id, test: 'Hemograma — leucocitos', valor: '18.400/µL', rango: '4.000-12.000', anormal: true, diasAtras: 4 });
+    await muestra({ tipo: 'blood', animal: pick(cows).id, test: 'Perfil mineral — cobre', valor: '0,58 ppm', rango: '0,60-1,20', anormal: true, diasAtras: 11 });
+    await muestra({ tipo: 'milk', animal: pick(cows).id, test: 'Recuento celular', valor: '148.000 cél/mL', rango: '< 200.000', anormal: false, diasAtras: 9 });
+    // Suelo: importa, y no es un caso clínico de nadie.
+    await muestra({ tipo: 'soil', potrero: paddocks[1], test: 'Fósforo disponible', valor: '6 ppm', rango: '> 12', anormal: true, diasAtras: 25 });
+  }
+
   // ── Faena: novillos terminados (cierra la cadena genética hasta el gancho) ────────────
   // Es el último escalón: pajuela → vaca → preñez → destete → GANCHO. Sin reses cargadas, la
   // evaluación por toro se corta en el destete y no puede contestar qué genética rinde en la res,

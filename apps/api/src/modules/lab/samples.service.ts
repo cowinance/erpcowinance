@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { assessLabResult, OPEN_CASE_STATUSES } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { ClinicalCaseService } from '../health/clinical-case.service';
 
 const SAMPLE_TYPES = ['blood', 'tissue', 'milk', 'soil', 'hair', 'semen', 'feces', 'other'];
 const STATUSES = ['collected', 'sent', 'in_progress', 'completed', 'rejected'];
@@ -22,7 +24,10 @@ const RESULTABLE = ['sent', 'in_progress', 'completed'];
  */
 @Injectable()
 export class SamplesService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly cases: ClinicalCaseService,
+  ) {}
 
   private readonly cols = `s.id, s.lab_id, l.name AS lab_name, s.sample_type, s.animal_id, tag.value AS animal_tag,
      s.paddock_id, p.name AS paddock_name, s.collected_at, s.sent_at, s.status, s.barcode,
@@ -93,30 +98,119 @@ export class SamplesService {
   }
 
   // ── Resultados (LAB-2) ─────────────────────────────────────────────────────
+  private readonly resultCols = `r.id, r.test_code, r.result_value, r.result_data, r.reference_range, r.is_abnormal, r.reported_at,
+     r.diagnosis_id, d.name AS diagnosis, d.is_notifiable, r.clinical_case_id`;
+
   async listResults(sampleId: string) {
     await this.get(sampleId); // valida pertenencia al tenant
     return this.db.query(
-      `SELECT id, test_code, result_value, result_data, reference_range, is_abnormal, reported_at
-       FROM lab_results WHERE sample_id=$1 AND tenant_id=$2 AND deleted_at IS NULL ORDER BY reported_at DESC NULLS LAST, created_at DESC`,
+      `SELECT ${this.resultCols} FROM lab_results r LEFT JOIN diagnoses d ON d.id = r.diagnosis_id
+        WHERE r.sample_id=$1 AND r.tenant_id=$2 AND r.deleted_at IS NULL
+        ORDER BY r.reported_at DESC NULLS LAST, r.created_at DESC`,
       [sampleId, this.db.tenant],
     );
   }
 
   async addResult(sampleId: string, body: any) {
-    const s = await this.db.one<{ status: string }>(`SELECT status FROM lab_samples WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [sampleId, this.db.tenant]);
+    const s = await this.db.one<{ status: string; animal_id: string | null }>(
+      `SELECT status, animal_id FROM lab_samples WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+      [sampleId, this.db.tenant],
+    );
     if (!s) throw new NotFoundException({ code: 'lab.sample_not_found', title: 'Muestra no encontrada' });
     if (!RESULTABLE.includes(s.status)) throw new ConflictException({ code: 'lab.sample_not_resultable', title: `No se pueden cargar resultados de una muestra '${s.status}' (enviala primero)` });
     const testCode = String(body?.test_code ?? '').trim();
     if (!testCode) throw new BadRequestException({ code: 'lab.missing_test_code', title: 'test_code es obligatorio' });
+    const diagnosis = await this.requireDiagnosis(body?.diagnosis_id);
     const reportedAt = body?.reported_at ?? new Date().toISOString();
     const row = await this.db.one<{ id: string }>(
-      `INSERT INTO lab_results (tenant_id, sample_id, test_code, result_value, result_data, reference_range, is_abnormal, reported_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [this.db.tenant, sampleId, testCode, body?.result_value ?? null, body?.result_data ?? {}, body?.reference_range ?? null, body?.is_abnormal ?? null, reportedAt, this.db.user],
+      `INSERT INTO lab_results (tenant_id, sample_id, test_code, result_value, result_data, reference_range, is_abnormal, reported_at, diagnosis_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [this.db.tenant, sampleId, testCode, body?.result_value ?? null, body?.result_data ?? {}, body?.reference_range ?? null, body?.is_abnormal ?? null, reportedAt, diagnosis?.id ?? null, this.db.user],
     );
+    const resultId = (row as { id: string }).id;
+
+    // El lazo con Sanidad (Fase 3.1). Se evalúa acá, en el momento de cargar el resultado, y no en
+    // un proceso aparte: un caso clínico que aparece diez minutos después es un caso que nadie
+    // relaciona con lo que acaba de cargar.
+    const veredicto = assessLabResult({
+      isAbnormal: body?.is_abnormal ?? null,
+      hasAnimal: s.animal_id != null,
+      diagnosisId: diagnosis?.id ?? null,
+      isNotifiable: diagnosis?.is_notifiable ?? null,
+    });
+    let caseId: string | null = null;
+    if (veredicto.opensCase) caseId = await this.linkClinicalCase(resultId, s.animal_id!, diagnosis!.id, veredicto.severity!, testCode, body?.result_value ?? null);
+
+    return { ...(await this.getResult(resultId)), case_assessment: { ...veredicto, clinical_case_id: caseId } };
+  }
+
+  /**
+   * Abre el caso clínico del resultado, o lo suma al que ya está abierto por el mismo diagnóstico.
+   *
+   * Retomar en vez de abrir de nuevo es lo que hace un veterinario y es lo que evita que una tanda
+   * de análisis del mismo animal genere cinco casos por lo mismo. La creación del caso NO se
+   * duplica acá: la hace `ClinicalCaseService`, que es donde vive esa regla (timeline del caso +
+   * evento del animal + máquina de estados).
+   */
+  private async linkClinicalCase(
+    resultId: string,
+    animalId: string,
+    diagnosisId: string,
+    severity: string,
+    testCode: string,
+    resultValue: string | null,
+  ): Promise<string> {
+    const nota = `Laboratorio: ${testCode}${resultValue ? ` = ${resultValue}` : ''}.`;
+    const abierto = await this.db.one<{ id: string }>(
+      `SELECT id FROM clinical_cases
+        WHERE tenant_id=$1 AND animal_id=$2 AND diagnosis_id=$3 AND deleted_at IS NULL
+          AND status = ANY($4::text[]) ORDER BY started_at DESC LIMIT 1`,
+      [this.db.tenant, animalId, diagnosisId, OPEN_CASE_STATUSES as unknown as string[]],
+    );
+
+    const caseId = abierto
+      ? (await this.cases.addFollowUp(abierto.id, { note: `${nota} Nuevo resultado sobre un caso ya abierto.` }), abierto.id)
+      : (await this.cases.create({ animal_id: animalId, diagnosis_id: diagnosisId, severity, notes: `${nota} Caso abierto por el resultado de laboratorio.` })).id;
+
+    await this.db.query(`UPDATE lab_results SET clinical_case_id=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3`, [caseId, resultId, this.db.tenant]);
+    return caseId;
+  }
+
+  /**
+   * Abre el caso a pedido, desde un resultado que el sistema NO abrió solo.
+   *
+   * Es la contraparte de la regla: los resultados sin diagnóstico necesitan criterio veterinario, y
+   * esto es el clic que lo convierte en acción sin retipear nada. El diagnóstico se puede indicar
+   * acá — es el momento en que el veterinario le pone nombre a lo que vio.
+   */
+  async openCaseFromResult(resultId: string, body: any) {
+    const r = await this.db.one<any>(
+      `SELECT r.id, r.test_code, r.result_value, r.is_abnormal, r.diagnosis_id, r.clinical_case_id, s.animal_id
+         FROM lab_results r JOIN lab_samples s ON s.id = r.sample_id AND s.deleted_at IS NULL
+        WHERE r.id=$1 AND r.tenant_id=$2 AND r.deleted_at IS NULL`,
+      [resultId, this.db.tenant],
+    );
+    if (!r) throw new NotFoundException({ code: 'lab.result_not_found', title: 'Resultado no encontrado' });
+    // Idempotente: reintentar desde una alerta que quedó abierta en otra pestaña no duplica el caso.
+    if (r.clinical_case_id) return { id: resultId, clinical_case_id: r.clinical_case_id, already_linked: true };
+    if (!r.animal_id) throw new ConflictException({ code: 'lab.result_without_animal', title: 'La muestra no es de un animal: no corresponde un caso clínico' });
+
+    const diagnosis = await this.requireDiagnosis(body?.diagnosis_id ?? r.diagnosis_id);
+    if (!diagnosis) throw new BadRequestException({ code: 'lab.missing_diagnosis', title: 'Indicá el diagnóstico con el que se abre el caso' });
+    // La severidad la decide la MISMA regla que el camino automático, para que un caso abierto a
+    // mano y uno abierto solo por el mismo hallazgo no nazcan distintos.
+    const veredicto = assessLabResult({ isAbnormal: true, hasAnimal: true, diagnosisId: diagnosis.id, isNotifiable: diagnosis.is_notifiable });
+    const severity = String(body?.severity ?? veredicto.severity);
+    if (r.diagnosis_id !== diagnosis.id)
+      await this.db.query(`UPDATE lab_results SET diagnosis_id=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3`, [diagnosis.id, resultId, this.db.tenant]);
+    const caseId = await this.linkClinicalCase(resultId, r.animal_id, diagnosis.id, severity, r.test_code, r.result_value);
+    return { id: resultId, clinical_case_id: caseId };
+  }
+
+  private async getResult(id: string) {
     return this.db.one(
-      `SELECT id, test_code, result_value, result_data, reference_range, is_abnormal, reported_at FROM lab_results WHERE id=$1 AND tenant_id=$2`,
-      [(row as { id: string }).id, this.db.tenant],
+      `SELECT ${this.resultCols} FROM lab_results r LEFT JOIN diagnoses d ON d.id = r.diagnosis_id WHERE r.id=$1 AND r.tenant_id=$2`,
+      [id, this.db.tenant],
     );
   }
 
@@ -131,6 +225,17 @@ export class SamplesService {
     if (!id) return;
     const a = await this.db.one<{ id: string }>(`SELECT id FROM animals WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, this.db.tenant]);
     if (!a) throw new NotFoundException({ code: 'lab.animal_not_found', title: 'Animal no encontrado' });
+  }
+
+  /** Devuelve el diagnóstico (con `is_notifiable`, que la regla necesita) o null si no se indicó. */
+  private async requireDiagnosis(id: string | null | undefined) {
+    if (!id) return null;
+    const d = await this.db.one<{ id: string; is_notifiable: boolean | null }>(
+      `SELECT id, is_notifiable FROM diagnoses WHERE id=$1 AND (tenant_id IS NULL OR tenant_id=$2) AND deleted_at IS NULL`,
+      [id, this.db.tenant],
+    );
+    if (!d) throw new BadRequestException({ code: 'lab.invalid_diagnosis', title: 'Diagnóstico inválido' });
+    return d;
   }
 
   private async requirePaddock(id: string | null | undefined) {

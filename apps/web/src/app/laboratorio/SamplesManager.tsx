@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Card, CardTitle } from '@/components/ui';
@@ -41,6 +42,16 @@ interface Result {
   result_value: string | null;
   reference_range: string | null;
   is_abnormal: boolean | null;
+  /** El laboratorio dijo QUÉ es, no solo que está raro: es lo que dispara el caso clínico (Fase 3.1). */
+  diagnosis_id: string | null;
+  diagnosis: string | null;
+  is_notifiable: boolean | null;
+  clinical_case_id: string | null;
+}
+interface Diagnosis {
+  id: string;
+  name: string;
+  is_notifiable: boolean | null;
 }
 
 const SAMPLE_TYPES = ['blood', 'tissue', 'milk', 'soil', 'hair', 'semen', 'feces', 'other'];
@@ -53,7 +64,7 @@ const ACTIONS: Record<string, [string, string][]> = {
 };
 const RESULTABLE = ['sent', 'in_progress', 'completed'];
 
-export function SamplesManager({ samples, labs, animals, paddocks }: { samples: Sample[]; labs: Lab[]; animals: Animal[]; paddocks: Paddock[] }) {
+export function SamplesManager({ samples, labs, animals, paddocks, diagnoses }: { samples: Sample[]; labs: Lab[]; animals: Animal[]; paddocks: Paddock[]; diagnoses: Diagnosis[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -68,6 +79,11 @@ export function SamplesManager({ samples, labs, animals, paddocks }: { samples: 
   const [resultValue, setResultValue] = useState('');
   const [refRange, setRefRange] = useState('');
   const [abnormal, setAbnormal] = useState(false);
+  const [diagnosisId, setDiagnosisId] = useState('');
+  /** Lo que el backend decidió con el último resultado: se muestra tal cual, incluido el «no se abrió porque…». */
+  const [veredicto, setVeredicto] = useState<{ opensCase: boolean; explanation: string } | null>(null);
+  /** Diagnóstico elegido por fila para abrir el caso a mano. */
+  const [caseDiagnosis, setCaseDiagnosis] = useState<Record<string, string>>({});
 
   async function call(method: string, path: string, data?: any) {
     const res = await fetch(`${API_URL}${path}`, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: data ? JSON.stringify(data) : undefined });
@@ -112,18 +128,40 @@ export function SamplesManager({ samples, labs, animals, paddocks }: { samples: 
       const rows = await call('GET', `/lab/samples/${s.id}/results`);
       setSelected(s);
       setResults(rows ?? []);
+      setVeredicto(null);
     });
 
   const addResult = () =>
     run(async () => {
       if (!selected) return;
-      await call('POST', `/lab/samples/${selected.id}/results`, { test_code: testCode, result_value: resultValue || null, reference_range: refRange || null, is_abnormal: abnormal });
+      const creado = await call('POST', `/lab/samples/${selected.id}/results`, {
+        test_code: testCode,
+        result_value: resultValue || null,
+        reference_range: refRange || null,
+        is_abnormal: abnormal,
+        diagnosis_id: diagnosisId || null,
+      });
       setTestCode('');
       setResultValue('');
       setRefRange('');
       setAbnormal(false);
+      setDiagnosisId('');
+      // Solo se muestra el veredicto de un resultado anormal: en uno normal, «no se abrió caso» es
+      // obvio y decirlo cada vez entrena a ignorar el aviso.
+      setVeredicto(creado?.is_abnormal ? (creado?.case_assessment ?? null) : null);
       const rows = await call('GET', `/lab/samples/${selected.id}/results`);
       setResults(rows ?? []);
+      router.refresh();
+    });
+
+  /** Abre el caso a mano cuando el resultado no traía diagnóstico: el clic que reemplaza retipear. */
+  const openCase = (r: Result, diagnosis: string) =>
+    run(async () => {
+      if (!selected) return;
+      await call('POST', `/lab/results/${r.id}/clinical-case`, { diagnosis_id: diagnosis });
+      const rows = await call('GET', `/lab/samples/${selected.id}/results`);
+      setResults(rows ?? []);
+      setVeredicto(null);
       router.refresh();
     });
 
@@ -218,18 +256,70 @@ export function SamplesManager({ samples, labs, animals, paddocks }: { samples: 
             ) : (
               <ul className="divide-y divide-subtle">
                 {results.map((r) => (
-                  <li key={r.id} className="flex items-center justify-between py-1.5">
-                    <div>
-                      <span className="text-body font-medium">{r.test_code}</span>
-                      <span className="ml-2 text-label text-ink-3">
-                        {r.result_value ?? '—'}
-                        {r.reference_range ? ` (${r.reference_range})` : ''}
-                      </span>
+                  <li key={r.id} className="py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-body font-medium">{r.test_code}</span>
+                        <span className="ml-2 text-label text-ink-3">
+                          {r.result_value ?? '—'}
+                          {r.reference_range ? ` (${r.reference_range})` : ''}
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {r.is_notifiable && (
+                          <span className="rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-caption font-medium text-danger">Denuncia obligatoria</span>
+                        )}
+                        {r.is_abnormal && <span className="rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-caption font-medium text-danger">Anormal</span>}
+                      </div>
                     </div>
-                    {r.is_abnormal && <span className="rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-caption font-medium text-danger">Anormal</span>}
+                    {r.diagnosis && <div className="text-caption text-ink-3">Diagnóstico: {r.diagnosis}</div>}
+                    {r.clinical_case_id ? (
+                      // Los casos viven en el panel de Sanidad, no en una ruta propia por caso.
+                      <Link href="/sanidad#casos" className="text-caption font-medium text-brand hover:underline">
+                        Caso clínico abierto →
+                      </Link>
+                    ) : (
+                      // El resultado anormal SIN caso es el que necesita una persona. Se ofrece la
+                      // acción acá, con el animal y el resultado ya cargados: es lo que evita el
+                      // camino largo por Sanidad retipeando todo.
+                      r.is_abnormal &&
+                      selected?.animal_id && (
+                        <div className="mt-1 flex items-center gap-1">
+                          <Select
+                            value={caseDiagnosis[r.id] ?? r.diagnosis_id ?? ''}
+                            onChange={(e) => setCaseDiagnosis({ ...caseDiagnosis, [r.id]: e.target.value })}
+                            controlSize="sm"
+                            aria-label={`Diagnóstico para abrir el caso de ${r.test_code}`}
+                          >
+                            <option value="">Diagnóstico…</option>
+                            {diagnoses.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                                {d.is_notifiable ? ' (denuncia obligatoria)' : ''}
+                              </option>
+                            ))}
+                          </Select>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={busy}
+                            disabled={busy || !(caseDiagnosis[r.id] ?? r.diagnosis_id)}
+                            onClick={() => openCase(r, caseDiagnosis[r.id] ?? r.diagnosis_id!)}
+                          >
+                            Abrir caso
+                          </Button>
+                        </div>
+                      )
+                    )}
                   </li>
                 ))}
               </ul>
+            )}
+            {veredicto && (
+              <p className={`rounded border px-2 py-1.5 text-label ${veredicto.opensCase ? 'border-danger/30 bg-danger/5 text-danger' : 'border-subtle text-ink-3'}`}>
+                {veredicto.opensCase ? 'Se abrió un caso clínico. ' : 'No se abrió caso clínico. '}
+                {veredicto.explanation}
+              </p>
             )}
             {RESULTABLE.includes(selected.status) ? (
               <div className="space-y-2 border-t border-subtle pt-2">
@@ -243,6 +333,22 @@ export function SamplesManager({ samples, labs, animals, paddocks }: { samples: 
                     <input type="checkbox" checked={abnormal} onChange={(e) => setAbnormal(e.target.checked)} /> Anormal
                   </label>
                 </div>
+                {/* Con diagnóstico, un resultado anormal abre el caso clínico solo. Sin él queda como
+                    hallazgo para que lo mire el veterinario: es la diferencia entre «qué es» y «está raro». */}
+                {selected.animal_id && (
+                  <Select value={diagnosisId} onChange={(e) => setDiagnosisId(e.target.value)} controlSize="sm" aria-label="Diagnóstico (opcional)">
+                    <option value="">Sin diagnóstico…</option>
+                    {diagnoses.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                        {d.is_notifiable ? ' (denuncia obligatoria)' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+                {abnormal && diagnosisId && selected.animal_id && (
+                  <p className="text-caption text-ink-3">Al guardar se abrirá un caso clínico con este animal.</p>
+                )}
                 <Button size="sm" fullWidth loading={busy} disabled={busy || !testCode.trim()} onClick={addResult}>
                   Cargar resultado
                 </Button>

@@ -17,3 +17,5 @@ export {
 export type { ClinicalCaseStatus, ClinicalCaseSeverity, ClinicalCaseOutcome } from './clinical-case';
 export { ADMISSION_KINDS, InvalidAdmissionError, assertAdmissionKind, resolveAdmissionKind } from './admission';
 export type { AdmissionKind } from './admission';
+export { assessLabResult } from './lab-result';
+export type { LabResultAssessment, LabResultInput, LabAssessmentReason } from './lab-result';

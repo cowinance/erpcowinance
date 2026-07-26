@@ -26,6 +26,8 @@ import { VaccinationSyncHandler } from './sync/vaccination-sync.handler';
     HealthService, MortalityService, TreatmentService, VaccinationService, ClinicalCaseService, HospitalizationService, HealthReportsService, PlansService,
     MortalitySyncHandler, TreatmentSyncHandler, VaccinationSyncHandler,
   ],
-  exports: [HealthService], // Inicio (DashboardHomeService) compone health.kpis() sin duplicar reglas.
+  // ClinicalCaseService: Laboratorio abre el caso desde el resultado (Fase 3.1) reusando ESTA regla
+  // —timeline del caso + evento del animal + máquina de estados—, en vez de insertar por su cuenta.
+  exports: [HealthService, ClinicalCaseService], // Inicio (DashboardHomeService) compone health.kpis() sin duplicar reglas.
 })
 export class HealthModule {}

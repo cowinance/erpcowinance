@@ -71,4 +71,15 @@ export class LabController {
   addResult(@Param('id') id: string, @Body() body: any) {
     return this.samples.addResult(id, body);
   }
+
+  /**
+   * Abre el caso clínico desde un resultado que el sistema no abrió solo (Fase 3.1).
+   *
+   * Es el clic que convierte la alerta «fuera de rango» en acción: los resultados sin diagnóstico
+   * necesitan criterio veterinario, y esto lo aplica sin retipear el animal ni el diagnóstico.
+   */
+  @Post('results/:id/clinical-case')
+  openCase(@Param('id') id: string, @Body() body: any) {
+    return this.samples.openCaseFromResult(id, body);
+  }
 }

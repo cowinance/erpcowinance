@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { LabsService } from './labs.service';
 import { SamplesService } from './samples.service';
+import { ClinicalCaseService } from '../health/clinical-case.service';
 
 /**
  * Integración de laboratorio (LAB-1/LAB-2): maestro, muestras con la máquina de estados
@@ -29,7 +30,7 @@ describe('lab — laboratorio', () => {
     db = new DbService();
     await db.onModuleInit();
     labs = new LabsService(db);
-    samples = new SamplesService(db);
+    samples = new SamplesService(db, new ClinicalCaseService(db));
     tenantId = db.tenant;
     animalId = (await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id=$1 LIMIT 1`, [tenantId]))[0].id;
     const lab: any = await labs.create({ name: 'LabVet SA', type: 'pathology', contact: { email: 'lab@vet.com' } });
@@ -96,5 +97,108 @@ describe('lab — laboratorio', () => {
     const s: any = await samples.create({ sample_type: 'hair' });
     await samples.remove(s.id);
     await expect(samples.get(s.id)).rejects.toMatchObject({ status: 404 });
+  });
+
+  /**
+   * El lazo con Sanidad (Fase 3.1). Lo que se fija acá no es que el caso aparezca, sino que aparezca
+   * SOLO cuando corresponde: el modo de falla caro no es que falte un caso, es que Sanidad se llene
+   * de casos que nadie cierra hasta que la pantalla se vuelve ruido.
+   */
+  describe('resultado positivo → caso clínico', () => {
+    let brucelosis: string;
+    let mastitis: string;
+
+    /** Muestra de sangre lista para recibir resultados. */
+    const enviada = async (animal: string | null = animalId) => {
+      const s: any = await samples.create({ sample_type: 'blood', animal_id: animal, lab_id: labId });
+      await samples.setStatus(s.id, 'sent');
+      return s.id as string;
+    };
+
+    beforeAll(async () => {
+      // Del catálogo global: brucelosis es de denuncia obligatoria, mastitis no.
+      brucelosis = (await db.query<any>(`SELECT id FROM diagnoses WHERE code='brucelosis' AND tenant_id IS NULL`))[0].id;
+      mastitis = (await db.query<any>(`SELECT id FROM diagnoses WHERE code='mastitis' AND tenant_id IS NULL`))[0].id;
+    });
+
+    it('un diagnóstico positivo abre el caso con el animal ya cargado', async () => {
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'MAST-CMT', result_value: 'positivo', is_abnormal: true, diagnosis_id: mastitis });
+      expect(r.case_assessment.opensCase).toBe(true);
+      expect(r.clinical_case_id).toBeTruthy();
+      const cc: any = await db.query(`SELECT animal_id, diagnosis_id, severity, status FROM clinical_cases WHERE id=$1`, [r.clinical_case_id]).then((x: any) => x[0]);
+      expect(cc.animal_id).toBe(animalId);
+      expect(cc.diagnosis_id).toBe(mastitis);
+      expect(cc.severity).toBe('moderate');
+    });
+
+    it('la enfermedad de denuncia obligatoria abre el caso SEVERO', async () => {
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'BRUC-RB', result_value: 'positivo', is_abnormal: true, diagnosis_id: brucelosis });
+      const cc: any = await db.query(`SELECT severity FROM clinical_cases WHERE id=$1`, [r.clinical_case_id]).then((x: any) => x[0]);
+      expect(cc.severity).toBe('severe');
+    });
+
+    it('UN SEGUNDO RESULTADO NO ABRE UN CASO NUEVO: se suma al que ya está abierto', async () => {
+      // La tanda de análisis de un mismo animal es lo normal, no la excepción. Sin esto, cinco
+      // resultados dan cinco casos por lo mismo y la pantalla de Sanidad deja de servir.
+      const antes: any = await db.query(`SELECT count(*)::int AS n FROM clinical_cases WHERE tenant_id=$1 AND animal_id=$2 AND diagnosis_id=$3`, [tenantId, animalId, brucelosis]);
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'BRUC-ELISA', result_value: 'positivo', is_abnormal: true, diagnosis_id: brucelosis });
+      const despues: any = await db.query(`SELECT count(*)::int AS n FROM clinical_cases WHERE tenant_id=$1 AND animal_id=$2 AND diagnosis_id=$3`, [tenantId, animalId, brucelosis]);
+      expect(despues[0].n).toBe(antes[0].n);
+      // Y el resultado nuevo queda apuntando al caso vivo, no huérfano.
+      expect(r.clinical_case_id).toBeTruthy();
+      const seguimientos: any = await db.query(`SELECT count(*)::int AS n FROM clinical_case_events WHERE case_id=$1 AND kind='note'`, [r.clinical_case_id]);
+      expect(seguimientos[0].n).toBeGreaterThan(0);
+    });
+
+    it('FUERA DE RANGO SIN DIAGNÓSTICO NO ABRE CASO, y dice por qué', async () => {
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'GLU', result_value: '180', is_abnormal: true });
+      expect(r.clinical_case_id).toBeNull();
+      expect(r.case_assessment.reason).toBe('needs_judgement');
+    });
+
+    it('una muestra sin animal no abre caso, aunque el diagnóstico sea grave', async () => {
+      const sid = await enviada(null);
+      const r: any = await samples.addResult(sid, { test_code: 'BRUC-RB', result_value: 'positivo', is_abnormal: true, diagnosis_id: brucelosis });
+      expect(r.clinical_case_id).toBeNull();
+      expect(r.case_assessment.reason).toBe('no_animal');
+    });
+
+    it('el veterinario abre el caso a mano desde un resultado sin diagnóstico', async () => {
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'SCC', result_value: '900000', is_abnormal: true });
+      expect(r.clinical_case_id).toBeNull();
+      const abierto: any = await samples.openCaseFromResult(r.id, { diagnosis_id: mastitis });
+      expect(abierto.clinical_case_id).toBeTruthy();
+      // El diagnóstico que puso el veterinario queda EN el resultado: la próxima vez ya no hace
+      // falta criterio para lo mismo.
+      const [rr]: any = await samples.listResults(sid);
+      expect(rr.diagnosis_id).toBe(mastitis);
+    });
+
+    it('reabrir desde el mismo resultado es idempotente', async () => {
+      // La alerta que quedó abierta en otra pestaña no puede duplicar el caso.
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'MAST-CMT', is_abnormal: true, diagnosis_id: mastitis });
+      const otra: any = await samples.openCaseFromResult(r.id, {});
+      expect(otra.already_linked).toBe(true);
+      expect(otra.clinical_case_id).toBe(r.clinical_case_id);
+    });
+
+    it('sin diagnóstico ni en el resultado ni en el pedido, no adivina', async () => {
+      const sid = await enviada();
+      const r: any = await samples.addResult(sid, { test_code: 'GLU', is_abnormal: true });
+      await expect(samples.openCaseFromResult(r.id, {})).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('un diagnóstico inexistente se rechaza en vez de guardarse en null', async () => {
+      const sid = await enviada();
+      await expect(
+        samples.addResult(sid, { test_code: 'X', is_abnormal: true, diagnosis_id: '00000000-0000-4000-8000-000000000000' }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
   });
 });

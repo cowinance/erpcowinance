@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { HealthModule } from '../health/health.module';
 import { LabController } from './lab.controller';
 import { LabsService } from './labs.service';
 import { SamplesService } from './samples.service';
@@ -10,6 +11,9 @@ import { SamplesService } from './samples.service';
  * directa, sin acoplar.
  */
 @Module({
+  // Un resultado positivo abre el caso clínico (Fase 3.1). La dirección es Lab → Sanidad y no al
+  // revés: Sanidad no sabe que existe el laboratorio, así que no hay ciclo.
+  imports: [HealthModule],
   controllers: [LabController],
   providers: [LabsService, SamplesService],
 })
