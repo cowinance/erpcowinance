@@ -9,6 +9,11 @@ export class SalesController {
   list(@Query('status') status?: string) {
     return this.sales.list(status);
   }
+  /** Certificaciones que amparan (o no) a los animales de la venta, antes de cerrarla (Fase 3.3). */
+  @Get(':id/certifications')
+  certifications(@Param('id') id: string) {
+    return this.sales.certifications(id);
+  }
   @Get(':id')
   get(@Param('id') id: string) {
     return this.sales.get(id);

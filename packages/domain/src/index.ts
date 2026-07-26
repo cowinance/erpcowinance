@@ -40,3 +40,5 @@ export * from './crm';
 export * from './genetics';
 // Fiscal — identidad tributaria venezolana: RIF y condición del contribuyente (G4-1).
 export * from './tax';
+// Trazabilidad — certificaciones contrastadas contra una venta, antes de cerrarla (Fase 3.3).
+export * from './traceability';

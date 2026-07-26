@@ -16,6 +16,27 @@ interface Doc {
   date: string;
 }
 
+interface SchemeCheck {
+  scheme: string;
+  verdict: 'ok' | 'vencida' | 'por_vencer' | 'suspendida' | 'parcial' | 'sin_cobertura';
+  message: string;
+  uncoveredTags: string[];
+}
+interface CertCheck {
+  animals: number;
+  hasWarnings: boolean;
+  schemes: SchemeCheck[];
+}
+
+/** Un aviso NO es un bloqueo: el sistema no sabe qué le exige el comprador a esta venta. */
+const VERDICT: Record<string, { label: string; tone: string }> = {
+  vencida: { label: 'Certificación vencida', tone: 'border-danger/30 bg-danger/10 text-danger' },
+  suspendida: { label: 'Certificación suspendida', tone: 'border-danger/30 bg-danger/10 text-danger' },
+  sin_cobertura: { label: 'Sin cobertura', tone: 'border-warning/30 bg-warning/10 text-warning' },
+  parcial: { label: 'Venta mixta', tone: 'border-warning/30 bg-warning/10 text-warning' },
+  por_vencer: { label: 'Vence pronto', tone: 'border-subtle text-ink-3' },
+};
+
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Borrador',
   confirmed: 'Confirmada',
@@ -41,7 +62,19 @@ const ACTIONS: Record<'purchase' | 'sale', Record<string, [string, string][]>> =
   },
 };
 
-export function DocumentList({ kind, docs }: { kind: 'purchase' | 'sale'; docs: Doc[] }) {
+export function DocumentList({
+  kind,
+  docs,
+  certifications = {},
+  uncheckedCount = 0,
+}: {
+  kind: 'purchase' | 'sale';
+  docs: Doc[];
+  /** Chequeo de certificaciones por venta (Fase 3.3). Solo lo manda la pantalla de ventas. */
+  certifications?: Record<string, CertCheck | null>;
+  /** Ventas abiertas que quedaron sin revisar por el tope: se dice, no se esconde. */
+  uncheckedCount?: number;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -77,31 +110,70 @@ export function DocumentList({ kind, docs }: { kind: 'purchase' | 'sale'; docs: 
           {error}
         </p>
       )}
+      {uncheckedCount > 0 && (
+        <p className="mb-2 text-caption text-ink-3">
+          {uncheckedCount} venta{uncheckedCount === 1 ? '' : 's'} abierta{uncheckedCount === 1 ? '' : 's'} sin revisar la certificación: se revisan las 20 más
+          recientes.
+        </p>
+      )}
       {docs.length === 0 ? (
         <p className="py-3 text-center text-label text-ink-3">Sin {kind === 'sale' ? 'ventas' : 'compras'} todavía.</p>
       ) : (
         <ul className="divide-y divide-subtle">
           {docs.map((d) => (
-            <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-              <div>
-                <span className="text-body font-medium">{d.party_name}</span>
-                <span className="ml-2 text-label text-ink-3">{d.document_number ?? d.date}</span>
-                <div className="text-label text-ink-3">
-                  <span className="tnum">{d.total}</span> {d.currency}
+            <li key={d.id} className="py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-body font-medium">{d.party_name}</span>
+                  <span className="ml-2 text-label text-ink-3">{d.document_number ?? d.date}</span>
+                  <div className="text-label text-ink-3">
+                    <span className="tnum">{d.total}</span> {d.currency}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-subtle px-2 py-0.5 text-caption font-medium text-ink-2">{STATUS_LABEL[d.status] ?? d.status}</span>
+                  {(ACTIONS[kind][d.status] ?? []).map(([to, label]) => (
+                    <Button key={to} variant="secondary" size="sm" loading={busy === d.id + to} disabled={!!busy} onClick={() => transition(d.id, to)}>
+                      {label}
+                    </Button>
+                  ))}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-subtle px-2 py-0.5 text-caption font-medium text-ink-2">{STATUS_LABEL[d.status] ?? d.status}</span>
-                {(ACTIONS[kind][d.status] ?? []).map(([to, label]) => (
-                  <Button key={to} variant="secondary" size="sm" loading={busy === d.id + to} disabled={!!busy} onClick={() => transition(d.id, to)}>
-                    {label}
-                  </Button>
-                ))}
-              </div>
+              <Certifications check={certifications[d.id]} />
             </li>
           ))}
         </ul>
       )}
     </Card>
+  );
+}
+
+/**
+ * El aviso de certificación de una venta (Fase 3.3).
+ *
+ * Va pegado a la fila y ARRIBA del botón «Entregar», que es el momento en que importa: hoy el
+ * problema aparece en el control, con el camión cargado, y el dato estaba en el sistema desde hacía
+ * meses.
+ *
+ * Solo se muestra lo que hay que mirar. Un «todo en orden» en cada venta entrena a saltear el
+ * renglón, y entonces el aviso que sí importa tampoco se lee.
+ */
+function Certifications({ check }: { check?: CertCheck | null }) {
+  if (!check || !check.hasWarnings) return null;
+  const avisos = check.schemes.filter((s) => s.verdict !== 'ok');
+  return (
+    <div className="mt-1.5 space-y-1 border-l-2 border-warning/40 pl-2">
+      {avisos.map((s) => (
+        <div key={s.scheme}>
+          <span className={`rounded-full border px-2 py-0.5 text-caption font-medium ${VERDICT[s.verdict]?.tone ?? 'border-subtle text-ink-3'}`}>
+            {VERDICT[s.verdict]?.label ?? s.verdict}
+          </span>
+          <p className="mt-0.5 text-caption text-ink-3">{s.message}</p>
+          {s.uncoveredTags.length > 0 && s.verdict === 'parcial' && (
+            <p className="text-caption text-ink-3">Sin cubrir: caravanas {s.uncoveredTags.join(', ')}.</p>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }

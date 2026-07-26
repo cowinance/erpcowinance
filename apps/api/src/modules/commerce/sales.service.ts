@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { computeDocumentTotals, DocumentLineInput } from '@cowinance/domain';
+import { assessSaleCertifications, computeDocumentTotals, DocumentLineInput } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { AnimalStatusService } from '../herd/animal-status.service';
@@ -161,6 +161,76 @@ export class SalesService {
         });
       }
     }
+  }
+
+  /**
+   * Certificaciones de la venta (Fase 3.3): avisa ANTES de cerrarla, no en el control.
+   *
+   * Hoy el problema aparece tarde — la venta se cierra, los animales salen, y recién ahí se descubre
+   * que la certificación estaba vencida o que ese lote nunca estuvo cubierto. El dato estaba cargado
+   * en el sistema desde hacía meses; lo único que faltaba era mirarlo en el momento correcto.
+   *
+   * La cobertura es POLIMÓRFICA y se expande acá: una certificación de finca ampara a todos sus
+   * animales, una de lote a los del lote, y una de animal a ése. Resolverlo en la consulta y no en
+   * el dominio es deliberado — es una pregunta sobre cómo están guardados los datos, no una regla
+   * de negocio.
+   *
+   * NUNCA bloquea. El sistema no sabe qué le exige el comprador; sabe qué esquemas mantiene la
+   * finca y cuáles no cubren esta venta. La decisión sigue siendo del productor.
+   */
+  async certifications(saleId: string) {
+    const t = this.db.tenant;
+    const sale = await this.db.one<{ id: string; sale_date: string }>(
+      `SELECT id, sale_date::text AS sale_date FROM sales WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+      [saleId, t],
+    );
+    if (!sale) throw new NotFoundException({ code: 'commerce.sale_not_found', title: 'Venta no encontrada' });
+
+    const animales = await this.db.query<{ animal_id: string; tag: string | null }>(
+      `SELECT DISTINCT sl.animal_id, ai.value AS tag
+         FROM sale_lines sl
+         LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = sl.animal_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+        WHERE sl.sale_id=$1 AND sl.tenant_id=$2 AND sl.deleted_at IS NULL AND sl.animal_id IS NOT NULL`,
+      [saleId, t],
+    );
+    // Una venta de insumos o de leche no tiene animales que certificar: contestar «sin cobertura»
+    // sería un aviso sobre algo que no existe.
+    if (animales.length === 0) return { sale_id: saleId, sale_date: sale.sale_date, animals: 0, hasWarnings: false, schemes: [] };
+
+    const ids = animales.map((a) => a.animal_id);
+    const [esquemas, cobertura] = await Promise.all([
+      this.db.query<{ scheme: string }>(
+        `SELECT DISTINCT scheme FROM certifications WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY scheme`,
+        [t],
+      ),
+      this.db.query<any>(
+        `SELECT c.scheme, a.id AS animal_id, c.entity_type AS scope, c.status, c.valid_until::text AS valid_until
+           FROM certifications c
+           JOIN animals a ON a.tenant_id = c.tenant_id AND a.deleted_at IS NULL AND a.id = ANY($2::uuid[])
+            AND ( (c.entity_type = 'animal' AND c.entity_id = a.id)
+               OR (c.entity_type = 'lot'    AND c.entity_id = a.current_lot_id)
+               OR (c.entity_type = 'farm'   AND c.entity_id = a.farm_id) )
+          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL`,
+        [t, ids],
+      ),
+    ]);
+
+    const check = assessSaleCertifications({
+      saleDate: sale.sale_date,
+      animalIds: ids,
+      schemes: esquemas.map((e) => e.scheme),
+      coverage: cobertura.map((c) => ({ scheme: c.scheme, animalId: c.animal_id, scope: c.scope, status: c.status, validUntil: c.valid_until })),
+    });
+
+    // Las caravanas y no los uuid: el aviso lo lee alguien que tiene que ir a buscar esos animales.
+    const caravana = new Map(animales.map((a) => [a.animal_id, a.tag]));
+    return {
+      sale_id: saleId,
+      sale_date: sale.sale_date,
+      animals: ids.length,
+      hasWarnings: check.hasWarnings,
+      schemes: check.schemes.map((s) => ({ ...s, uncoveredTags: s.uncoveredAnimalIds.map((id) => caravana.get(id) ?? '—') })),
+    };
   }
 
   // ── Lectura ──────────────────────────────────────────────────────────────

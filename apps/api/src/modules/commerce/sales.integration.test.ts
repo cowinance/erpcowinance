@@ -132,4 +132,98 @@ describe('commerce — ventas', () => {
     await expect(sales.updateStatus(s2.id, 'delivered')).rejects.toMatchObject({ status: 409 });
     expect((await sales.get(s2.id) as any).status).toBe('draft');
   });
+
+  /**
+   * Certificaciones de la venta (Fase 3.3). Lo que se fija acá es la EXPANSIÓN POLIMÓRFICA: que una
+   * certificación de finca ampare a todos sus animales y una de lote solo a los del lote. Si eso se
+   * resolviera mal, el aviso saldría en ventas que están perfectas o —peor— callaría en las que no.
+   */
+  describe('certificaciones de la venta', () => {
+    let loteCert: string;
+    let loteSinCert: string;
+
+    const certificar = async (entityType: string, entityId: string, scheme: string, validUntil: string | null, status = 'active') => {
+      await db.query(
+        `INSERT INTO certifications (tenant_id, entity_type, entity_id, scheme, valid_from, valid_until, status) VALUES ($1,$2,$3,$4, CURRENT_DATE - 100, $5, $6)`,
+        [tenantId, entityType, entityId, scheme, validUntil, status],
+      );
+    };
+    const enLote = async (lot: string) =>
+      (await db.query<any>(`INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, origin, current_lot_id) VALUES ($1,$2,$3,'M','active','born',$4) RETURNING id`, [tenantId, farmId, speciesId, lot]))[0].id;
+
+    beforeAll(async () => {
+      loteCert = (await db.query<any>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote certificado') RETURNING id`, [tenantId, farmId]))[0].id;
+      loteSinCert = (await db.query<any>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote común') RETURNING id`, [tenantId, farmId]))[0].id;
+      await certificar('farm', farmId, 'Libre de brucelosis', '2030-01-01');
+      await certificar('farm', farmId, 'BPG vencida', '2020-01-01');
+      await certificar('lot', loteCert, 'Carne Natural', '2030-01-01');
+    });
+
+    it('la certificación de FINCA ampara a cualquier animal de la venta', async () => {
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'livestock', lines: [{ animal_id: await enLote(loteSinCert), quantity: 1, unit_price: 100 }] });
+      const r: any = await sales.certifications(s.id);
+      expect(r.schemes.find((x: any) => x.scheme === 'Libre de brucelosis').verdict).toBe('ok');
+    });
+
+    it('avisa de la vencida ANTES de cerrar, con la venta todavía en borrador', async () => {
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'livestock', lines: [{ animal_id: await enLote(loteCert), quantity: 1, unit_price: 100 }] });
+      expect(s.status).toBe('draft');
+      const r: any = await sales.certifications(s.id);
+      expect(r.hasWarnings).toBe(true);
+      expect(r.schemes.find((x: any) => x.scheme === 'BPG vencida').verdict).toBe('vencida');
+    });
+
+    it('LA CERTIFICACIÓN DE LOTE NO SE DERRAMA A LOS ANIMALES DE OTRO LOTE', async () => {
+      // Es la prueba que sostiene el aviso: si la cobertura por lote se expandiera mal, una venta
+      // mixta se vería como entera y el problema volvería a aparecer en el control.
+      const s: any = await sales.create({
+        customer_partner_id: customerId,
+        type: 'livestock',
+        lines: [
+          { animal_id: await enLote(loteCert), quantity: 1, unit_price: 100 },
+          { animal_id: await enLote(loteSinCert), quantity: 1, unit_price: 100 },
+        ],
+      });
+      const r: any = await sales.certifications(s.id);
+      const natural = r.schemes.find((x: any) => x.scheme === 'Carne Natural');
+      expect(natural.verdict).toBe('parcial');
+      expect(natural.coveredAnimals).toBe(1);
+      expect(natural.totalAnimals).toBe(2);
+    });
+
+    it('nombra las caravanas: el aviso lo lee quien tiene que ir a buscar los animales', async () => {
+      const sinCubrir = await enLote(loteSinCert);
+      await db.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual','C-777')`, [tenantId, sinCubrir]);
+      const s: any = await sales.create({
+        customer_partner_id: customerId,
+        type: 'livestock',
+        lines: [{ animal_id: await enLote(loteCert), quantity: 1, unit_price: 100 }, { animal_id: sinCubrir, quantity: 1, unit_price: 100 }],
+      });
+      const r: any = await sales.certifications(s.id);
+      expect(r.schemes.find((x: any) => x.scheme === 'Carne Natural').uncoveredTags).toContain('C-777');
+    });
+
+    it('una venta SIN animales no avisa de nada', async () => {
+      // Vender insumos o leche no tiene animales que certificar: contestar «sin cobertura» sería un
+      // aviso sobre algo que no existe.
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'product', lines: [{ item_id: itemId, quantity: 1, unit_price: 10 }] });
+      const r: any = await sales.certifications(s.id);
+      expect(r.animals).toBe(0);
+      expect(r.hasWarnings).toBe(false);
+      expect(r.schemes).toEqual([]);
+    });
+
+    it('NUNCA bloquea: con la certificación vencida la venta se entrega igual', async () => {
+      // El sistema no sabe qué le exige el comprador. Bloquear haría inservible una venta a alguien
+      // que no pide nada.
+      const s: any = await sales.create({ customer_partner_id: customerId, type: 'livestock', lines: [{ animal_id: await enLote(loteCert), quantity: 1, unit_price: 100 }] });
+      expect((await sales.certifications(s.id) as any).hasWarnings).toBe(true);
+      const entregada: any = await sales.updateStatus(s.id, 'delivered');
+      expect(entregada.status).toBe('delivered');
+    });
+
+    it('venta inexistente → 404', async () => {
+      await expect(sales.certifications('00000000-0000-4000-8000-000000000000')).rejects.toMatchObject({ status: 404 });
+    });
+  });
 });

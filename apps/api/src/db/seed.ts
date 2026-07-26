@@ -523,6 +523,60 @@ export async function seedDemo(db: Queryable) {
     }
   }
 
+  // ── Trazabilidad y una venta de hacienda (Fase 3.3) ──────────────────────────────────
+  //
+  // El aviso de certificación solo se puede ver si hay algo contra qué contrastar. Se siembran los
+  // TRES estados que cambian la conclusión, porque cada uno se resuelve en un lugar distinto:
+  //
+  //   - Vigente a nivel FINCA → cubre a todos, no hay nada que avisar.
+  //   - VENCIDA a nivel finca → hay que renovarla antes de despachar.
+  //   - Vigente a nivel LOTE → cubre solo a ese lote: una venta que mezcla lotes sale «parcial»,
+  //     que es el caso que más caro se paga y el más difícil de ver a ojo.
+  //
+  // La venta queda en `draft` a propósito: el aviso existe para leerse ANTES de cerrarla.
+  {
+    const [{ id: socioExportador }] = await q(
+      `INSERT INTO business_partners (tenant_id, company_id, type, name, tax_id) VALUES ($1,$2,'customer','Exportadora del Llano','J-30158742-6') RETURNING id`,
+      [org, company],
+    );
+    await q(`INSERT INTO customers (tenant_id, partner_id, segment) VALUES ($1,$2,'export')`, [org, socioExportador]);
+
+    const hoy = new Date().toISOString().slice(0, 10);
+    const enDias = (d: number) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+    await q(
+      `INSERT INTO certifications (tenant_id, entity_type, entity_id, scheme, issuer, valid_from, valid_until, status, created_by) VALUES
+         ($1,'farm',$2,'Predio libre de brucelosis','INSAI',$3,$4,'active',$5),
+         ($1,'farm',$2,'Buenas Prácticas Ganaderas','INSAI',$3,$6,'active',$5),
+         ($1,'lot',$7,'Carne Natural Certificada','Programa Carne Natural',$3,$8,'active',$5)`,
+      [org, farm, daysAgo(500).toISOString().slice(0, 10), enDias(400), userId, daysAgo(40).toISOString().slice(0, 10), lots[3], enDias(300)],
+    );
+
+    // La venta mezcla animales del lote certificado con otros que no lo están: es el escenario que
+    // la pantalla tiene que poder mostrar, y el que a ojo no se ve.
+    const delLoteCertificado = await q(`SELECT id FROM animals WHERE tenant_id=$1 AND current_lot_id=$2 AND status='active' AND deleted_at IS NULL LIMIT 3`, [org, lots[3]]);
+    const deOtroLote = await q(`SELECT id FROM animals WHERE tenant_id=$1 AND current_lot_id=$2 AND status='active' AND deleted_at IS NULL LIMIT 2`, [org, lots[2]]);
+    const aVender = [...delLoteCertificado, ...deOtroLote];
+    if (aVender.length > 0) {
+      const [{ id: venta }] = await q(
+        `INSERT INTO sales (tenant_id, company_id, customer_partner_id, document_number, sale_date, type, currency, subtotal, tax_total, total, status, created_by)
+         VALUES ($1,$2,$3,'VTA-2026-0044',$4,'livestock','USD',0,0,0,'draft',$5) RETURNING id`,
+        [org, company, socioExportador, hoy, userId],
+      );
+      let subtotal = 0;
+      for (const a of aVender) {
+        const kg = Math.round(between(380, 460));
+        const precio = +(between(2.6, 3.1) * kg).toFixed(2);
+        subtotal += precio;
+        await q(
+          `INSERT INTO sale_lines (tenant_id, sale_id, animal_id, description, quantity, unit_price, weight_kg, tax_rate, line_total, created_by)
+           VALUES ($1,$2,$3,'Novillo gordo',1,$4,$5,0,$4,$6)`,
+          [org, venta, a.id, precio, kg, userId],
+        );
+      }
+      await q(`UPDATE sales SET subtotal=$2, total=$2 WHERE id=$1`, [venta, subtotal.toFixed(2)]);
+    }
+  }
+
   // ── Clima: estación meteorológica con una SECA deliberada (Fase 3.2) ─────────────────
   //
   // Sin serie climática, el rendimiento del potrero es una tabla de kg/ha sin contexto, que es
