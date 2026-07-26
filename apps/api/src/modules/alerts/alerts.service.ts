@@ -3,7 +3,7 @@ import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain
 import { DbService } from '../../db/db.service';
 import { ReproService } from '../repro/repro.service';
 import { WeatherService } from '../weather/weather.service';
-import { nitrogenAlertMessage } from '@cowinance/domain';
+import { nitrogenAlertMessage, seriesStatus } from '@cowinance/domain';
 import { NitrogenService } from '../genetics/nitrogen.service';
 
 /**
@@ -16,10 +16,16 @@ import { NitrogenService } from '../genetics/nitrogen.service';
  * producción es event-driven (Kafka) + cron (BullMQ), con la misma lógica.
  */
 
+/**
+ * Categorías de alerta. Es la MISMA lista que el CHECK de `alert_rules.category` (migración 0022):
+ * si divergen, la regla se crea en TypeScript y la rechaza la base al insertarla.
+ */
+type AlertCategory = 'health' | 'reproduction' | 'task' | 'iot' | 'inventory' | 'finance' | 'machinery' | 'compliance';
+
 interface RuleDef {
   code: string;
   name: string;
-  category: 'health' | 'reproduction' | 'task' | 'iot';
+  category: AlertCategory;
   severity: 'info' | 'warning' | 'critical';
   /** Umbral configurable en días (ventana de anticipación / antigüedad). Ausente = regla sin parámetro. */
   defaultDays?: number;
@@ -53,6 +59,31 @@ const RULES: RuleDef[] = [
   // un aviso o una urgencia no es cuánto queda en el termo sino si todavía se llega a pedir. El
   // valor por termo manda sobre este default, porque el proveedor puede ser distinto por finca.
   { code: 'nitrogen_low', name: 'Nitrógeno por agotarse', category: 'iot', severity: 'critical', defaultDays: 14, paramLabel: 'Días que tarda el proveedor' },
+
+  // ── Fase 1.1: lo que cuesta plata y nadie vigilaba ──────────────────────────────────────────
+  //
+  // Criterio de severidad, para que la lista no se llene de rojos y deje de leerse:
+  //   `critical` → bloquea una operación HOY, o hay pérdida/riesgo sanitario inminente.
+  //   `warning`  → va a bloquear o a costar si nadie actúa en los próximos días.
+  //   `info`     → previsible y programado; no hay nada roto.
+  //
+  // Y la regla que las gobierna a todas: **si una alerta no cambia lo que alguien va a hacer hoy,
+  // no es una alerta — es un dato de reporte.**
+
+  // SIN parámetro numérico a propósito: el umbral ya vive por artículo en
+  // `inventory_items.reorder_point`. Un número global sería mentira — no se le pide el mismo mínimo
+  // a una vacuna que al gasoil. Acá la regla solo se enciende o se apaga.
+  { code: 'stock_below_reorder', name: 'Insumo bajo el punto de reposición', category: 'inventory', severity: 'warning' },
+
+  // Días de GRACIA, no de anticipación: avisar antes del vencimiento sería ruido (la factura no
+  // está vencida todavía). Cero = avisa apenas se pasa la fecha.
+  { code: 'invoice_overdue', name: 'Factura vencida sin cobrar', category: 'finance', severity: 'warning', defaultDays: 0, paramLabel: 'Días de gracia tras el vencimiento' },
+
+  // El parámetro son COMPROBANTES restantes, no días: lo que decide si esto urge no es el tiempo
+  // sino cuántas formas quedan en el talonario. Mismo criterio que `repeat_breeder`, que usa el
+  // campo para contar servicios.
+  { code: 'fiscal_series_low', name: 'Lote de comprobantes por agotarse', category: 'compliance', severity: 'warning', defaultDays: 50, paramLabel: 'Comprobantes restantes para avisar' },
+
 ];
 
 /** Nivel de estrés en el idioma del producto: la alerta la lee una persona, no un sistema. */
@@ -648,6 +679,120 @@ export class AlertsService {
           related_type: 'storage_tank',
           related_id: termo.tank_id,
           due_at: termo.state.projected_empty_date,
+        });
+      }
+    }
+
+    // ── Fase 1.1 ────────────────────────────────────────────────────────────────────────────
+    // Tres fuentes que el motor ignoraba y que cuestan plata: quedarse sin insumo, no cobrar, y
+    // quedarse sin comprobantes. Las tres se descubrían igual — cuando ya era tarde.
+
+    /**
+     * Insumo bajo el punto de reposición.
+     *
+     * El mínimo vive POR ARTÍCULO (`reorder_point`), así que un artículo sin punto de reposición
+     * cargado no genera alerta: no es que esté bien, es que nadie declaró cuánto es «poco». Avisar
+     * de lo que no se configuró sería ruido sobre el catálogo entero.
+     *
+     * Se suma el stock de TODOS los depósitos: tener el mínimo repartido en dos galpones no es
+     * faltante, y alertar por depósito llenaría la lista de avisos falsos.
+     */
+    if (cfg.get('stock_below_reorder')!.active) {
+      const bajos = await this.db.query<any>(
+        `SELECT i.id AS rid, i.name, i.reorder_point::float AS minimo,
+                COALESCE(SUM(sl.quantity), 0)::float AS hay,
+                u.code AS unidad
+           FROM inventory_items i
+           LEFT JOIN stock_levels sl ON sl.item_id = i.id AND sl.deleted_at IS NULL
+           LEFT JOIN units u ON u.code = i.unit
+          WHERE i.tenant_id = $1 AND i.deleted_at IS NULL AND i.reorder_point IS NOT NULL
+          GROUP BY i.id, i.name, i.reorder_point, u.code
+         HAVING COALESCE(SUM(sl.quantity), 0) <= i.reorder_point`,
+        [t],
+      );
+      for (const b of bajos)
+        out.push({
+          code: 'stock_below_reorder',
+          category: 'inventory',
+          // Quedarse EN CERO ya frenó el trabajo; estar bajo el mínimo todavía se puede reponer.
+          severity: b.hay <= 0 ? 'critical' : 'warning',
+          title: b.hay <= 0 ? `Sin stock: ${b.name}` : `Stock bajo: ${b.name}`,
+          message: `Quedan ${b.hay} ${b.unidad ?? ''} y el mínimo es ${b.minimo}`.trim(),
+          related_type: 'inventory_item',
+          related_id: b.rid,
+        });
+    }
+
+    /**
+     * Factura emitida y vencida sin cobrar.
+     *
+     * El saldo es DERIVADO (total − imputaciones), igual que en `invoices.service` y en el aging:
+     * una columna de «pendiente» sería una segunda fuente del mismo número. Solo `issued`: una
+     * factura recibida vencida es una deuda propia y merece otra alerta, con otro texto y otra
+     * urgencia — no se mezclan.
+     */
+    if (cfg.get('invoice_overdue')!.active) {
+      const vencidas = await this.db.query<any>(
+        `SELECT i.id AS rid, i.invoice_number, i.due_date, p.name AS socio,
+                (i.total - COALESCE((SELECT SUM(pa.amount) FROM payment_allocations pa
+                                      WHERE pa.invoice_id = i.id AND pa.deleted_at IS NULL), 0))::float AS saldo,
+                (CURRENT_DATE - i.due_date)::int AS atraso
+           FROM invoices i JOIN business_partners p ON p.id = i.partner_id
+          WHERE i.tenant_id = $1 AND i.deleted_at IS NULL AND i.direction = 'issued'
+            AND i.status <> 'void' AND i.voided_at IS NULL
+            AND i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE - $2::int
+          ORDER BY i.due_date`,
+        [t, cfg.get('invoice_overdue')!.days],
+      );
+      for (const v of vencidas) {
+        if (!(v.saldo > 0)) continue; // ya cobrada: el saldo derivado es la única verdad
+        out.push({
+          code: 'invoice_overdue',
+          category: 'finance',
+          severity: 'warning',
+          title: `Factura ${v.invoice_number} vencida hace ${v.atraso} días`,
+          message: `${v.socio} adeuda ${v.saldo}`,
+          related_type: 'invoice',
+          related_id: v.rid,
+          due_at: iso(v.due_date),
+        });
+      }
+    }
+
+    /**
+     * Lote de comprobantes por agotarse.
+     *
+     * `seriesStatus` (dominio, G4-2) ya sabe cuántos quedan y cuándo eso es poco; acá solo se lo
+     * consulta. Se avisa ANTES porque quedarse sin formas libres no es un trámite: es no poder
+     * facturar hasta que la imprenta entregue el lote nuevo, y eso tarda.
+     *
+     * Las series SIN tope (el correlativo propio del emisor) no se agotan nunca: `remaining` es
+     * null y quedan fuera, que es distinto de cero.
+     */
+    if (cfg.get('fiscal_series_low')!.active) {
+      const umbral = cfg.get('fiscal_series_low')!.days;
+      const series = await this.db.query<any>(
+        `SELECT id, purpose, document_type, prefix, padding, next_number, range_to
+           FROM fiscal_series
+          WHERE tenant_id = $1 AND is_active AND deleted_at IS NULL AND range_to IS NOT NULL`,
+        [t],
+      );
+      for (const s of series) {
+        const st = seriesStatus(Number(s.next_number), Number(s.range_to), s.prefix, s.padding, umbral);
+        if (st.health === 'ok' || st.remaining === null) continue;
+        const que = s.purpose === 'control' ? 'números de control' : `comprobantes de ${s.document_type}`;
+        out.push({
+          code: 'fiscal_series_low',
+          category: 'compliance',
+          // Agotada = no se puede emitir AHORA. Es la definición de crítico.
+          severity: st.health === 'exhausted' ? 'critical' : 'warning',
+          title: st.health === 'exhausted' ? `Sin ${que}: no se puede facturar` : `Quedan ${st.remaining} ${que}`,
+          message:
+            st.health === 'exhausted'
+              ? 'El lote autorizado se agotó. Pedí el lote nuevo a la imprenta y cargá la serie.'
+              : `Pedí el lote nuevo a la imprenta antes de que se termine.`,
+          related_type: 'fiscal_series',
+          related_id: s.id,
         });
       }
     }
