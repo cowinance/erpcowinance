@@ -52,3 +52,13 @@ export {
   validateRefill,
 } from './nitrogen';
 export type { NitrogenReading, NitrogenState, NitrogenStatus, RefillInput } from './nitrogen';
+
+export {
+  STANDARD_AGE_DAYS,
+  DEFAULT_DAM_AGE_ADJUSTMENTS,
+  adjustWeaningWeight,
+  confidenceFor,
+  damAgeAdjustment,
+  sireIndexes,
+} from './weaning-weight';
+export type { AdjustedWeaning, AnimalSex, ContemporaryMember, DamAgeAdjustment, SireIndex, WeaningInput } from './weaning-weight';
