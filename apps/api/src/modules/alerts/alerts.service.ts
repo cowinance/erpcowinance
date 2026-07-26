@@ -84,6 +84,19 @@ const RULES: RuleDef[] = [
   // campo para contar servicios.
   { code: 'fiscal_series_low', name: 'Lote de comprobantes por agotarse', category: 'compliance', severity: 'warning', defaultDays: 50, paramLabel: 'Comprobantes restantes para avisar' },
 
+  // ── Fase 1.2: los silos sanitarios ──────────────────────────────────────────────────────────
+
+  // El parámetro NO es el umbral de anormalidad —eso lo decide el laboratorio con su rango de
+  // referencia, y discutírselo desde acá sería inventar medicina—. Es cuántos días el resultado
+  // sigue reclamando atención antes de pasar a ser historia clínica.
+  { code: 'lab_result_abnormal', name: 'Resultado de laboratorio fuera de rango', category: 'health', severity: 'warning', defaultDays: 30, paramLabel: 'Días que el resultado sigue pendiente' },
+
+  // La UNIDAD del recuento celular no está documentada en el modelo ni la fija el seed: la carga
+  // quien usa el sistema. Por eso el umbral es configurable y la etiqueta dice la unidad — asumir
+  // en silencio que son células/mL haría que una finca que carga miles no reciba NINGÚN aviso, que
+  // es la peor forma de fallar: callada.
+  { code: 'milk_scc_high', name: 'Recuento celular alto (mastitis subclínica)', category: 'health', severity: 'warning', defaultDays: 200000, paramLabel: 'Recuento que dispara el aviso (células/mL)' },
+
 ];
 
 /** Nivel de estrés en el idioma del producto: la alerta la lee una persona, no un sistema. */
@@ -793,6 +806,108 @@ export class AlertsService {
               : `Pedí el lote nuevo a la imprenta antes de que se termine.`,
           related_type: 'fiscal_series',
           related_id: s.id,
+        });
+      }
+    }
+
+    // ── Fase 1.2: los silos sanitarios ──────────────────────────────────────────────────────
+    // Laboratorio y calidad de leche son los dos datos que hoy mueren donde se cargan, siendo que
+    // son señales de salud animal. Van a `health` a propósito: un recuento celular alto es mastitis
+    // subclínica, no «un dato del tambo».
+
+    /**
+     * Resultado de laboratorio fuera de rango.
+     *
+     * **Lo anormal lo decide el laboratorio**, no nosotros: se usa `is_abnormal`, que el propio
+     * laboratorio marcó contra su rango de referencia. Discutirle el umbral desde acá sería inventar
+     * medicina con datos que no tenemos.
+     *
+     * La parte difícil de un reconciliador acá: un resultado anormal es un HECHO y no deja de serlo
+     * nunca — si la alerta dependiera solo de eso, no se apagaría jamás. Se apaga cuando alguien
+     * **hizo algo**: abrió un caso clínico para ese animal después del resultado. Y caduca sola
+     * pasada la ventana configurada, porque a esa altura ya es historia clínica y no una tarea
+     * pendiente.
+     *
+     * Solo resultados con animal: una muestra de agua o de suelo anormal importa, pero no es una
+     * alerta sanitaria del hato y merece su propio tratamiento.
+     */
+    if (cfg.get('lab_result_abnormal')!.active) {
+      const anormales = await this.db.query<any>(
+        `SELECT r.id AS rid, r.test_code, r.result_value, r.reference_range, r.reported_at,
+                s.animal_id, ai.value AS tag
+           FROM lab_results r
+           JOIN lab_samples s ON s.id = r.sample_id AND s.deleted_at IS NULL
+           JOIN animals a ON a.id = s.animal_id AND a.status = 'active' AND a.deleted_at IS NULL
+           LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+          WHERE r.tenant_id = $1 AND r.deleted_at IS NULL AND r.is_abnormal
+            AND r.reported_at IS NOT NULL
+            AND r.reported_at >= now() - ($2::int * interval '1 day')
+            -- Se apaga cuando alguien actuó: un caso clínico abierto DESPUÉS del resultado.
+            AND NOT EXISTS (
+              SELECT 1 FROM clinical_cases cc
+               WHERE cc.animal_id = s.animal_id AND cc.tenant_id = r.tenant_id
+                 AND cc.deleted_at IS NULL AND cc.started_at >= r.reported_at
+            )
+          ORDER BY r.reported_at DESC`,
+        [t, cfg.get('lab_result_abnormal')!.days],
+      );
+      for (const r of anormales)
+        out.push({
+          code: 'lab_result_abnormal',
+          category: 'health',
+          severity: 'warning',
+          title: `${r.test_code ?? 'Análisis'} fuera de rango — caravana ${r.tag ?? '—'}`,
+          message: `Resultado ${r.result_value ?? '—'}${r.reference_range ? ` (referencia ${r.reference_range})` : ''}. Abrí un caso clínico si corresponde.`,
+          related_type: 'animal',
+          related_id: r.animal_id,
+          due_at: iso(r.reported_at),
+          tag: r.tag ?? null,
+        });
+    }
+
+    /**
+     * Recuento celular alto — mastitis subclínica.
+     *
+     * Solo el ÚLTIMO análisis de cada vaca y de cada tanque: un recuento alto de hace tres meses,
+     * ya normalizado, no es un problema de hoy. Tomando el último, un análisis nuevo y bueno apaga
+     * la alerta solo — que es exactamente lo que se quiere de un reconciliador.
+     *
+     * El tanque es CRÍTICO y la vaca es warning, y no es una gradación arbitraria: un recuento alto
+     * en el tanque compromete la ENTREGA ENTERA —el precio de toda la leche del día, y en muchos
+     * casos su aceptación—, mientras que una vaca sola todavía se puede apartar del ordeñe.
+     */
+    if (cfg.get('milk_scc_high')!.active) {
+      const umbral = cfg.get('milk_scc_high')!.days;
+      const altos = await this.db.query<any>(
+        `SELECT DISTINCT ON (COALESCE(q.animal_id::text, q.tank_id::text))
+                q.id, q.scc, q.sample_date, q.animal_id, q.tank_id,
+                ai.value AS tag, mt.name AS tank_name
+           FROM milk_quality_tests q
+           LEFT JOIN animals a ON a.id = q.animal_id AND a.deleted_at IS NULL
+           LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = q.animal_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
+           LEFT JOIN milk_tanks mt ON mt.id = q.tank_id
+          WHERE q.tenant_id = $1 AND q.deleted_at IS NULL AND q.scc IS NOT NULL
+            AND (q.animal_id IS NOT NULL OR q.tank_id IS NOT NULL)
+          ORDER BY COALESCE(q.animal_id::text, q.tank_id::text), q.sample_date DESC, q.created_at DESC`,
+        [t],
+      );
+      for (const m of altos) {
+        if (!(Number(m.scc) > umbral)) continue;
+        const esTanque = !m.animal_id && m.tank_id;
+        out.push({
+          code: 'milk_scc_high',
+          category: 'health',
+          severity: esTanque ? 'critical' : 'warning',
+          title: esTanque
+            ? `Recuento celular alto en el tanque ${m.tank_name ?? '—'}`
+            : `Recuento celular alto — caravana ${m.tag ?? '—'}`,
+          message: esTanque
+            ? `${m.scc} en el último análisis: compromete la entrega completa.`
+            : `${m.scc} en el último análisis (umbral ${umbral}). Revisá mastitis subclínica.`,
+          related_type: esTanque ? 'milk_tank' : 'animal',
+          related_id: esTanque ? m.tank_id : m.animal_id,
+          due_at: iso(m.sample_date),
+          tag: m.tag ?? null,
         });
       }
     }
