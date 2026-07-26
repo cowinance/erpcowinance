@@ -25,6 +25,11 @@ describe('clima — estaciones, ingesta e índices (D4)', () => {
     await db.onModuleInit();
     await db.defaultFarm(); // precalentar: `createStation` la consultaría dentro de la tx (PGlite, conexión única)
     svc = new WeatherService(db);
+    // El demo trae su propia estación (Fase 3.2). Esta suite AFIRMA sobre el conjunto de estaciones
+    // y de mediciones, así que arranca siendo dueña del fixture en vez de suponer una base vacía:
+    // suponerlo la hacía romperse cada vez que el seed se enriquecía, sin que nada estuviera mal.
+    await db.query(`DELETE FROM sensor_readings WHERE tenant_id = $1`, [db.tenant]);
+    await db.query(`DELETE FROM devices WHERE tenant_id = $1`, [db.tenant]);
 
     const station: any = await svc.createStation({ name: 'Casco', serial_number: 'EST-001' });
     stationId = station.id;

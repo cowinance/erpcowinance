@@ -35,6 +35,11 @@ describe('alertas de clima (D4 · E2)', () => {
     await db.defaultFarm();
     weather = new WeatherService(db);
     alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, weather, new NitrogenService(db, new InventoryService(db)));
+    // El demo trae estación y un año de mediciones (Fase 3.2). Esta suite afirma sobre el conjunto
+    // de alertas de clima, así que arranca siendo dueña del fixture: suponer la base vacía la hacía
+    // romperse cada vez que el seed se enriquecía, sin que nada estuviera realmente mal.
+    await db.query(`DELETE FROM sensor_readings WHERE tenant_id = $1`, [db.tenant]);
+    await db.query(`DELETE FROM devices WHERE tenant_id = $1`, [db.tenant]);
     const st: any = await weather.createStation({ name: 'Casco', serial_number: 'EST-A' });
     stationId = st.id;
   }, 120_000);

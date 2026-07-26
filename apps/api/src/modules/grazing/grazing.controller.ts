@@ -5,6 +5,12 @@ import { GrazingService } from './grazing.service';
 export class GrazingController {
   constructor(private readonly grazing: GrazingService) {}
 
+  /** Rendimiento por potrero: kg/ha con el clima de sus ventanas al lado (Fase 3.2). */
+  @Get('performance')
+  performance(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.grazing.performance({ from, to });
+  }
+
   @Get('occupancy')
   occupancy() {
     return this.grazing.occupancy();

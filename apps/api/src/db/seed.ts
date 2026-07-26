@@ -523,6 +523,114 @@ export async function seedDemo(db: Queryable) {
     }
   }
 
+  // ── Clima: estación meteorológica con una SECA deliberada (Fase 3.2) ─────────────────
+  //
+  // Sin serie climática, el rendimiento del potrero es una tabla de kg/ha sin contexto, que es
+  // exactamente la lectura que la etapa viene a evitar: sacar de la rotación un potrero que rindió
+  // poco porque le tocó la seca.
+  //
+  // Por eso la serie NO es ruido uniforme. Hay un tramo seco de verdad, y las rotaciones se
+  // acomodan para que un potrero caiga dentro de él: solo así la pantalla puede enseñar la
+  // diferencia entre un potrero malo y un potrero con mala suerte.
+  const SECA_DESDE = 150; // días atrás
+  const SECA_HASTA = 90;
+  {
+    const [{ id: tipoEstacion }] = await q(
+      `INSERT INTO device_types (code, name, category, protocol) VALUES ('weather_station','Estación meteorológica','environmental','lorawan')
+       ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+    );
+    const [{ id: estacion }] = await q(
+      `INSERT INTO devices (tenant_id, farm_id, device_type_id, serial_number, name, status, created_by)
+       VALUES ($1,$2,$3,'WS-0001','Estación El Ombú','active',$4) RETURNING id`,
+      [org, farm, tipoEstacion, userId],
+    );
+
+    const lecturas: string[] = [];
+    const args: unknown[] = [org, estacion];
+    const push = (metric: string, value: number, unit: string, at: Date) => {
+      args.push(metric, value.toFixed(2), unit, at.toISOString());
+      const n = args.length;
+      lecturas.push(`($1,$2,$${n - 3},$${n - 2},$${n - 1},$${n})`);
+    };
+    for (let d = 365; d >= 0; d--) {
+      const at = daysAgo(d);
+      at.setUTCHours(12, 0, 0, 0);
+      // Estacionalidad simple del hemisferio norte (Venezuela): el pico de calor a mitad de año.
+      const estacional = Math.sin(((365 - d) / 365) * 2 * Math.PI - Math.PI / 2);
+      const tMax = 31 + 4 * estacional + between(-2, 2);
+      const tMin = 21 + 3 * estacional + between(-2, 2);
+      const seca = d <= SECA_DESDE && d >= SECA_HASTA;
+      // En la seca llueve casi nunca; fuera de ella, un día de cada tres.
+      const llueve = seca ? rand() < 0.06 : rand() < 0.34;
+      const mm = llueve ? between(2, seca ? 6 : 34) : 0;
+      push('temp_max', tMax, 'c', at);
+      push('temp_min', tMin, 'c', at);
+      push('temp', (tMax + tMin) / 2, 'c', at);
+      push('humidity', seca ? between(40, 62) : between(62, 88), 'un', at);
+      push('rain', mm, 'ml', at);
+      // ETP más alta en la seca: más sol y menos humedad evaporan más, que es lo que hunde el balance.
+      push('etp', seca ? between(5.5, 7.5) : between(3.2, 5.2), 'ml', at);
+    }
+    // Una sola sentencia: 365 días × 6 métricas son 2.190 filas, y de a una el seed tarda minutos.
+    await q(`INSERT INTO sensor_readings (tenant_id, device_id, metric, value, unit, recorded_at) VALUES ${lecturas.join(',')}`, args);
+  }
+
+  // ── Pastoreo: rotación con pesaje de entrada y salida (Fase 3.2) ─────────────────────
+  //
+  // El pesaje al entrar y al salir NO es un detalle del seed: es la única forma de atribuirle kilos
+  // a un potrero. La ganancia entre dos pesajes cualesquiera pudo haber pasado en otro lado, y por
+  // eso el reporte solo cuenta animales con dos pesajes DENTRO de la ventana.
+  //
+  // Un potrero queda a propósito sin pesar: la pantalla tiene que distinguir «rindió poco» de
+  // «nadie lo midió», que son conclusiones opuestas.
+  {
+    const rotaciones: [number, number, number, number][] = [
+      // [potrero, lote, entra hace N días, sale hace N días]
+      [0, 0, 320, 288],
+      [3, 1, 300, 265],
+      [2, 2, 250, 215],
+      [5, 3, 200, 170],
+      // Éste cae de lleno en la seca: va a rendir menos, y no por ser mal potrero.
+      [0, 0, 145, 110],
+      [3, 1, 140, 100],
+      [2, 2, 80, 45],
+      [5, 3, 60, 25],
+    ];
+    // El potrero 4 se ocupa pero nadie pasa la balanza.
+    const sinPesar = new Set([8]);
+    rotaciones.push([4, 2, 340, 305]);
+
+    for (let i = 0; i < rotaciones.length; i++) {
+      const [pi, li, entra, sale] = rotaciones[i];
+      const entryDate = daysAgo(entra).toISOString().slice(0, 10);
+      const exitDate = daysAgo(sale).toISOString().slice(0, 10);
+      await q(
+        `INSERT INTO grazing_records (tenant_id, paddock_id, lot_id, entry_date, exit_date, pre_grazing_kg_dm_ha, post_grazing_kg_dm_ha, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [org, paddocks[pi], lots[li], entryDate, exitDate, Math.round(between(2200, 3400)), Math.round(between(900, 1600)), userId],
+      );
+      if (sinPesar.has(i)) continue;
+
+      // Pesar a la entrada y a la salida a los animales del lote. La ganancia diaria cae en la
+      // seca: es la señal que la pantalla tiene que poder explicar con el balance hídrico.
+      const delLote = await q(`SELECT id FROM animals WHERE tenant_id=$1 AND current_lot_id=$2 AND deleted_at IS NULL LIMIT 12`, [org, lots[li]]);
+      const enSeca = entra <= SECA_DESDE && sale >= SECA_HASTA;
+      const gdp = enSeca ? between(0.18, 0.34) : between(0.62, 0.95);
+      const dias = entra - sale;
+      for (const a of delLote) {
+        const [{ base }] = await q(
+          `SELECT COALESCE(max(weight_kg), 240)::float AS base FROM weighings WHERE tenant_id=$1 AND animal_id=$2 AND deleted_at IS NULL AND weighed_at <= $3`,
+          [org, a.id, daysAgo(entra).toISOString()],
+        );
+        const kgEntrada = Math.round(Number(base) + between(-6, 6));
+        await q(
+          `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, created_by) VALUES ($1,$2,$3,$4,'scale',$5), ($1,$2,$6,$7,'scale',$5)`,
+          [org, a.id, daysAgo(entra).toISOString(), kgEntrada, userId, daysAgo(sale).toISOString(), Math.round(kgEntrada + gdp * dias + between(-4, 4))],
+        );
+      }
+    }
+  }
+
   // ── Laboratorio: muestras y resultados (Fase 3.1) ────────────────────────────────────
   //
   // Sin esto la pantalla de Laboratorio arranca vacía y el lazo con Sanidad es invisible: nadie
