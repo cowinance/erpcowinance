@@ -8,6 +8,7 @@ import { HerdService } from './herd.service';
 import { BillingService } from '../billing/billing.service';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { ReportsService } from '../reports/reports.service';
+import { buildReportsService } from '../reports/reports.test-factory';
 
 describe('GDP derivado desde v_weighings', () => {
   let db: DbService;
@@ -33,7 +34,7 @@ describe('GDP derivado desde v_weighings', () => {
     await db.onModuleInit();
     herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
     dashboard = new DashboardService(db);
-    reports = new ReportsService(db);
+    reports = buildReportsService(db);
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;

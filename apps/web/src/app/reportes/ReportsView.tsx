@@ -8,9 +8,12 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 
-type ReportKey = 'inventory' | 'movements' | 'production' | 'reproduction' | 'health';
+type ReportKey = 'summary' | 'inventory' | 'movements' | 'production' | 'reproduction' | 'health';
 
 const REPORTS: { key: ReportKey; label: string }[] = [
+  // Primero el resumen: es el que contesta «¿cómo anduvo la finca?», que es la pregunta con la que
+  // alguien entra a Reportes. Los demás son el detalle de una parte.
+  { key: 'summary', label: 'Resumen de la finca' },
   { key: 'inventory', label: 'Inventario a fecha' },
   { key: 'movements', label: 'Altas y bajas' },
   { key: 'production', label: 'Producción' },
@@ -24,7 +27,7 @@ const monthsAgo = (n: number) => new Date(Date.now() - n * 30.44 * 86400000).toI
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 
 export function ReportsView() {
-  const [tab, setTab] = useState<ReportKey>('inventory');
+  const [tab, setTab] = useState<ReportKey>('summary');
   const [at, setAt] = useState(today());
   const [from, setFrom] = useState(monthsAgo(12));
   const [to, setTo] = useState(today());
@@ -41,7 +44,9 @@ export function ReportsView() {
     setError('');
     try {
       const qs =
-        tab === 'inventory'
+        tab === 'summary'
+          ? `farm-summary?from=${from}&to=${to}`
+          : tab === 'inventory'
           ? `herd-inventory?at=${at}&group_by=${groupBy}`
           : tab === 'movements'
             ? `herd-movements?from=${from}&to=${to}`
@@ -70,7 +75,28 @@ export function ReportsView() {
     const { forTab, payload: data } = result;
     let rows: (string | number | null)[][] = [];
     let name = 'reporte.csv';
-    if (forTab === 'inventory') {
+    if (forTab === 'summary') {
+      name = `resumen-finca-${data.from}_${data.to}.csv`;
+      rows = [
+        ['Bloque', 'Concepto', 'Valor'],
+        ['Hacienda', 'Cabezas', data.hacienda?.total ?? ''],
+        ['Producción', 'Pesajes', data.produccion?.pesajes ?? ''],
+        ['Producción', 'GDP promedio (kg/d)', data.produccion?.gdp_promedio ?? ''],
+        ['Economía', 'Ingresos', data.economia?.ingresos ?? ''],
+        ['Economía', 'Costos', data.economia?.costos ?? ''],
+        ['Economía', 'Margen', data.economia?.margen ?? ''],
+        ['Mano de obra', 'Costo', data.mano_de_obra?.costo ?? ''],
+        ['Mano de obra', 'Horas', data.mano_de_obra?.horas ?? ''],
+        ['Inventario', 'Valor del stock', data.inventario?.valor ?? ''],
+        ['Inventario', 'Plata quieta', data.inventario?.plata_quieta ?? ''],
+        ['Maquinaria', 'Costo total', data.maquinaria?.costo_total ?? ''],
+        ['Sanidad', 'Vacunaciones', data.sanidad?.vacunaciones?.total ?? ''],
+        ['Sanidad', 'Tratamientos', data.sanidad?.tratamientos?.total ?? ''],
+        ['Sanidad', 'Muertes', data.sanidad?.mortalidad?.n ?? ''],
+        ['Reproducción', 'Servicios', data.reproduccion?.servicios?.total ?? ''],
+        ['Reproducción', '% preñez', data.reproduccion?.indices?.prenez_pct ?? ''],
+      ];
+    } else if (forTab === 'inventory') {
       name = `inventario-hato-${data.at}.csv`;
       rows = [[data.dimension, 'Animales'], ...data.rows.map((r: any) => [r.grupo, r.n]), ['Total', data.total]];
     } else if (forTab === 'movements') {
@@ -192,6 +218,7 @@ export function ReportsView() {
       ) : (
         result && (
           <>
+            {result.forTab === 'summary' && <FarmSummary data={result.payload} />}
             {result.forTab === 'inventory' && <InventoryReport data={result.payload} />}
             {result.forTab === 'movements' && <MovementsReport data={result.payload} />}
             {result.forTab === 'production' && <ProductionReport data={result.payload} />}
@@ -444,6 +471,199 @@ function HealthReport({ data }: { data: any }) {
         </div>
       </div>
       <p className="text-label text-ink-3">Indicadores del período. La cobertura de vacunación y los animales en retiro (a la fecha) viven en el panel de Alertas.</p>
+    </div>
+  );
+}
+
+const money = (n: number | null | undefined, digits = 0) =>
+  n == null ? '—' : n.toLocaleString('es-AR', { style: 'currency', currency: 'USD', maximumFractionDigits: digits });
+const qty = (n: number | null | undefined, digits = 0) => (n == null ? '—' : n.toLocaleString('es-AR', { maximumFractionDigits: digits }));
+
+const ACTIVIDAD_ES: Record<string, string> = {
+  health: 'Sanidad',
+  breeding: 'Reproducción',
+  feeding: 'Alimentación',
+  maintenance: 'Mantenimiento',
+  crop: 'Agricultura',
+  general: 'General',
+};
+
+/**
+ * Resumen de la finca (Fase 5): el cierre que ensambla el ERP.
+ *
+ * Cada bloque muestra el mismo número que la pantalla de su módulo, porque el backend COMPONE esos
+ * servicios en vez de rehacer sus consultas. Por eso cada tarjeta dice de dónde viene: quien
+ * necesita el detalle sabe adónde ir, y el resumen no compite con el módulo por ser la fuente.
+ *
+ * Un bloque sin datos se muestra vacío y con su motivo. Rellenarlo con ceros haría que una finca
+ * que todavía no usa Maquinaria lea «gastó 0», que es una afirmación y no una ausencia.
+ */
+function FarmSummary({ data }: { data: any }) {
+  const bloques: { titulo: string; href: string; vacio: string; contenido: React.ReactNode | null }[] = [
+    {
+      titulo: 'Economía',
+      href: '/costos',
+      vacio: 'Sin costos ni ventas en el período.',
+      contenido: data.economia && (
+        <>
+          <Row label="Ingresos" value={money(data.economia.ingresos)} />
+          <Row label="Costos" value={money(data.economia.costos)} />
+          <Row label="Margen" value={money(data.economia.margen)} tone={data.economia.margen < 0 ? 'danger' : 'success'} />
+          {data.economia.caveat && <p className="mt-2 text-caption text-warning">{data.economia.caveat}</p>}
+        </>
+      ),
+    },
+    {
+      titulo: 'Hacienda',
+      href: '/animales',
+      vacio: 'Sin animales cargados.',
+      contenido: data.hacienda && (
+        <>
+          <Row label="Cabezas" value={qty(data.hacienda.total)} />
+          {(data.hacienda.by ?? []).slice(0, 3).map((r: any) => (
+            <Row key={r.grupo} label={r.grupo} value={qty(r.n)} muted />
+          ))}
+        </>
+      ),
+    },
+    {
+      titulo: 'Producción',
+      href: '/produccion',
+      vacio: 'Sin pesajes en el período.',
+      contenido: data.produccion && (
+        <>
+          <Row label="Pesajes" value={qty(data.produccion.pesajes)} />
+          <Row label="GDP promedio" value={data.produccion.gdp_promedio == null ? '—' : `${qty(data.produccion.gdp_promedio, 3)} kg/d`} />
+        </>
+      ),
+    },
+    {
+      titulo: 'Reproducción',
+      href: '/reproduccion',
+      vacio: 'Sin servicios en el período.',
+      contenido: data.reproduccion && (
+        <>
+          <Row label="Servicios" value={qty(data.reproduccion.servicios?.total)} />
+          <Row label="Preñez" value={data.reproduccion.indices?.prenez_pct == null ? '—' : `${qty(data.reproduccion.indices.prenez_pct, 1)}%`} />
+          <Row label="Partos" value={qty(data.reproduccion.partos)} muted />
+        </>
+      ),
+    },
+    {
+      titulo: 'Sanidad',
+      href: '/sanidad',
+      vacio: 'Sin eventos sanitarios en el período.',
+      contenido: data.sanidad && (
+        <>
+          <Row label="Vacunaciones" value={qty(data.sanidad.vacunaciones?.total)} />
+          <Row label="Tratamientos" value={qty(data.sanidad.tratamientos?.total)} />
+          <Row label="Muertes" value={qty(data.sanidad.mortalidad?.n)} tone={data.sanidad.mortalidad?.n > 0 ? 'danger' : undefined} />
+        </>
+      ),
+    },
+    {
+      titulo: 'Mano de obra',
+      href: '/costos',
+      vacio: 'Sin partes de trabajo en el período.',
+      contenido: data.mano_de_obra && (
+        <>
+          <Row label="Costo" value={money(data.mano_de_obra.costo)} />
+          <Row label="Horas" value={qty(data.mano_de_obra.horas, 1)} />
+          {data.mano_de_obra.principal && (
+            <Row label="Se va en" value={ACTIVIDAD_ES[data.mano_de_obra.principal.activity] ?? data.mano_de_obra.principal.activity} muted />
+          )}
+        </>
+      ),
+    },
+    {
+      titulo: 'Inventario',
+      href: '/inventario',
+      vacio: 'Sin insumos cargados.',
+      contenido: data.inventario && (
+        <>
+          <Row label="Valor del stock" value={money(data.inventario.valor)} />
+          <Row label="Plata quieta" value={money(data.inventario.plata_quieta)} tone={data.inventario.plata_quieta > 0 ? 'danger' : undefined} />
+          <Row label="No llegan a reponerse" value={qty(data.inventario.items_criticos)} muted />
+        </>
+      ),
+    },
+    {
+      titulo: 'Maquinaria',
+      href: '/maquinaria',
+      vacio: 'Sin máquinas ni cargas en el período.',
+      contenido: data.maquinaria && (
+        <>
+          <Row label="Costo de uso" value={money(data.maquinaria.costo_total)} />
+          <Row label="Combustible" value={money(data.maquinaria.combustible)} muted />
+          {data.maquinaria.mas_cara && <Row label="La más cara" value={data.maquinaria.mas_cara.name} muted />}
+        </>
+      ),
+    },
+    {
+      titulo: 'Agricultura',
+      href: '/agricultura',
+      vacio: 'Sin cultivos en el período.',
+      contenido: data.agricultura && (
+        <>
+          {data.agricultura.por_cultivo.slice(0, 3).map((c: any) => (
+            <Row key={c.cropType} label={c.cropType} value={`${qty(c.meanYieldPerHa)}/ha`} raw />
+          ))}
+        </>
+      ),
+    },
+    {
+      titulo: 'Pastoreo',
+      href: '/pastoreo',
+      vacio: 'Sin pastoreos cerrados con pesajes.',
+      contenido: data.pastoreo && (
+        <>
+          <Row label="Mejor potrero" value={data.pastoreo.mejor.paddock_name} />
+          <Row label="kg/ha/día" value={qty(data.pastoreo.mejor.gainKgPerHaPerDay, 2)} muted />
+          <Row label="Más flojo" value={data.pastoreo.peor.paddock_name} muted />
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className={cardCls}>
+        <p className="text-body text-ink-2">
+          Cómo anduvo la finca entre <span className="tnum font-medium">{data.from}</span> y <span className="tnum font-medium">{data.to}</span>.
+        </p>
+        <p className="mt-1 text-label text-ink-3">
+          Cada bloque trae el mismo número que su módulo: este resumen los compone, no los vuelve a calcular. Entrá al módulo para el detalle.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-2 max-sm:grid-cols-1">
+        {bloques.map((b) => (
+          <div key={b.titulo} className={cardCls}>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <h3 className="text-body font-semibold">{b.titulo}</h3>
+              <a href={b.href} className="text-caption font-medium text-brand hover:underline">
+                ver →
+              </a>
+            </div>
+            {b.contenido ?? <p className="text-label text-ink-3">{b.vacio}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * `capitalize` va SOLO donde la etiqueta viene de un dato crudo (el tipo de cultivo). Aplicado a
+ * toda etiqueta convierte «GDP promedio» en «GDP Promedio» y «no llegan a reponerse» en «No Llegan
+ * A Reponerse»: title case en castellano se lee como error de traducción.
+ */
+function Row({ label, value, tone, muted, raw }: { label: string; value: string | number; tone?: 'success' | 'danger'; muted?: boolean; raw?: boolean }) {
+  const color = tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : muted ? 'text-ink-3' : 'text-ink-1';
+  return (
+    <div className="flex items-baseline justify-between gap-2 py-0.5">
+      <span className={`text-label ${muted ? 'text-ink-3' : 'text-ink-2'} ${raw ? 'capitalize' : ''}`}>{label}</span>
+      <span className={`tnum text-body font-medium ${color}`}>{value}</span>
     </div>
   );
 }

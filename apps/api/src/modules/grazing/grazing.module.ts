@@ -12,5 +12,6 @@ import { GrazingService } from './grazing.service';
   imports: [WeatherModule],
   controllers: [GrazingController],
   providers: [GrazingService],
+  exports: [GrazingService], // Reportes compone el rendimiento de potreros en el resumen (Fase 5).
 })
 export class GrazingModule {}

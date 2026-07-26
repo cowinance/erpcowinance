@@ -13,5 +13,6 @@ import { InventoryModule } from '../inventory/inventory.module';
   imports: [InventoryModule],
   controllers: [MachineryController, MachineryLogsController],
   providers: [MachineryService, MachineryLogsService],
+  exports: [MachineryService], // Reportes compone el costo de uso en el resumen de la finca (Fase 5).
 })
 export class MachineryModule {}

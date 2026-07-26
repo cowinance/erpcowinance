@@ -13,5 +13,6 @@ import { InventoryModule } from '../inventory/inventory.module';
   imports: [InventoryModule],
   controllers: [AgricultureController, CropOperationsController],
   providers: [CropsService, CropOperationsService],
+  exports: [CropsService], // Reportes compone el rinde por cultivo en el resumen de la finca (Fase 5).
 })
 export class AgricultureModule {}

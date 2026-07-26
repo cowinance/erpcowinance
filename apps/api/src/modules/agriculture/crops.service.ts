@@ -157,7 +157,10 @@ export class CropsService {
             WHERE sl.item_id = h.item_id AND sl.tenant_id = $1 AND sl.deleted_at IS NULL
               AND sa.sale_date BETWEEN $2::date AND $3::date) precio ON true
         WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
-          AND (c.planting_date IS NULL OR c.planting_date <= $3::date)
+          -- Solo los cultivos que TUVIERON ALGO en la ventana: se cosechó, se trabajó, o se sembró
+          -- dentro. Un cultivo de otra campaña aparecía con costo cero y sin rinde, indistinguible
+          -- de uno recién sembrado, y sumaba una fila que no dice nada del período consultado.
+          AND (h.harvested IS NOT NULL OR op.cost IS NOT NULL OR c.planting_date BETWEEN $2::date AND $3::date)
         ORDER BY c.crop_type, p.name`,
       [t, from, to],
     );

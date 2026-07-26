@@ -1,5 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
+// El resumen de la finca (Fase 5) COMPONE estos servicios, no repite sus consultas: cada número
+// tiene un solo dueño y acá se lo pide, para que el margen de este reporte y el de Costos no puedan
+// discrepar nunca.
+import { CostingService } from '../costing/costing.service';
+import { InventoryService } from '../inventory/inventory.service';
+import { MachineryService } from '../machinery/machinery.service';
+import { CropsService } from '../agriculture/crops.service';
+import { GrazingService } from '../grazing/grazing.service';
 
 /**
  * Reportes esenciales (doc APIs §5.12, Roadmap §4.1). El diferencial es el
@@ -7,6 +15,35 @@ import { DbService } from '../../db/db.service';
  * animal (nacimiento/compra → baja), no por un contador mutable — la promesa
  * de trazabilidad del event store.
  */
+
+/**
+ * El margen del resumen se apoya en las ventas cargadas en el sistema. Si una finca opera y no las
+ * carga, el número no dice que perdió plata: dice que falta la mitad de la información.
+ *
+ * El corte se ata al número que se muestra —el costo más que duplicó al ingreso— y no a un ratio
+ * suelto. La primera versión usaba «ingresos por debajo del 10% del costo» y en el demo dejaba
+ * pasar un margen de −717% sin decir nada: un aviso que no aparece justo cuando más falta es
+ * decoración.
+ *
+ * NO disculpa un margen malo. Dice bajo qué condición el número no se puede leer como resultado, y
+ * con ingresos normales no aparece, porque un aviso que sale siempre se aprende a saltear.
+ */
+export const MARGIN_SUSPECT_PCT = -100;
+
+function avisoDeMargen(ingresos: number, costos: number): string | null {
+  if (costos <= 0) return null;
+  if (ingresos <= 0) return 'No hay ventas cargadas en el período: lo que se ve es el costo, no el resultado. El margen aparece cuando las ventas estén en el sistema.';
+  const pct = ((ingresos - costos) / ingresos) * 100;
+  if (pct < MARGIN_SUSPECT_PCT)
+    return 'Los costos más que duplican a los ingresos cargados. Si la finca vendió y esas ventas no están en el sistema, este margen mide la carga de datos y no el resultado del ejercicio.';
+  return null;
+}
+
+/** Promedio de los valores que EXISTEN. Los null no son cero: son «no se midió». */
+const promedioDe = (valores: (number | null | undefined)[]): number | null => {
+  const hay = valores.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  return hay.length === 0 ? null : Math.round((hay.reduce((a, b) => a + b, 0) / hay.length) * 1000) / 1000;
+};
 
 const isoDate = (s?: string): string => {
   const d = s ? new Date(s) : new Date();
@@ -16,7 +53,128 @@ const isoDate = (s?: string): string => {
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly costing: CostingService,
+    private readonly inventory: InventoryService,
+    private readonly machinery: MachineryService,
+    private readonly crops: CropsService,
+    private readonly grazing: GrazingService,
+  ) {}
+
+  /**
+   * Resumen de la finca (Fase 5): el cierre que ensambla el ERP.
+   *
+   * Reportes leía animales, sanidad y reproducción, y no reflejaba ninguno de los verticales
+   * construidos después. Alguien que quería saber «¿cómo anduvo la finca este año?» tenía que
+   * abrir ocho pantallas y sumar de memoria.
+   *
+   * **Es ENSAMBLADO, no invención.** Cada bloque llama al servicio que ya es dueño de ese número
+   * en vez de rehacer su consulta. Es la única forma de que el margen que se lee acá sea el mismo
+   * que muestra Costos: si esta pantalla tuviera su propio SQL, el día que cambie una regla habría
+   * dos verdades y la más vista ganaría por costumbre, no por ser la correcta.
+   *
+   * Por eso tampoco agrega KPIs nuevos: lo que no exista en un módulo, no aparece acá inventado.
+   *
+   * Los bloques que fallan no tumban el resumen — un módulo sin datos devuelve `null` y la pantalla
+   * lo dice. Un cierre de ejercicio que no abre porque Maquinaria está vacía sería inservible.
+   */
+  async farmSummary(params: { from?: string; to?: string } = {}) {
+    const to = isoDate(params.to);
+    const from = isoDate(params.from ?? new Date(new Date(to).getTime() - 365 * 86400000).toISOString());
+    const rango = { from, to };
+
+    /** Un bloque que falla se informa como ausente; no tumba el resumen entero. */
+    const opcional = async <T>(fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch {
+        return null;
+      }
+    };
+
+    const [hato, produccion, reproduccion, sanidad, rentabilidad, manoDeObra, stock, maquinas, cultivos, potreros] = await Promise.all([
+      opcional(() => this.herdInventory(to)),
+      opcional(() => this.production(from, to)),
+      opcional(() => this.reproduction(from, to)),
+      opcional(() => this.health(from, to)),
+      opcional(() => this.costing.profitability({ level: 'activity', ...rango })),
+      opcional(() => this.costing.laborByActivity(rango)),
+      opcional(() => this.inventory.rotation(rango)),
+      opcional(() => this.machinery.costs(rango)),
+      opcional(() => this.crops.yields(rango)),
+      opcional(() => this.grazing.performance(rango)),
+    ]);
+
+    const medidos = (potreros?.paddocks ?? []).filter((p: any) => p.gainKgPerHaPerDay != null);
+
+    return {
+      from,
+      to,
+      hacienda: hato == null ? null : { total: hato.total, by: hato.rows },
+      produccion:
+        produccion == null
+          ? null
+          : {
+              pesajes: produccion.total_pesajes,
+              // La GDP de la finca es el promedio de los lotes que la midieron: incluir los que no
+              // pesaron como cero bajaría el número sin que nada se vea roto.
+              gdp_promedio: promedioDe(produccion.rows.map((r: any) => r.gdp_promedio)),
+            },
+      reproduccion,
+      sanidad: sanidad == null ? null : { vacunaciones: sanidad.vacunaciones, tratamientos: sanidad.tratamientos, mortalidad: sanidad.mortalidad },
+      economia:
+        rentabilidad == null
+          ? null
+          : {
+              ingresos: rentabilidad.totals.revenue,
+              costos: rentabilidad.totals.cost,
+              margen: rentabilidad.totals.margin,
+              margen_pct: rentabilidad.totals.margin_pct,
+              por_actividad: rentabilidad.rows,
+              caveat: avisoDeMargen(rentabilidad.totals.revenue, rentabilidad.totals.cost),
+            },
+      mano_de_obra:
+        manoDeObra == null
+          ? null
+          : {
+              costo: manoDeObra.totals.cost,
+              horas: manoDeObra.totals.hours,
+              cobertura_pct: manoDeObra.totals.coveragePct,
+              /** En qué se fue: la actividad que más pesa, que es por donde empieza la conversación. */
+              principal: manoDeObra.rows.find((r: any) => r.activity != null) ?? null,
+            },
+      inventario:
+        stock == null
+          ? null
+          : {
+              valor: stock.totals.stock_value,
+              plata_quieta: stock.totals.idle_value,
+              items_criticos: stock.totals.critical_items,
+              items_sin_costo: stock.totals.items_without_cost,
+            },
+      maquinaria:
+        maquinas == null
+          ? null
+          : {
+              costo_total: maquinas.totals.total_cost,
+              combustible: maquinas.totals.fuel_cost,
+              mantenimiento: maquinas.totals.maintenance_cost,
+              /** La que más cuesta por hora: la fila por la que se empieza a mirar. */
+              mas_cara: maquinas.by_hours[0] ?? maquinas.by_km[0] ?? null,
+              sin_medir: maquinas.unmeasured.length,
+            },
+      agricultura: cultivos == null || cultivos.by_type.length === 0 ? null : { por_cultivo: cultivos.by_type },
+      pastoreo:
+        potreros == null || medidos.length === 0
+          ? null
+          : {
+              mejor: medidos[0],
+              peor: medidos[medidos.length - 1],
+              sin_medir: (potreros.paddocks ?? []).length - medidos.length,
+            },
+    };
+  }
 
   /**
    * Inventario del hato a una fecha. Un animal está "presente" en la fecha D si

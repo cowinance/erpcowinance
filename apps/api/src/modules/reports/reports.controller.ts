@@ -5,6 +5,12 @@ import { ReportsService } from './reports.service';
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
+  /** Resumen de la finca: el cierre que ensambla todos los verticales (Fase 5). */
+  @Get('farm-summary')
+  farmSummary(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.reports.farmSummary({ from, to });
+  }
+
   @Get('herd-inventory')
   herdInventory(@Query('at') at?: string, @Query('group_by') groupBy?: 'category' | 'lot' | 'sex') {
     return this.reports.herdInventory(at, groupBy);

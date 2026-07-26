@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReportsService } from './reports.service';
+import { buildReportsService } from './reports.test-factory';
 
 /**
  * Integración de los índices reproductivos período-scoped (P9-1). Aísla del seed usando ventanas
@@ -44,7 +45,7 @@ describe('reports.reproduction — índices del período', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    reports = new ReportsService(db);
+    reports = buildReportsService(db);
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
