@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import * as jwt from 'jsonwebtoken';
-import { DbService } from '../../db/db.service';
+import { DbService, type Q } from '../../db/db.service';
 import { hashPassword, needsRehash, verifyPassword } from '../../common/passwords';
 import { requestContext } from '../../common/request-context';
 import { resolveJwtSecret } from './jwt-secret';
@@ -63,6 +63,8 @@ export class AuthService {
     if (!assignment)
       throw new UnauthorizedException({ code: 'auth.no_tenant', title: 'El usuario no pertenece a ninguna organización' });
 
+    await this.assertOrganizationActive(assignment.tenant_id);
+
     await this.db.query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [user.id]);
     return this.issueTokens(user, assignment.tenant_id, assignment.role);
   }
@@ -94,7 +96,71 @@ export class AuthService {
     const user = await this.db.one<any>(`SELECT id, email, full_name, status FROM users WHERE id = $1`, [row.user_id]);
     if (!user || user.status !== 'active')
       throw new UnauthorizedException({ code: 'auth.user_inactive', title: 'Usuario inactivo' });
+    // También en el refresh, no solo en el login: sin esto, una cuenta suspendida seguiría
+    // renovando su sesión indefinidamente y la suspensión solo alcanzaría a quien volviera a
+    // ingresar desde cero.
+    await this.assertOrganizationActive(row.tenant_id);
     return this.issueTokens(user, row.tenant_id, payload.role ?? 'owner');
+  }
+
+  /**
+   * Una organización suspendida o dada de baja no puede operar.
+   *
+   * **POR QUÉ ESTÁ ACÁ Y NO EN CADA REQUEST.** El panel de plataforma (fase 2) permite suspender una
+   * cuenta —por falta de pago, típicamente—, y hasta ahora `organizations.status` era una columna
+   * que NADIE leía: suspender habría sido puramente cosmético, con el tenant trabajando igual. El
+   * botón habría mentido.
+   *
+   * El control va en el login y en el refresh, y no en el interceptor, porque en el interceptor
+   * sería una consulta más en TODAS las requests de TODAS las fincas para un dato que cambia una
+   * vez cada mucho. Cachearlo sería peor: la suspensión no tendría un momento definido en que
+   * empieza a valer.
+   *
+   * **La ventana que esto deja está acotada a propósito.** Suspender revoca además los refresh
+   * tokens vivos del tenant, así que lo único que sobrevive es un access token ya emitido: 15
+   * minutos como máximo. Es exactamente la misma garantía que el sistema ya daba al bloquear a un
+   * usuario, y hacerla distinta acá sería inventar una segunda regla para el mismo problema.
+   */
+  private async assertOrganizationActive(tenantId: string): Promise<void> {
+    const org = await this.db.one<{ status: string }>(`SELECT status FROM organizations WHERE id = $1`, [tenantId]);
+    if (!org || org.status === 'active') return;
+    throw new UnauthorizedException({
+      code: 'auth.organization_suspended',
+      title:
+        org.status === 'suspended'
+          ? 'La cuenta de tu finca está suspendida. Escribinos para reactivarla.'
+          : 'La cuenta de tu finca fue dada de baja.',
+    });
+  }
+
+  /**
+   * Revoca las sesiones DENTRO de una transacción ajena.
+   *
+   * Mismo patrón que `createEntryInTx` / `recordMovementInTx`: quien suspende una cuenta necesita
+   * que el cambio de estado y el corte de sesiones sean UNA sola operación. Si fueran dos
+   * transacciones, una falla a mitad de camino deja la cuenta suspendida con las sesiones vivas —o
+   * al revés— y nadie se entera.
+   *
+   * Vive en `auth` porque `auth_refresh_tokens` es suyo: el panel de plataforma no tiene por qué
+   * saber cómo se almacenan las sesiones, solo pedir que se corten.
+   */
+  static async revokeTenantSessionsInTx(q: Q, tenantId: string): Promise<number> {
+    const filas = await q.query<{ id: string }>(
+      `UPDATE auth_refresh_tokens SET revoked_at = now()
+        WHERE tenant_id = $1 AND revoked_at IS NULL RETURNING jti AS id`,
+      [tenantId],
+    );
+    return filas.length;
+  }
+
+  /** Ídem para UN usuario (bloqueo individual). */
+  static async revokeUserSessionsInTx(q: Q, userId: string): Promise<number> {
+    const filas = await q.query<{ id: string }>(
+      `UPDATE auth_refresh_tokens SET revoked_at = now()
+        WHERE user_id = $1 AND revoked_at IS NULL RETURNING jti AS id`,
+      [userId],
+    );
+    return filas.length;
   }
 
   /**

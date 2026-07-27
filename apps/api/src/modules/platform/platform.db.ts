@@ -42,6 +42,27 @@ export class PlatformDb {
   }
 
   /**
+   * Corre `fn` con contexto de plataforma **y permiso de escritura** (fase 2).
+   *
+   * Fija los DOS GUCs: el de escritura habilita la policy `platform_write` sobre `subscriptions`, y
+   * el de lectura hace falta igual porque un `UPDATE … WHERE` primero tiene que poder VER la fila.
+   *
+   * Es un método aparte de `read` justamente para que escribir sea una decisión visible en el
+   * código. Si las lecturas del panel corrieran con este contexto, un `UPDATE` puesto por error en
+   * una ruta de listado se ejecutaría sin que nada lo frene; así, no compila el descuido: hay que
+   * llamar a `write` a propósito.
+   */
+  async write<T>(fn: (q: Q) => Promise<T>): Promise<T> {
+    if (requestContext.getStore())
+      throw new Error('PlatformDb.write corrió dentro de una request de tenant (ver `read`).');
+    return this.db.tx(async (q) => {
+      await q.query(`SELECT set_config('app.platform_read', 'on', true)`);
+      await q.query(`SELECT set_config('app.platform_write', 'on', true)`);
+      return fn(q);
+    });
+  }
+
+  /**
    * Registra una entrada en la bitácora global.
    *
    * Nunca lanza: una acción que ya ocurrió no se puede «des-hacer» porque falló su registro, y

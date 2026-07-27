@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { adminApi, formatDateTime, formatDay, queryString } from '@/lib/admin-api';
 import { Empty, PageHeader, Pager, Panel, Pill, TableWrap, Td, Th } from '../ui';
 import { Filtros } from '../filtros';
+import { AccionUsuario } from './AccionUsuario';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,9 +36,13 @@ export default async function UsuariosPage({
 }) {
   const sp = await searchParams;
   const qs = queryString({ q: sp.q, status: sp.status, email_verified: sp.email_verified, offset: sp.offset });
-  const { data, total, limit, offset } = await adminApi<{ data: Row[]; total: number; limit: number; offset: number }>(
-    `/users${qs}`,
-  );
+  // `me` viaja junto al listado: define qué botones se dibujan y cuál fila es la propia (que no se
+  // puede bloquear). Los permisos los resuelve el servidor para no repetir la regla en el panel.
+  const [{ data, total, limit, offset }, yo] = await Promise.all([
+    adminApi<{ data: Row[]; total: number; limit: number; offset: number }>(`/users${qs}`),
+    adminApi<{ userId: string; actions: string[] }>('/me'),
+  ]);
+  const acciones = yo.actions ?? [];
 
   return (
     <>
@@ -83,6 +88,7 @@ export default async function UsuariosPage({
                   <Th>Organizaciones</Th>
                   <Th>Alta</Th>
                   <Th>Último ingreso</Th>
+                  <Th>Acciones</Th>
                 </tr>
               </thead>
               <tbody>
@@ -132,6 +138,16 @@ export default async function UsuariosPage({
                     </Td>
                     <Td className="whitespace-nowrap text-ink-2">{formatDay(u.created_at)}</Td>
                     <Td className="whitespace-nowrap text-ink-2">{formatDateTime(u.last_login_at)}</Td>
+                    <Td>
+                      <AccionUsuario
+                        id={u.id}
+                        nombre={u.name}
+                        email={u.email}
+                        estado={u.status}
+                        acciones={acciones}
+                        esMiCuenta={u.id === yo.userId}
+                      />
+                    </Td>
                   </tr>
                 ))}
               </tbody>

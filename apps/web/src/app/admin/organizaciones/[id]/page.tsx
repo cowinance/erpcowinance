@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { adminApi, formatBytes, formatDateTime, formatDay } from '@/lib/admin-api';
 import { Empty, PageHeader, Panel, Pill, Stat, TableWrap, Td, Th } from '../../ui';
+import { AccionesOrganizacion } from './AccionesOrganizacion';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,7 @@ interface Detalle {
     billing_currency: string;
     current_period_start: string;
     current_period_end: string;
+    plan_code: string;
     plan_name: string;
     monthly_price_usd: number;
     max_animals: number | null;
@@ -83,7 +85,15 @@ function contraLimite(uso: number, limite: number | null | undefined): string {
 
 export default async function OrganizacionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const d = await adminApi<Detalle>(`/organizations/${id}`);
+  // En paralelo: el detalle, qué puede hacer QUIEN MIRA (el servidor resuelve los permisos) y el
+  // catálogo de planes para el selector. Tres llamadas independientes; encadenarlas sumaría dos
+  // viajes a una pantalla que ya hace bastante trabajo.
+  const [d, yo, planes] = await Promise.all([
+    adminApi<Detalle>(`/organizations/${id}`),
+    adminApi<{ actions: string[] }>('/me'),
+    adminApi<{ code: string; name: string }[]>('/plans'),
+  ]);
+  const acciones = yo.actions ?? [];
   const o = d.organization;
   const s = d.subscription;
 
@@ -97,6 +107,15 @@ export default async function OrganizacionPage({ params }: { params: Promise<{ i
             ← Volver al listado
           </Link>
         }
+      />
+
+      <AccionesOrganizacion
+        id={o.id}
+        nombre={o.name}
+        estado={o.status}
+        planActual={s?.plan_code}
+        acciones={acciones}
+        planes={planes}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">

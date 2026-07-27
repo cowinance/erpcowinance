@@ -4,6 +4,8 @@ import { Public } from '../auth/public.decorator';
 import { CREDENTIAL_RULES, RateLimit } from '../../common/rate-limit.guard';
 import { PlatformService, type OrganizationFilters, type UserFilters } from './platform.service';
 import { PlatformAuthService } from './platform-auth.service';
+import { PlatformActionsService } from './platform-actions.service';
+import { actionsFor } from './platform-permissions';
 import { PlatformController, clientIp } from './platform-admin.guard';
 import type { PlatformActor } from './platform-session';
 
@@ -41,10 +43,14 @@ export class PlatformAuthController {
 export class PlatformReadController {
   constructor(private readonly platform: PlatformService) {}
 
-  /** Quién soy: lo usa el panel para el encabezado y para saber qué rol tiene la sesión. */
+  /**
+   * Quién soy y QUÉ PUEDO HACER. Las acciones viajan resueltas por el servidor para que el panel no
+   * dibuje botones que van a terminar en 403 — y, sobre todo, para que la regla de permisos no
+   * quede escrita dos veces con riesgo de divergir.
+   */
   @Get('me')
   me(@Req() req: Request & { platformActor: PlatformActor }) {
-    return req.platformActor;
+    return { ...req.platformActor, actions: actionsFor(req.platformActor.role) };
   }
 
   @Get('dashboard')
@@ -69,8 +75,55 @@ export class PlatformReadController {
     return this.platform.users(query);
   }
 
+  @Get('plans')
+  plans() {
+    return this.platform.plans();
+  }
+
   @Get('audit-log')
   auditLog(@Query('limit') limit?: string) {
     return this.platform.auditLog(Number(limit) || 100);
+  }
+}
+
+/**
+ * Acciones del panel — FASE 2. Cambios de estado reversibles sobre la cuenta.
+ *
+ * `POST` y no `PATCH`: son TRANSICIONES con nombre («suspender», «reactivar»), no ediciones de un
+ * recurso. La ruta dice qué pasa; un `PATCH {status:'suspended'}` invitaría a mandar cualquier
+ * columna y a que el servidor decidiera cuáles acepta.
+ *
+ * Las tres restricciones que aplican a TODAS:
+ *   · motivo obligatorio (queda en la bitácora, dentro de la misma transacción),
+ *   · el rol tiene que permitirlo (`platform-permissions.ts`),
+ *   · nada de esto toca `billing_payments`, que sigue en solo lectura por policy.
+ */
+@PlatformController()
+export class PlatformActionsController {
+  constructor(private readonly acciones: PlatformActionsService) {}
+
+  @Post('organizations/:id/suspend')
+  suspend(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
+    return this.acciones.suspendOrganization(req.platformActor, id, body);
+  }
+
+  @Post('organizations/:id/reactivate')
+  reactivate(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
+    return this.acciones.reactivateOrganization(req.platformActor, id, body);
+  }
+
+  @Post('organizations/:id/plan')
+  changePlan(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
+    return this.acciones.changePlan(req.platformActor, id, body);
+  }
+
+  @Post('users/:id/block')
+  block(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
+    return this.acciones.blockUser(req.platformActor, id, body);
+  }
+
+  @Post('users/:id/unblock')
+  unblock(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
+    return this.acciones.unblockUser(req.platformActor, id, body);
   }
 }

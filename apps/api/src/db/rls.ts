@@ -269,6 +269,20 @@ export function rlsMigration(only?: readonly string[]): string {
 const PLATFORM_GUC = `current_setting('app.platform_read', true) = 'on'`;
 
 /**
+ * El GUC de ESCRITURA, separado del de lectura a propósito (fase 2).
+ *
+ * Podría haberse reusado `app.platform_read` para las policies de UPDATE y habría funcionado. No se
+ * hizo porque entonces CUALQUIER consulta del panel —las decenas de lecturas del dashboard, los
+ * listados, el detalle— correría con permiso de escritura latente, y un `UPDATE` escrito por error
+ * en una ruta de lectura pasaría sin que nada lo frene.
+ *
+ * Con dos GUCs, escribir es una decisión explícita por transacción: solo `PlatformDb.write()` lo
+ * fija, y solo lo usa el servicio de acciones. El resto del panel sigue sin poder escribir ni por
+ * accidente.
+ */
+const PLATFORM_WRITE_GUC = `current_setting('app.platform_write', true) = 'on'`;
+
+/**
  * Tablas de tenant que el panel de plataforma puede leer A TRAVÉS de los tenants.
  *
  * **Es una lista corta a propósito, y ese es el diseño.** La alternativa obvia —dejar leer las
@@ -294,6 +308,20 @@ export const PLATFORM_READ_TABLES = [
   'files',
   'sync_devices',
 ];
+
+/**
+ * Tablas de tenant que el panel puede MODIFICAR (fase 2). **Una sola, y con motivo.**
+ *
+ * Cambiar de plan es lo único que el panel necesita escribir dentro del plano de tenant. Las otras
+ * dos acciones de la fase 2 —suspender una organización y bloquear a un usuario— no aparecen acá
+ * porque `organizations` y `users` viven en el plano de IDENTIDAD: no tienen `tenant_id` y por eso
+ * nunca tuvieron policy de aislamiento. Se escriben sin abrir nada.
+ *
+ * Todo lo demás sigue en `FOR SELECT`: `animals`, `files`, `farms`, `companies`,
+ * `subscription_usage` y sobre todo `billing_payments` — el panel no toca dinero, y no por
+ * convención sino porque el motor lo deniega.
+ */
+export const PLATFORM_WRITE_TABLES = ['subscriptions'];
 
 /** Tablas del plano de plataforma: no son de tenant, y solo se ven con el GUC puesto. */
 export const PLATFORM_TABLES = ['platform_admins', 'platform_audit_logs'];
@@ -323,6 +351,17 @@ export function platformMigration(): string {
       CREATE POLICY platform_read ON "${t}" FOR SELECT
         USING (${PLATFORM_GUC});`,
   );
+  // Escritura: `FOR UPDATE` y nada más. Ni INSERT ni DELETE — el panel cambia el plan de una
+  // suscripción existente; crear o borrar suscripciones es del flujo de facturación, no de acá.
+  // La cláusula va en USING y en WITH CHECK: la primera decide qué fila puede tocar, la segunda
+  // impide que la deje en un estado que no podría volver a ver.
+  const writable = PLATFORM_WRITE_TABLES.map(
+    (t) => `
+      DROP POLICY IF EXISTS platform_write ON "${t}";
+      CREATE POLICY platform_write ON "${t}" FOR UPDATE
+        USING (${PLATFORM_WRITE_GUC})
+        WITH CHECK (${PLATFORM_WRITE_GUC});`,
+  );
   const own = PLATFORM_TABLES.map(
     (t) => `
       ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY;
@@ -332,5 +371,5 @@ export function platformMigration(): string {
         USING (${PLATFORM_GUC})
         WITH CHECK (${PLATFORM_GUC});`,
   );
-  return [...readOnly, ...own].join('\n');
+  return [...readOnly, ...writable, ...own].join('\n');
 }

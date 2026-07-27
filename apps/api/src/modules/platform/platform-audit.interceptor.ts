@@ -27,6 +27,13 @@ export class PlatformAuditInterceptor implements NestInterceptor {
     const req = context.switchToHttp().getRequest();
     const actor: PlatformActor | undefined = req.platformActor;
 
+    // Las ESCRITURAS se auditan solas, dentro de su propia transacción y con el motivo, el estado
+    // anterior y las sesiones cortadas (`PlatformActionsService`). Registrarlas también acá dejaría
+    // dos entradas por acción: una rica y otra que solo dice el verbo y la ruta. Peor todavía, la
+    // de acá se escribe DESPUÉS de que la transacción cerró, así que una acción revertida podría
+    // quedar igual en la bitácora como si hubiera pasado.
+    if (req.method !== 'GET') return next.handle();
+
     return next.handle().pipe(
       tap(() => {
         void this.pdb.audit({

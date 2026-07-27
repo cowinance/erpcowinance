@@ -294,6 +294,21 @@ export class PlatformService {
     });
   }
 
+  /**
+   * Catálogo de planes activos. Lo necesita el selector de «cambiar plan» del panel.
+   *
+   * `plans` es un catálogo GLOBAL (sin `tenant_id`, sin RLS), así que no hace falta que esté en
+   * ninguna lista de la policy: se lee igual.
+   */
+  async plans() {
+    return this.pdb.read((q) =>
+      q.query(
+        `SELECT code, name, monthly_price_usd::float AS monthly_price_usd, max_animals, max_users, max_devices
+           FROM plans WHERE is_active = true AND deleted_at IS NULL ORDER BY monthly_price_usd`,
+      ),
+    );
+  }
+
   /** Bitácora global: quién miró qué. Solo lectura, últimas N entradas. */
   async auditLog(limit = 100) {
     return this.pdb.read((q: Q) =>

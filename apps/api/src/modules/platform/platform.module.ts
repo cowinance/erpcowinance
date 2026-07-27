@@ -5,7 +5,8 @@ import { PlatformService } from './platform.service';
 import { PlatformAuthService } from './platform-auth.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { PlatformAuditInterceptor } from './platform-audit.interceptor';
-import { PlatformAuthController, PlatformReadController } from './platform.controller';
+import { PlatformActionsService } from './platform-actions.service';
+import { PlatformActionsController, PlatformAuthController, PlatformReadController } from './platform.controller';
 
 /**
  * Administración de la PLATAFORMA Cowinance — separada del ERP de cada finca.
@@ -20,8 +21,15 @@ import { PlatformAuthController, PlatformReadController } from './platform.contr
  * pasar por ellos y a cada una a saber excluirse.
  */
 @Module({
-  controllers: [PlatformAuthController, PlatformReadController],
-  providers: [PlatformDb, PlatformService, PlatformAuthService, PlatformAdminGuard, PlatformAuditInterceptor],
+  controllers: [PlatformAuthController, PlatformReadController, PlatformActionsController],
+  providers: [
+    PlatformDb,
+    PlatformService,
+    PlatformAuthService,
+    PlatformActionsService,
+    PlatformAdminGuard,
+    PlatformAuditInterceptor,
+  ],
   exports: [PlatformDb],
 })
 export class PlatformModule implements OnModuleInit {

@@ -290,6 +290,77 @@ const desdePanel = await asAppT(`SET app.platform_read = 'on'; SELECT count(*) F
 if (desdeTenant === '0' && desdePanel === '1') ok('platform_admins: invisible desde el ERP, visible desde el panel');
 else bad('platform_admins mal aislada', `tenant=${desdeTenant} panel=${desdePanel}`);
 
+// ── FASE 2: la escritura acotada ──────────────────────────────────────────────
+//
+// El panel ya puede cambiar el plan de una suscripción. Lo que hay que demostrar es que esa grieta
+// tiene EXACTAMENTE el tamaño diseñado: una tabla, una operación, y bajo un GUC propio.
+console.log('\n\x1b[1m── Escritura del panel (fase 2)\x1b[0m');
+
+await sqlT(`
+  INSERT INTO plans (id, code, name, monthly_price_usd) VALUES
+    ('dddddddd-0000-0000-0000-00000000000d','prueba-rls','Plan de prueba',0)
+  ON CONFLICT (code) DO NOTHING;
+  INSERT INTO subscriptions (id, tenant_id, plan_id, billing_currency, current_period_start, current_period_end)
+  VALUES ('cccccccc-0000-0000-0000-00000000000c','${TA}','dddddddd-0000-0000-0000-00000000000d','ARS', CURRENT_DATE, CURRENT_DATE + 30)
+  ON CONFLICT DO NOTHING;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON plans, subscriptions TO ${APP_ROLE};
+`);
+
+// W1) Con el GUC de ESCRITURA, el panel actualiza la suscripción de cualquier tenant.
+const updPlan = await asAppT(`
+  SET app.platform_read = 'on'; SET app.platform_write = 'on';
+  UPDATE subscriptions SET status = 'active' WHERE tenant_id = '${TA}';
+  SELECT count(*) FROM subscriptions WHERE tenant_id = '${TA}' AND status = 'active';
+`);
+if (updPlan === '1') ok('con app.platform_write el panel actualiza subscriptions cross-tenant');
+else bad('el panel no pudo actualizar la suscripción', `count=${updPlan}`);
+
+// W2) LA aserción central: el GUC de LECTURA por sí solo NO alcanza para escribir. Es lo que hace
+// que las decenas de consultas del panel no corran con permiso de escritura latente.
+const soloLectura = await asAppT(`
+  SET app.platform_read = 'on';
+  UPDATE subscriptions SET status = 'canceled' WHERE tenant_id = '${TA}';
+  SELECT count(*) FROM subscriptions WHERE tenant_id = '${TA}' AND status = 'canceled';
+`);
+if (soloLectura === '0') ok('con SOLO el GUC de lectura, el UPDATE no alcanza ninguna fila');
+else bad('leer alcanzaba para escribir', `filas cambiadas=${soloLectura}`);
+
+// W3) La escritura NO se derrama a las demás tablas del allowlist: `animals` y `billing_payments`
+// siguen siendo de lectura aunque el GUC de escritura esté puesto.
+const derrame = await asAppT(`
+  SET app.platform_read = 'on'; SET app.platform_write = 'on';
+  UPDATE farms SET name = 'renombrada por el panel' WHERE tenant_id = '${TB}';
+  SELECT count(*) FROM farms WHERE name = 'renombrada por el panel';
+`);
+if (derrame === '0') ok('la escritura NO se derrama: farms sigue siendo de solo lectura');
+else bad('el panel escribió en una tabla fuera de PLATFORM_WRITE_TABLES', `filas=${derrame}`);
+
+// W4) Y es FOR UPDATE: no puede crear ni borrar suscripciones.
+const insertar = await asAppTErr(`
+  SET app.platform_read = 'on'; SET app.platform_write = 'on';
+  INSERT INTO subscriptions (tenant_id, plan_id, billing_currency, current_period_start, current_period_end)
+  VALUES ('${TB}','dddddddd-0000-0000-0000-00000000000d','ARS', CURRENT_DATE, CURRENT_DATE + 30);
+`);
+if (insertar && /row-level security|violates/i.test(insertar)) ok('el panel NO puede CREAR suscripciones (la policy es FOR UPDATE)');
+else bad('el panel pudo insertar una suscripción', insertar ?? 'el INSERT no falló');
+
+const borrado = await asAppT(`
+  SET app.platform_read = 'on'; SET app.platform_write = 'on';
+  DELETE FROM subscriptions WHERE tenant_id = '${TA}';
+  SELECT count(*) FROM subscriptions WHERE tenant_id = '${TA}';
+`);
+if (borrado === '1') ok('el panel NO puede BORRAR suscripciones');
+else bad('el panel borró una suscripción', `quedan=${borrado}`);
+
+// W5) Y una sesión de TENANT no hereda nada de esto: sigue viendo y tocando solo lo suyo.
+const tenantSigueAcotado = await asAppT(`
+  SET app.tenant_id = '${TB}';
+  UPDATE subscriptions SET status = 'canceled' WHERE tenant_id = '${TA}';
+  SELECT count(*) FROM subscriptions WHERE tenant_id = '${TA}' AND status = 'canceled';
+`);
+if (tenantSigueAcotado === '0') ok('un tenant no puede tocar la suscripción de otro (sin cambios)');
+else bad('la policy de escritura aflojó el aislamiento entre tenants', `filas=${tenantSigueAcotado}`);
+
 // P7) Y el GUC no sobrevive a la transacción: la conexión vuelve al pool sin permisos de panel.
 const trasTxPanel = await asAppT(
   `BEGIN; SELECT set_config('app.platform_read','on',true); COMMIT; SELECT count(*) FROM farms;`,

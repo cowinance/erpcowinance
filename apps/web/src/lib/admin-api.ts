@@ -25,6 +25,37 @@ export async function adminApi<T = any>(path: string): Promise<T> {
   return res.json();
 }
 
+/**
+ * POST al panel de plataforma (acciones de la fase 2).
+ *
+ * Devuelve el error en vez de lanzarlo: acá el «no se pudo» es información para la persona que
+ * apretó el botón —«la cuenta ya está suspendida», «tu rol no puede hacer esto», «el motivo es
+ * obligatorio»— y no un fallo del sistema. Tirar una excepción mostraría la pantalla de error de
+ * Next y perdería el motivo, que es justo lo único útil de la respuesta.
+ */
+export async function adminPost<T = any>(
+  path: string,
+  body: unknown,
+): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+  const token = (await cookies()).get(PLATFORM_COOKIE)?.value;
+  if (!token) redirect('/admin/login');
+  let res: Response;
+  try {
+    res = await fetch(`${DIRECT_API_URL}/platform${path}`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    });
+  } catch {
+    return { ok: false, error: 'No se pudo conectar con el servidor. Reintentá.' };
+  }
+  if (res.status === 401) redirect('/admin/login?expirada=1');
+  const cuerpo = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false, error: cuerpo?.title ?? `Error ${res.status}` };
+  return { ok: true, data: cuerpo as T };
+}
+
 /** `?a=1&b=` → `?a=1` (los filtros vacíos no se mandan). */
 export function queryString(params: Record<string, string | undefined>): string {
   const sp = new URLSearchParams();
