@@ -108,21 +108,53 @@ console.log(`Destino: ${cfg.endpoint}/${cfg.bucket} (${cfg.forcePathStyle ? 'pat
  * antes de tocar un solo archivo.
  */
 {
-  const probe = firmar('HEAD', `.cowinance-probe-${Date.now()}`);
-  let res;
+  // GET y no HEAD: un HEAD no devuelve cuerpo, y el cuerpo es donde S3 dice QUÉ falló. Sin él, todo
+  // problema se ve igual —«403»— y no se puede distinguir una credencial mal copiada de una
+  // política a la que le falta un permiso.
+  const probe = firmar('GET', `.cowinance-probe-${Date.now()}`);
+  let res, cuerpo = '';
   try {
-    res = await fetch(probe.url, { method: 'HEAD', headers: probe.headers });
+    res = await fetch(probe.url, { method: 'GET', headers: probe.headers });
+    cuerpo = await res.text();
   } catch (e) {
     console.error(`\nNo se pudo llegar a ${cfg.endpoint}: ${e.message}`);
     console.error('Revisá S3_ENDPOINT (y que el servidor tenga salida a internet).');
     process.exit(1);
   }
+  const codigo = (cuerpo.match(/<Code>(.*?)<\/Code>/) ?? [])[1] ?? '';
+  const mensaje = (cuerpo.match(/<Message>(.*?)<\/Message>/) ?? [])[1] ?? '';
+
   if (res.status === 403) {
-    console.error('\nEl almacén respondió 403. Las credenciales no sirven o les falta permiso sobre el bucket.');
-    console.error('Revisá S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY y que la política permita s3:PutObject y s3:GetObject.');
-    process.exit(1);
-  }
-  if (res.status === 404 || res.ok) {
+    /**
+     * **Un 403 acá NO significa que la configuración esté mal, y creer que sí costó un diagnóstico
+     * equivocado.**
+     *
+     * Cuando se pide un objeto que NO EXISTE y la política no incluye `s3:ListBucket`, S3 contesta
+     * 403 en vez de 404 — a propósito, para no revelar si la clave existe. Y la política que
+     * recomienda `docs/ops/s3-archivos.md` omite `ListBucket` justamente por mínimo privilegio.
+     *
+     * O sea que la configuración CORRECTA producía el mensaje «las credenciales no sirven». Ahora
+     * se distingue por el permiso que S3 nombra: si el que falta es `ListBucket`, las credenciales
+     * son válidas —S3 pudo identificar al usuario para poder negarle algo— y lo que hay es
+     * exactamente la política mínima esperada.
+     */
+    if (/ListBucket/.test(mensaje)) {
+      console.log('Credenciales OK (política mínima, sin s3:ListBucket — es lo esperado).');
+    } else if (/SignatureDoesNotMatch/.test(codigo)) {
+      console.error('\nLa FIRMA no coincide. Suele ser el secreto mal copiado, o S3_REGION distinta de la del bucket.');
+      console.error(`  ${mensaje}`);
+      process.exit(1);
+    } else if (/InvalidAccessKeyId|TokenRefreshRequired|ExpiredToken/.test(codigo)) {
+      console.error(`\nLa credencial no es válida (${codigo}).`);
+      console.error(`  ${mensaje}`);
+      process.exit(1);
+    } else {
+      console.error(`\nEl almacén respondió 403 (${codigo || 'AccessDenied'}).`);
+      console.error(`  ${mensaje}`);
+      console.error('La política del usuario IAM tiene que permitir s3:PutObject y s3:GetObject sobre el bucket.');
+      process.exit(1);
+    }
+  } else if (res.status === 404 || res.ok) {
     console.log('Credenciales OK.');
   } else if (res.status === 301 || res.status === 400) {
     // AWS devuelve 301/400 cuando la región del bucket no es la que se firmó.

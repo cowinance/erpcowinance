@@ -22,9 +22,18 @@ describe('signS3Request', () => {
     expect(signS3Request(BASE).url).toBe('https://s3.us-east-1.amazonaws.com/cowinance/tenant-1/file-1');
   });
 
+  /**
+   * Este test AFIRMABA EL BUG: daba por buena una URL sin el bucket
+   * (`https://s3.us-east-1.amazonaws.com/tenant-1/file-1`) mientras firmaba el host
+   * `cowinance.s3.…`. O sea, aseguraba que la URL y el host firmado NO coincidieran — que es
+   * exactamente la condición que hace que AWS rechace la firma.
+   *
+   * Es lo que pasa cuando un test se escribe para calzar con el código en vez de con el contrato:
+   * queda en verde y encima protege el error. Se corrige al valor correcto.
+   */
   it('arma la URL virtual-hosted cuando se apaga path-style (el estilo actual de AWS)', () => {
     const r = signS3Request({ ...BASE, forcePathStyle: false });
-    expect(r.url).toBe('https://s3.us-east-1.amazonaws.com/tenant-1/file-1');
+    expect(r.url).toBe('https://cowinance.s3.us-east-1.amazonaws.com/tenant-1/file-1');
     expect(r.headers.host).toBe('cowinance.s3.us-east-1.amazonaws.com');
   });
 
@@ -73,5 +82,53 @@ describe('signS3Request', () => {
     const r = signS3Request({ ...BASE, sessionToken: 'tok' });
     expect(r.headers['x-amz-security-token']).toBe('tok');
     expect(r.headers.Authorization).toContain('x-amz-security-token');
+  });
+});
+
+/**
+ * URL y `Host` firmado tienen que hablar del MISMO destino.
+ *
+ * Es la invariante que estaba rota y que nadie veía: la firma usaba el host virtual-hosted
+ * (`bucket.endpoint`) y la URL el endpoint pelado, así que contra AWS —el único que usa ese
+ * estilo— la request iba a una URL sin bucket y con una firma que no correspondía. Las pruebas de
+ * integración corren contra MinIO, que es path-style, así que jamás tocaron esta rama.
+ */
+describe('estilo de URL: path-style vs virtual-hosted', () => {
+  const base = {
+    endpoint: 'https://s3.us-east-2.amazonaws.com',
+    bucket: 'cowinance-media',
+    region: 'us-east-2',
+    accessKeyId: 'AKIA',
+    secretAccessKey: 'secreto',
+    method: 'GET' as const,
+    key: 'tenant/foto.jpg',
+    now: new Date(0),
+  };
+
+  it('virtual-hosted (AWS): el bucket va en el HOST, y la URL apunta ahí', () => {
+    const r = signS3Request({ ...base, forcePathStyle: false });
+    expect(r.url).toBe('https://cowinance-media.s3.us-east-2.amazonaws.com/tenant/foto.jpg');
+    expect(r.headers.host).toBe('cowinance-media.s3.us-east-2.amazonaws.com');
+  });
+
+  it('path-style (R2/MinIO/B2): el bucket va en la RUTA', () => {
+    const r = signS3Request({ ...base, forcePathStyle: true });
+    expect(r.url).toBe('https://s3.us-east-2.amazonaws.com/cowinance-media/tenant/foto.jpg');
+    expect(r.headers.host).toBe('s3.us-east-2.amazonaws.com');
+  });
+
+  // LA aserción: el host que se firma tiene que ser el host al que se pega. Si divergen, el
+  // servidor recalcula la firma sobre otro host y la rechaza — con un error que no dice el motivo.
+  it('en los DOS estilos, el host firmado es el de la URL', () => {
+    for (const forcePathStyle of [true, false]) {
+      const r = signS3Request({ ...base, forcePathStyle });
+      expect(new URL(r.url).host).toBe(r.headers.host);
+    }
+  });
+
+  it('conserva el puerto (MinIO local en virtual-hosted)', () => {
+    const r = signS3Request({ ...base, endpoint: 'http://localhost:9010', forcePathStyle: false });
+    expect(r.url).toBe('http://cowinance-media.localhost:9010/tenant/foto.jpg');
+    expect(new URL(r.url).host).toBe(r.headers.host);
   });
 });

@@ -81,7 +81,20 @@ export function signS3Request(p: S3SignParams): SignedRequest {
   const signature = hmac(signingKey(p.secretAccessKey, dateStamp, p.region), stringToSign).toString('hex');
 
   return {
-    url: `${endpoint.origin}${path}`,
+    /**
+     * La URL se arma con `host` —el mismo que se FIRMÓ— y no con `endpoint.origin`.
+     *
+     * Decía `endpoint.origin`, y en estilo virtual-hosted eso rompía de dos formas a la vez: la URL
+     * quedaba sin el bucket (`https://s3.us-east-2.amazonaws.com/tenant/foto.jpg`, que apunta a
+     * ningún lado) y además el `Host` firmado —`cowinance-media.s3…`— no era el del destino, así
+     * que S3 rechazaba la firma. O sea que `S3_FORCE_PATH_STYLE=false` no funcionaba, que es
+     * justamente el valor que hay que usar contra AWS.
+     *
+     * Sobrevivió porque las pruebas de integración corren contra MinIO, que usa path-style: la rama
+     * virtual-hosted no se ejercía nunca. Ahora hay tests que comparan URL y `Host` firmado en los
+     * dos estilos, que es la invariante que se violaba.
+     */
+    url: `${endpoint.protocol}//${host}${path}`,
     headers: {
       ...headers,
       Authorization: `${ALGORITHM} Credential=${p.accessKeyId}/${scope}, SignedHeaders=${signedHeadersList}, Signature=${signature}`,

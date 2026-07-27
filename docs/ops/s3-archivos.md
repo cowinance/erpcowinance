@@ -60,7 +60,14 @@ S3_FORCE_PATH_STYLE=false
 
 **`S3_FORCE_PATH_STYLE=false` es obligatorio en AWS.** El valor por defecto es `true` porque R2,
 MinIO y Backblaze lo exigen; AWS usa virtual-hosted (`https://bucket.s3.region.amazonaws.com/clave`)
-y con `true` responde errores que no explican el motivo.
+y el path-style está DEPRECADO para los buckets creados después de septiembre de 2020 — que es el
+caso de `cowinance-media`.
+
+> **Ojo si desplegaste antes del 26/07/2026.** Hasta ese día `false` estaba ROTO: el firmador armaba
+> la URL con el endpoint pelado (sin el bucket) pero firmaba el host virtual-hosted, así que S3
+> rechazaba la firma. No se había detectado porque las pruebas de integración corren contra MinIO,
+> que es path-style, y un test viejo daba por buena esa incoherencia. Corregido; hay tests que ahora
+> comparan la URL con el `Host` firmado en los dos estilos.
 
 **`S3_REGION` tiene que ser la región real del bucket.** Si no coincide, AWS contesta 301 o 400. El
 script de migración traduce ese caso a un mensaje que lo dice.
