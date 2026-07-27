@@ -5,6 +5,7 @@ import { countryDefaults, isSupportedCountry, supportedCountries } from './count
 import { EmailActionTokenService } from './email-action-token.service';
 import { EMAIL_SENDER, type EmailSender } from '../../application/ports/email-sender.port';
 import { AuthService } from '../auth/auth.service';
+import { bootstrapTenant } from './tenant-bootstrap';
 
 /** Base URL del front para armar los links de email (dev: localhost del web). */
 function appBaseUrl(): string {
@@ -125,6 +126,16 @@ export class IdentityService {
         `INSERT INTO farms (tenant_id, company_id, name, timezone, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
         [org.id, company.id, farmName, defaults.timezone, user.id],
       ))!;
+
+      // La finca arranca operable, no vacía: plan de cuentas, mapa de posteo y depósito. Dentro de
+      // la MISMA transacción — si falla, no queda un tenant a medio armar para reparar a mano.
+      await bootstrapTenant(q, {
+        tenantId: org.id,
+        companyId: company.id,
+        farmId: farm.id,
+        userId: user.id,
+        timeZone: defaults.timezone,
+      });
 
       return { userId: user.id, organizationId: org.id, companyId: company.id, farmId: farm.id };
     });

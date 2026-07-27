@@ -4,3 +4,5 @@ export { normalizeByAccountType, computeBudgetVariance } from './budget-variance
 export type { AccountType, BudgetVariance } from './budget-variance';
 export { agingBucketOf, computeAging } from './aging';
 export type { AgingBucketKey, AgingItem, AgingSummary } from './aging';
+export * from './base-chart';
+export * from './fiscal-periods';

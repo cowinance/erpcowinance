@@ -4,6 +4,7 @@ import { AccountsService } from './accounts.service';
 import { LedgerService } from './ledger.service';
 import { PurchasesService } from '../commerce/purchases.service';
 import { SalesService } from '../commerce/sales.service';
+import { POSTING_ROLES, type PostingRole } from '@cowinance/domain';
 
 const SETTINGS_KEY = 'finance.posting_accounts';
 /** Roles requeridos del mapa según el tipo de documento. */
@@ -11,8 +12,11 @@ const REQUIRED_ROLES = {
   sale: ['receivable', 'sales_income', 'vat_debit'] as const,
   purchase: ['purchases', 'vat_credit', 'payable'] as const,
 };
-const ALL_ROLES = ['receivable', 'sales_income', 'vat_debit', 'purchases', 'vat_credit', 'payable', 'cash', 'salary_expense', 'salaries_payable', 'payroll_withholdings'] as const;
-type Role = (typeof ALL_ROLES)[number];
+// Los roles VIVEN EN EL DOMINIO, junto al plan de cuentas que los cubre. Estaban duplicados: la
+// lista acá y las cuentas allá, sin nada que atara las dos. Agregar un rol y olvidarse del plan
+// dejaba a toda finca nueva con un asiento que no cierra, y se descubría en la primera venta.
+const ALL_ROLES = POSTING_ROLES;
+type Role = PostingRole;
 export type AccountMap = Partial<Record<Role, string>>;
 
 /**

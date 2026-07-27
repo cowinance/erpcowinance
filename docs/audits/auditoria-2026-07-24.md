@@ -398,11 +398,39 @@ software esté completo.
 
 1. **Onboarding real**: hoy un tenant nuevo arranca vacío. Importador guiado + datos de ejemplo
    opcionales + primeros pasos por rol.
+
+   **O-1 · La finca nueva arranca operable — HECHO (26 jul 2026).** Registrar un tenant y recorrer
+   la app mostró que «vacío» era peor de lo que decía esta línea: el productor *podía* cargar un
+   animal —los catálogos de especies, razas y categorías son globales— pero **Finanzas estaba
+   muerto**. La primera venta que intentara asentarse chocaba contra «La cuenta del rol
+   'receivable' no existe» y, salvado eso, contra «No hay un período fiscal abierto». Dos paredes
+   que le piden saber contabilidad a quien compró un sistema para ganado.
+
+   El alta ahora crea, en la MISMA transacción del registro: el plan de cuentas base, el mapa
+   rol→cuenta que consume `PostingService`, 24 períodos mensuales (el año en curso **y el
+   siguiente**, para que el 1 de enero no corte toda la contabilidad de golpe) y un depósito.
+
+   El criterio de «mínimo» no es estético: las cuentas salen de los 10 roles que el propio
+   `PostingService` declara necesitar, y un test del dominio verifica el ida y vuelta —ningún rol
+   sin cuenta, ninguna cuenta de rol que no sea imputable—. Si mañana se agrega un rol y nadie toca
+   el plan, falla la suite en vez de fallar la primera venta de un cliente. Los roles, que estaban
+   duplicados entre el servicio y el plan, ahora viven en un solo lugar.
+
+   Verificado registrando un tenant contra la app: 40 cuentas (24 imputables, 16 títulos), 24
+   períodos abiertos, un depósito, y una venta que se asienta en el mayor de punta a punta.
+
+   Falta de este punto: **O-2** primeros pasos derivados del estado real, **O-3** datos de ejemplo
+   opcionales, **O-4** importador guiado en la web.
 2. **Verificar los planes de facturación end-to-end** con un proveedor de pagos.
 3. **Beta con un socio de diseño** (`docs/product/design-partner-strategy.md`) sobre datos reales:
    es lo único que revela si el modelo de datos aguanta una finca de verdad.
-4. **Medir performance con volumen real** — 10.000 animales, 5 años de eventos. El perfilado previo
-   (Fase 3 de la auditoría anterior) se hizo sobre el dataset demo de 57 animales.
+4. ~~**Medir performance con volumen real**~~ — **HECHO (25-26 jul 2026)**, método y resultados en
+   `docs/ops/medir-volumen.md`. Encontró dos cuadráticos (`v_weighings` consultada desde
+   subconsultas correlacionadas: Inicio 7.156 → 147 ms, lotes 5.129 → 60 ms), una subconsulta sin
+   índice (migración `0026`) y, en el importador, un defecto que el tamaño del archivo no podía
+   encontrar: media planilla rechazada por escribir `H` de hembra. Se midió con 3.065 animales, no
+   con 10.000 — el objetivo era encontrar la CURVA, y las tres superficies dieron lineales o
+   sublineales.
 
 ---
 
