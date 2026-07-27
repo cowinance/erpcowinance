@@ -161,11 +161,17 @@ Tres decisiones que no son de forma:
 - **El esquema se aplica solo, y una vez.** Al arrancar, la API carga el DDL canónico si la base
   está vacía y después aplica las migraciones pendientes de
   [`packages/db/migrations/`](packages/db/migrations/), registrándolas en `schema_migrations`.
-- **`NEXT_PUBLIC_API_URL` se hornea en la imagen de la web.** Next la inlinea en el bundle durante
-  el build: es un `--build-arg`, no una variable de runtime. Una imagen por entorno. Reconstruir sin
-  pasarla deja la URL en el default de desarrollo, y por eso la web **comprueba al arrancar que
-  llega a la API y se apaga si no** (`apps/web/src/instrumentation.ts`): el fallo aparecía recién
-  cuando alguien intentaba registrarse.
+- **La web llega a la API por `API_INTERNAL_URL`, que se lee AL ARRANCAR.** Solo la usa el servidor
+  de Next (proxy `/api/cw`, middleware, Server Components); el navegador siempre habla con
+  `/api/cw`, del mismo origen. Cambiarla es editar el entorno y reiniciar — la misma imagen sirve
+  para todos los entornos.
+  `NEXT_PUBLIC_API_URL` sigue funcionando como respaldo, pero Next la **inlinea en el build**: exige
+  reconstruir, y el valor termina dentro del JavaScript que se le manda al navegador. Reconstruir
+  sin pasarla dejaba la URL en el default de desarrollo, y por eso la web **comprueba al arrancar
+  que llega a la API y se apaga si no** (`apps/web/src/instrumentation.ts`): el fallo aparecía
+  recién cuando alguien intentaba registrarse.
+  Si la web y la API comparten host, la URL tiene que ser el **bucle local**: apuntarla al dominio
+  público hace que Next salga a internet y vuelva por el proxy para hablar consigo mismo.
 
 Para un despliegue de verdad hay que configurar además estos valores; con los defaults de
 desarrollo el arranque avisa exactamente qué queda roto:
@@ -175,7 +181,7 @@ desarrollo el arranque avisa exactamente qué queda roto:
 | `STORAGE_DRIVER` | `local` | Las fotos y documentos van al disco del contenedor: se pierden en el próximo deploy y no los ve otra instancia. Con `s3` (AWS, Cloudflare R2, MinIO, Backblaze B2) viven fuera del proceso. |
 | `EMAIL_PROVIDER` | `log` | El correo se **imprime**: la verificación de email y el reset de contraseña no le llegan al usuario. Con `smtp` se envía de verdad, contra cualquier proveedor. |
 | `APP_BASE_URL` | `http://localhost:3000` | El correo sale, pero el **enlace** apunta a localhost: no funciona en el teléfono de quien lo recibe. Es el más difícil de diagnosticar, porque el mail llegó. |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:3001/v1` | La web no llega a la API. **Se INLINEA al construir la imagen**, no se lee en runtime: reconstruir sin pasarla la deja apuntando a localhost. Desde el contenedor web el host es el nombre del servicio (`api`), no `localhost`. Con este default la web **no arranca** (guardia de arranque). |
+| `API_INTERNAL_URL` | `http://localhost:3001/v1` | La web no llega a la API. Se lee **al arrancar** (no se inlinea): corregirla es reiniciar, sin reconstruir. Desde el contenedor web el host es el nombre del servicio (`api`), no `localhost`; con web y API en el mismo host, `127.0.0.1`. Con este default la web **no arranca** (guardia de arranque). |
 
 **«No me llega el email de verificación».** Casi siempre es una de esas dos. Con `EMAIL_PROVIDER=log`
 el mensaje queda en el log de la API (`docker compose logs api`) y nunca sale; el dashboard lo dice
@@ -311,7 +317,8 @@ mínimas**. Es lo que hace que la RLS se ejerza de verdad — con un superusuari
 | `EMAIL_PROVIDER` | API | Adaptador de email (puerto `EmailSender`, ADR-0011) | `log` (imprime el email al log) — **solo desarrollo**. `smtp` envía de verdad (SES, Postmark, Mailgun, Resend, Gmail o relay propio): pide `SMTP_HOST` y `SMTP_FROM` |
 | `STORAGE_DRIVER` | API | Adaptador de archivos (puerto `FileStorage`) | `local` (disco del proceso, `.data/uploads`) — **solo desarrollo**. `s3` para cualquier almacén compatible (AWS, R2, MinIO, B2): pide `S3_ENDPOINT`, `S3_BUCKET` y las credenciales |
 | `APP_BASE_URL` | API | Base del front para armar los **enlaces de email** (verificación/reset) | `http://localhost:3000` — apuntar a la web real en despliegue |
-| `NEXT_PUBLIC_API_URL` | Web | URL de la API que consume la web (se **inlinea en build** para componentes cliente) | `http://localhost:3001/v1` |
+| `API_INTERNAL_URL` | Web | Cómo llega el **servidor** de Next a la API (el navegador usa `/api/cw`, del mismo origen). Se lee en runtime | `http://localhost:3001/v1` |
+| `NEXT_PUBLIC_API_URL` | Web | Respaldo de la anterior, para despliegues que ya la pasan. Se **inlinea en build**: cambiarla exige reconstruir | `http://localhost:3001/v1` |
 | `EXPO_PUBLIC_WEB_URL` | Móvil | Base pública de la web para el botón "Abrir Cowinance web" del estado vacío del hato (ADR-0012) | **sin default**: si falta, la UI muestra instrucciones en texto **sin** hardcodear dominios y **sin** botón |
 | `JWT_SECRET` | API | Clave HMAC de los JWT (access, refresh, tokens de archivo) | dev: clave pública de desarrollo. **Producción: obligatoria** — el proceso NO arranca sin ella, ni con la de desarrollo, ni con menos de 32 caracteres (`openssl rand -base64 48`) |
 | `CORS_ORIGINS` | API | Orígenes permitidos, separados por comas | dev: refleja el origen. Producción sin lista: **CORS deshabilitado** (móvil y render server-side siguen funcionando: no son navegadores con origen) |

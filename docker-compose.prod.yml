@@ -106,6 +106,10 @@ services:
     init: true
     environment:
       NODE_ENV: production
+      # Cómo llega el SERVIDOR de Next a la API. Va acá —entorno de RUNTIME— y no como build-arg:
+      # se lee al arrancar, así que corregirla es `up -d web`, sin reconstruir. Tiene precedencia
+      # sobre el `NEXT_PUBLIC_API_URL` horneado de arriba, que queda solo como respaldo.
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:3001/v1}
     ports:
       - '${WEB_PORT:-3000}:3000'
     depends_on:

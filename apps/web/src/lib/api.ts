@@ -1,8 +1,42 @@
 /**
- * Base de la API SIN intermediarios. La usan el código de servidor que habla con api-core
- * directamente: los route handlers de `app/api/*` y `server-api.ts`.
+ * Base de la API SIN intermediarios. La usa SOLO el código de servidor que habla con api-core
+ * directamente: los route handlers de `app/api/*`, el middleware, `server-api.ts` y `admin-api.ts`.
+ * El navegador nunca la usa — va siempre por el proxy `/api/cw` (ver `API_URL`).
+ *
+ * ## Por qué `API_INTERNAL_URL` y no solo `NEXT_PUBLIC_API_URL`
+ *
+ * `NEXT_PUBLIC_*` se **inlinea en el build**, no se lee al arrancar. Para un valor que solo lee el
+ * servidor, eso es el mecanismo equivocado y ya costó caro dos veces: reconstruir sin pasar la
+ * variable dejó la web apuntando a `localhost` y **rompió el registro en producción**.
+ *
+ * Hay un segundo problema, más silencioso: al inlinearse, el valor termina DENTRO del JavaScript
+ * que se le manda al navegador. Configurar el bucle local correcto (`http://127.0.0.1:3001/v1`)
+ * publicaba la topología interna en el bundle, aunque el navegador no la use.
+ *
+ * `API_INTERNAL_URL` no lleva el prefijo, así que Next NO la inlinea: se lee del entorno del
+ * proceso al arrancar. Cambiarla es editar el `.env` y reiniciar — sin rebuild, y sin que pueda
+ * quedar horneada mal.
+ *
+ * `NEXT_PUBLIC_API_URL` se mantiene como respaldo para no romper los despliegues que ya la pasan;
+ * si están las dos, gana la interna.
  */
-export const DIRECT_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
+export const DEV_API_URL = 'http://localhost:3001/v1';
+
+/**
+ * La regla de precedencia, aparte y pura para poder probarla.
+ *
+ * **Recibe los VALORES, no el objeto `process.env`, y eso no es un detalle de estilo.** Next
+ * reconoce `process.env.LO_QUE_SEA` solo como referencia LITERAL en el código; si acá se pasara
+ * `process.env` entero y adentro se hiciera `env.API_INTERNAL_URL`, el bundle del middleware (que
+ * corre en el runtime Edge) no tendría de dónde resolverla y quedaría en `undefined` — con lo cual
+ * la renovación de sesión al navegar volvería a apuntar a la URL vieja. Se comprobó que la forma
+ * literal SÍ se resuelve en runtime, en Edge y en Node; conviene no romperla por prolijidad.
+ */
+export function resolveDirectApiUrl(interna?: string, publica?: string): string {
+  return interna?.trim() || publica?.trim() || DEV_API_URL;
+}
+
+export const DIRECT_API_URL = resolveDirectApiUrl(process.env.API_INTERNAL_URL, process.env.NEXT_PUBLIC_API_URL);
 
 /**
  * Base que usa cada `fetch` de la app — y que cambia según DÓNDE corre:

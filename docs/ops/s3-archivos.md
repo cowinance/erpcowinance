@@ -132,8 +132,12 @@ Dejan basura en `tenant-de-prueba/` — borrable a mano, o correrlas contra un b
 
 - **Rotar las claves expuestas**: la contraseña maestra de RDS y la de SMTP se compartieron en texto
   plano durante las pruebas. Tratarlas como comprometidas antes de que entren datos reales.
-- **`NEXT_PUBLIC_API_URL`** apuntando al host local + rebuild de la web (se inlinea en build, no se
-  lee en runtime).
+- **La URL interna de la web**: hoy está construida con `https://app.cowinance.com/v1`, así que el
+  proceso de Next sale a internet y vuelve por nginx para hablar consigo mismo. **Ya no hace falta
+  reconstruir**: agregar `API_INTERNAL_URL=http://127.0.0.1:3001/v1` al `.env` y
+  `pm2 restart cowinance-web` alcanza — se lee al arrancar y tiene precedencia sobre la horneada.
+  Verificar con `pm2 logs cowinance-web | grep alcanzable`, que imprime la URL en uso.
+  **No sacar `/v1` de nginx**: la app móvil nativa sí necesita la API pública.
 - ~~Verificar que `cowinance_app` tenga `rolsuper=false` y `rolbypassrls=false`~~ **YA NO HAY QUE
   VERIFICARLO A MANO.** Desde el 26/07/2026 la API lo comprueba sola al arrancar
   (`apps/api/src/db/role-privileges.ts`): con `NODE_ENV=production`, un rol con `SUPERUSER` o

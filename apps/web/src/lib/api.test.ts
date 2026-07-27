@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiErrorTitle } from './api';
+import { DEV_API_URL, apiErrorTitle, resolveDirectApiUrl } from './api';
 
 /**
  * El motivo de error que ve el usuario.
@@ -46,5 +46,41 @@ describe('motivo de error de la API', () => {
     expect(apiErrorTitle('texto suelto', 'Error')).toBe('Error');
     expect(apiErrorTitle([1, 2, 3], 'Error')).toBe('Error');
     expect(apiErrorTitle(42, 'Error')).toBe('Error');
+  });
+});
+
+/**
+ * Precedencia de la URL interna de la API.
+ *
+ * El bug que cubre ya ocurrió dos veces: `NEXT_PUBLIC_API_URL` se INLINEA en el build, así que
+ * reconstruir sin pasarla dejó la web apuntando a `localhost` y rompió el registro en producción.
+ * `API_INTERNAL_URL` se lee en runtime; este test fija cuál gana y que el respaldo siga vivo para
+ * los despliegues que todavía hornean la vieja.
+ */
+describe('URL interna de la API', () => {
+  it('la interna (runtime) le gana a la pública (horneada en el build)', () => {
+    expect(resolveDirectApiUrl('http://127.0.0.1:3001/v1', 'https://app.cowinance.com/v1')).toBe(
+      'http://127.0.0.1:3001/v1',
+    );
+  });
+
+  it('sin la interna cae a la pública: no rompe los despliegues que ya la pasan', () => {
+    expect(resolveDirectApiUrl(undefined, 'https://app.cowinance.com/v1')).toBe('https://app.cowinance.com/v1');
+  });
+
+  it('sin ninguna, el default de desarrollo', () => {
+    expect(resolveDirectApiUrl(undefined, undefined)).toBe(DEV_API_URL);
+  });
+
+  // Una variable declarada vacía en el .env (`API_INTERNAL_URL=`) llega como cadena vacía, no como
+  // undefined. Si contara como valor, la web intentaría hablar con `` y fallaría sin decir por qué.
+  it('una variable vacía o con espacios NO cuenta como configurada', () => {
+    expect(resolveDirectApiUrl('', 'https://app.cowinance.com/v1')).toBe('https://app.cowinance.com/v1');
+    expect(resolveDirectApiUrl('   ', 'https://app.cowinance.com/v1')).toBe('https://app.cowinance.com/v1');
+    expect(resolveDirectApiUrl('', '')).toBe(DEV_API_URL);
+  });
+
+  it('recorta los espacios accidentales alrededor del valor', () => {
+    expect(resolveDirectApiUrl('  http://127.0.0.1:3001/v1  ')).toBe('http://127.0.0.1:3001/v1');
   });
 });
