@@ -95,9 +95,48 @@ export class PlatformService {
       // `q.one` devuelve `T | undefined`, y una agregación sin GROUP BY siempre trae una fila —
       // pero el tipo no lo sabe y el panel se caería con `undefined.total`. El `?? {}` deja el
       // contrato del endpoint sin opcionales: la UI recibe siempre la forma completa.
+      /**
+       * ATENCIÓN — a quién llamar hoy.
+       *
+       * El resumen eran ocho contadores correctos y ninguno accionable: decían cuántas cuentas hay,
+       * no cuál necesita algo. Un dueño de plataforma abre esto para decidir a quién escribirle.
+       *
+       * Los tres grupos son las tres formas de perder plata que este panel puede ver:
+       *  · el período que vence (una prueba que nadie convierte se pierde sola),
+       *  · la cuenta que dejó de entrar (baja silenciosa, se detecta antes de que pida el reembolso),
+       *  · la que ya no entra en su plan (upgrade que nadie ofreció).
+       *
+       * Se devuelven las 5 primeras de cada uno más el total: la tarjeta es para empezar a trabajar,
+       * y el listado completo está a un clic con el mismo filtro aplicado.
+       */
+      const atencion = await q.one<Record<string, unknown>>(
+        `WITH cuentas AS (${ORGANIZATION_SELECT} WHERE o.deleted_at IS NULL AND o.status = 'active')
+         SELECT
+           (SELECT count(*)::int FROM cuentas WHERE dias_para_vencer IS NOT NULL AND dias_para_vencer <= 7) AS expiring_total,
+           (SELECT COALESCE(json_agg(x), '[]') FROM (
+              SELECT id, name, plan_code, dias_para_vencer, current_period_end FROM cuentas
+               WHERE dias_para_vencer IS NOT NULL AND dias_para_vencer <= 7
+               ORDER BY dias_para_vencer LIMIT 5) x) AS expiring,
+           (SELECT count(*)::int FROM cuentas
+             WHERE last_login_at IS NULL OR last_login_at < now() - interval '30 days') AS idle_total,
+           (SELECT COALESCE(json_agg(x), '[]') FROM (
+              SELECT id, name, last_login_at, animals FROM cuentas
+               WHERE last_login_at IS NULL OR last_login_at < now() - interval '30 days'
+               ORDER BY last_login_at NULLS FIRST LIMIT 5) x) AS idle,
+           (SELECT count(*)::int FROM cuentas
+             WHERE (max_animals IS NOT NULL AND animals >= max_animals)
+                OR (max_users IS NOT NULL AND users >= max_users)) AS over_limit_total,
+           (SELECT COALESCE(json_agg(x), '[]') FROM (
+              SELECT id, name, plan_code, animals, max_animals, users, max_users FROM cuentas
+               WHERE (max_animals IS NOT NULL AND animals >= max_animals)
+                  OR (max_users IS NOT NULL AND users >= max_users)
+               ORDER BY animals DESC LIMIT 5) x) AS over_limit`,
+      );
+
       return {
         organizations: organizations ?? {},
         users: users ?? {},
+        attention: atencion ?? {},
         herd: { active_animals: herd?.active_animals ?? 0 },
         devices: devices ?? { active: 0, total: 0 },
         // `bytes` viaja como TEXTO: `sum(bigint)` es numeric y con varios terabytes se pasa del
@@ -134,23 +173,41 @@ export class PlatformService {
     }
     const clause = where.join(' AND ');
 
+    /**
+     * Los filtros de ATENCIÓN se aplican AFUERA, sobre el resultado ya calculado.
+     *
+     * `animales`, `usuarios` y `dias_para_vencer` son subconsultas escalares del propio SELECT: no
+     * existen todavía cuando corre el `WHERE` de adentro. Repetirlas en el `WHERE` funcionaría, pero
+     * dejaría la misma regla escrita dos veces y con dos oportunidades de divergir. Envolviendo, la
+     * definición de «vencido» o «sobre el límite» vive en un solo lugar.
+     */
+    const atencion: string[] = [];
+    if (filters.expiring?.trim()) {
+      params.push(Number(filters.expiring) || 7);
+      atencion.push(`dias_para_vencer IS NOT NULL AND dias_para_vencer <= $${params.length}`);
+    }
+    if (filters.idle?.trim()) {
+      params.push(Number(filters.idle) || 30);
+      // «Nunca entró» cuenta como inactiva: es el caso de la cuenta que se registró y no volvió,
+      // que es justamente a quien más conviene llamar.
+      atencion.push(`(last_login_at IS NULL OR last_login_at < now() - ($${params.length} || ' days')::interval)`);
+    }
+    if (filters.over_limit?.trim())
+      atencion.push(
+        `((max_animals IS NOT NULL AND animals >= max_animals) OR (max_users IS NOT NULL AND users >= max_users))`,
+      );
+    const externa = atencion.length ? `WHERE ${atencion.join(' AND ')}` : '';
+
     return this.pdb.read(async (q) => {
       const rows = await q.query(
-        `${ORGANIZATION_SELECT}
-          WHERE ${clause}
-          ORDER BY o.created_at DESC
+        `SELECT * FROM (${ORGANIZATION_SELECT} WHERE ${clause}) t
+          ${externa}
+          ORDER BY created_at DESC
           LIMIT ${limit} OFFSET ${offset}`,
         params,
       );
       const total = await q.one<{ n: number }>(
-        `SELECT count(*)::int AS n FROM organizations o
-           LEFT JOIN LATERAL (
-             SELECT s.plan_id FROM subscriptions s
-              WHERE s.tenant_id = o.id AND s.deleted_at IS NULL
-              ORDER BY s.created_at DESC LIMIT 1
-           ) s ON true
-           LEFT JOIN plans p ON p.id = s.plan_id
-          WHERE ${clause}`,
+        `SELECT count(*)::int AS n FROM (${ORGANIZATION_SELECT} WHERE ${clause}) t ${externa}`,
         params,
       );
       // Facetas: los valores POSIBLES del filtro, sobre el conjunto SIN filtrar.
@@ -416,7 +473,12 @@ const ORGANIZATION_SELECT = `
          (SELECT count(*)::int FROM animals a
            WHERE a.tenant_id = o.id AND a.status = 'active' AND a.deleted_at IS NULL) AS animals,
          p.code AS plan_code, p.name AS plan_name,
+         p.max_animals, p.max_users, p.max_devices,
          s.status AS subscription_status, s.current_period_end,
+         -- Días hasta el fin del período. Negativo = ya venció. Se calcula acá y no en la UI
+         -- porque de esto dependen un filtro y una tarjeta del resumen: si cada consumidor lo
+         -- derivara por su cuenta, tarde o temprano dirían cosas distintas sobre la misma cuenta.
+         (s.current_period_end - CURRENT_DATE) AS dias_para_vencer,
          (SELECT max(u.last_login_at) FROM users u
             JOIN user_role_assignments ura2 ON ura2.user_id = u.id AND ura2.tenant_id = o.id) AS last_login_at
     FROM organizations o
@@ -432,6 +494,12 @@ export interface OrganizationFilters {
   status?: string;
   country?: string;
   plan?: string;
+  /** Días: período que vence dentro de N (o ya vencido). */
+  expiring?: string;
+  /** Días: sin que ningún usuario ingrese hace N — o que nunca ingresó. */
+  idle?: string;
+  /** Cualquier valor: cuentas que alcanzaron o pasaron el límite de animales o usuarios del plan. */
+  over_limit?: string;
   limit?: string | number;
   offset?: string | number;
 }

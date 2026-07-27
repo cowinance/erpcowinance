@@ -304,6 +304,82 @@ describe('platform — panel de administración global', () => {
     expect(p.offset).toBe(1);
   });
 
+  // ── Atención: a quién llamar hoy ────────────────────────────────────────────────────────────
+
+  /**
+   * El resumen eran ocho contadores correctos y ninguno accionable. Estos tests fijan las tres
+   * definiciones de «necesita algo», que son la razón de ser del bloque.
+   */
+  describe('bloque de atención', () => {
+    let conVencimiento: string;
+
+    beforeAll(async () => {
+      // Una cuenta con el período venciendo en 3 días, en un plan con techo de 1000 animales.
+      conVencimiento = (
+        await db.query<{ id: string }>(
+          `INSERT INTO organizations (name, country_code, default_currency, timezone)
+           VALUES ('Finca Por Vencer','VE','USD','America/Caracas') RETURNING id`,
+        )
+      )[0].id;
+      const trial = (await db.query<{ id: string }>(`SELECT id FROM plans WHERE code='trial'`))[0].id;
+      await db.query(
+        `INSERT INTO subscriptions (tenant_id, plan_id, status, billing_currency, current_period_start, current_period_end)
+         VALUES ($1,$2,'trialing','USD', CURRENT_DATE - 27, CURRENT_DATE + 3)`,
+        [conVencimiento, trial],
+      );
+    });
+
+    it('detecta el período que vence dentro de 7 días, con los días ya calculados', async () => {
+      const d: any = await platform.dashboard();
+      const fila = d.attention.expiring.find((x: any) => x.id === conVencimiento);
+      expect(fila).toBeTruthy();
+      expect(fila.dias_para_vencer).toBe(3);
+      expect(d.attention.expiring_total).toBeGreaterThanOrEqual(1);
+    });
+
+    it('el filtro del listado devuelve LO MISMO que la tarjeta: si divergieran, la tarjeta mentiría', async () => {
+      const d: any = await platform.dashboard();
+      const lista = await platform.organizations({ expiring: '7' });
+      expect(lista.total).toBe(d.attention.expiring_total);
+      expect(lista.data.map((o: any) => o.id)).toContain(conVencimiento);
+    });
+
+    it('«sobre el límite» compara el uso real contra el techo del plan', async () => {
+      // La finca demo tiene ~66 animales y el trial admite 1000: NO está sobre el límite.
+      const antes = await platform.organizations({ over_limit: '1' });
+      expect(antes.data.map((o: any) => o.id)).not.toContain(demoTenant);
+
+      // Se le baja el techo del plan por debajo de su hato: ahora sí.
+      await db.query(`UPDATE plans SET max_animals = 1 WHERE code = 'trial'`);
+      const trial = (await db.query<{ id: string }>(`SELECT id FROM plans WHERE code='trial'`))[0].id;
+      await db.query(
+        `INSERT INTO subscriptions (tenant_id, plan_id, status, billing_currency, current_period_start, current_period_end)
+         VALUES ($1,$2,'trialing','USD', CURRENT_DATE, CURRENT_DATE + 30)`,
+        [demoTenant, trial],
+      );
+      const despues = await platform.organizations({ over_limit: '1' });
+      expect(despues.data.map((o: any) => o.id)).toContain(demoTenant);
+      await db.query(`UPDATE plans SET max_animals = 1000 WHERE code = 'trial'`);
+    });
+
+    it('«sin actividad» incluye a la que NUNCA ingresó, que es a quien más conviene llamar', async () => {
+      // `conVencimiento` no tiene usuarios, así que su last_login_at es NULL.
+      const inactivas = await platform.organizations({ idle: '30' });
+      expect(inactivas.data.map((o: any) => o.id)).toContain(conVencimiento);
+      const nunca: any = inactivas.data.find((o: any) => o.id === conVencimiento);
+      expect(nunca?.last_login_at).toBeNull();
+    });
+
+    it('los filtros de atención se combinan con los normales', async () => {
+      const combinado = await platform.organizations({ expiring: '7', country: 'VE' });
+      expect(combinado.data.every((o: any) => o.country_code === 'VE')).toBe(true);
+      expect(combinado.data.map((o: any) => o.id)).toContain(conVencimiento);
+
+      const otroPais = await platform.organizations({ expiring: '7', country: 'AR' });
+      expect(otroPais.data.map((o: any) => o.id)).not.toContain(conVencimiento);
+    });
+  });
+
   // ── Campos sensibles ───────────────────────────────────────────────────────────────────────
 
   it('ninguna respuesta del panel expone hashes, tokens ni credenciales', async () => {

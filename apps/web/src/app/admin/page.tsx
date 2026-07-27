@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { adminApi, formatBytes, formatDateTime } from '@/lib/admin-api';
 import { Empty, PageHeader, Panel, Pill, Stat, TableWrap, Td, Th } from './ui';
+import { BloqueAtencion, type Atencion } from './Atencion';
 
 export const dynamic = 'force-dynamic';
 
 interface Dashboard {
+  attention: Atencion;
   organizations: Record<string, number>;
   users: Record<string, number>;
   herd: { active_animals: number };
@@ -27,6 +29,10 @@ export default async function AdminDashboard() {
   return (
     <>
       <PageHeader title="Resumen de la plataforma" subtitle="Estado global de cuentas, usuarios y uso del sistema" />
+
+      {/* Primero lo que hay que HACER, después el estado. Al revés, el operador scrollea
+          ocho contadores antes de llegar a lo único que le pide una decisión. */}
+      <BloqueAtencion a={d.attention} />
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
