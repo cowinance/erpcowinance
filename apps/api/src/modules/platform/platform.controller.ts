@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { Public } from '../auth/public.decorator';
 import { CREDENTIAL_RULES, RateLimit } from '../../common/rate-limit.guard';
-import { PlatformService, type OrganizationFilters, type UserFilters } from './platform.service';
+import { PlatformService, type AuditFilters, type OrganizationFilters, type UserFilters } from './platform.service';
 import { PlatformAuthService } from './platform-auth.service';
 import { PlatformActionsService } from './platform-actions.service';
 import { actionsFor } from './platform-permissions';
@@ -81,8 +81,8 @@ export class PlatformReadController {
   }
 
   @Get('audit-log')
-  auditLog(@Query('limit') limit?: string) {
-    return this.platform.auditLog(Number(limit) || 100);
+  auditLog(@Query() query: AuditFilters) {
+    return this.platform.auditLog(query);
   }
 }
 

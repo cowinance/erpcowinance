@@ -103,9 +103,16 @@ export default async function OrganizacionPage({ params }: { params: Promise<{ i
         title={o.name}
         subtitle={[o.legal_name, o.country_code, o.default_currency, o.timezone].filter(Boolean).join(' · ')}
         action={
-          <Link href="/admin/organizaciones" className="text-label text-ink-2 hover:underline">
-            ← Volver al listado
-          </Link>
+          <div className="flex items-center gap-4">
+            {/* «¿Qué le hicimos a esta cuenta?» respondida desde la cuenta, que es donde surge la
+                pregunta. Antes había que ir a la bitácora y leerla entera a ojo. */}
+            <Link href={`/admin/auditoria?kind=&tenant=${o.id}`} className="text-label text-brand hover:underline">
+              Ver actividad del panel sobre esta cuenta
+            </Link>
+            <Link href="/admin/organizaciones" className="text-label text-ink-2 hover:underline">
+              ← Volver al listado
+            </Link>
+          </div>
         }
       />
 

@@ -26,14 +26,29 @@ export function Filtros({
   action,
   buscar,
   selects = [],
+  fechas = [],
+  hidden = {},
 }: {
   action: string;
   buscar?: { name: string; placeholder: string; value?: string };
   selects?: SelectFilter[];
+  /** Rango de días (`YYYY-MM-DD`). El backend los aplica inclusive en los dos extremos. */
+  fechas?: { name: string; label: string; value?: string }[];
+  /**
+   * Valores que el formulario tiene que CONSERVAR sin mostrar. Los usa la auditoría para no perder
+   * la pestaña activa (`kind`) al filtrar: sin esto, filtrar por email te devolvía a «Acciones»
+   * aunque estuvieras mirando «Accesos», y el filtro parecía haber hecho otra cosa.
+   */
+  hidden?: Record<string, string | undefined>;
 }) {
-  const hayFiltros = Boolean(buscar?.value) || selects.some((s) => s.value);
+  const hayFiltros = Boolean(buscar?.value) || selects.some((s) => s.value) || fechas.some((f) => f.value);
+  // «Limpiar» conserva lo oculto: en la auditoría eso es la pestaña activa. Mandarte a otra vista al
+  // limpiar los filtros haría parecer que el botón hizo algo más de lo que dice.
+  const conservados = new URLSearchParams(Object.entries(hidden).filter(([, v]) => v) as [string, string][]).toString();
+  const limpiarHref = conservados ? `${action}?${conservados}` : action;
   return (
     <form action={action} method="get" className="mb-4 flex flex-wrap items-end gap-2">
+      {Object.entries(hidden).map(([k, v]) => (v ? <input key={k} type="hidden" name={k} value={v} /> : null))}
       {buscar && (
         <div className="min-w-[240px] flex-1">
           <label htmlFor={buscar.name} className="mb-1 block text-label text-ink-2">
@@ -57,11 +72,19 @@ export function Filtros({
           </Select>
         </div>
       ))}
+      {fechas.map((f) => (
+        <div key={f.name} className="min-w-[140px]">
+          <label htmlFor={f.name} className="mb-1 block text-label text-ink-2">
+            {f.label}
+          </label>
+          <Input id={f.name} name={f.name} type="date" defaultValue={f.value ?? ''} />
+        </div>
+      ))}
       <button type="submit" className="h-9 rounded-md bg-brand px-4 text-body font-medium text-white">
         Filtrar
       </button>
       {hayFiltros && (
-        <Link href={action} className="h-9 rounded-md border border-subtle px-3 text-body leading-9 text-ink-2 hover:bg-sunken">
+        <Link href={limpiarHref} className="h-9 rounded-md border border-subtle px-3 text-body leading-9 text-ink-2 hover:bg-sunken">
           Limpiar
         </Link>
       )}

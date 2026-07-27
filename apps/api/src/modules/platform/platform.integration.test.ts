@@ -391,13 +391,76 @@ describe('platform — panel de administración global', () => {
       detail: { query: { q: 'esperanza' } },
       ip: '10.0.0.1',
     });
-    const log = await platform.auditLog(50);
-    const entrada: any = log.find((e: any) => e.action === 'GET /v1/platform/organizations/:id');
+    const { data } = await platform.auditLog({ limit: 50 });
+    const entrada: any = data.find((e: any) => e.action === 'GET /v1/platform/organizations/:id');
     expect(entrada).toBeTruthy();
     expect(entrada.actor_email).toBe('dueno@cowinance.com');
     expect(entrada.target_tenant_id).toBe(demoTenant);
 
     // Y los intentos fallidos del login quedaron registrados como 'denied'.
-    expect(log.some((e: any) => e.outcome === 'denied')).toBe(true);
+    expect(data.some((e: any) => e.outcome === 'denied')).toBe(true);
+  });
+
+  /**
+   * La bitácora se estaba ahogando en su propio ruido: medido sobre datos reales, 75 de 99 entradas
+   * eran navegación del panel, y las que justifican que el módulo exista quedaban sepultadas. Estos
+   * tests fijan la separación y los filtros que la hacen usable.
+   */
+  it('separa ACCIONES de ACCESOS por el nombre del evento', async () => {
+    const acciones = await platform.auditLog({ kind: 'accion', limit: 200 });
+    const accesos = await platform.auditLog({ kind: 'acceso', limit: 200 });
+
+    // Los eventos de dominio llevan punto; los de navegación empiezan con el verbo HTTP. Esa es la
+    // invariante de la que depende la clasificación derivada (sin columna nueva).
+    expect(acciones.data.every((e: any) => !e.action.startsWith('GET '))).toBe(true);
+    expect(acciones.data.every((e: any) => e.es_accion === true)).toBe(true);
+    expect(accesos.data.every((e: any) => e.action.startsWith('GET '))).toBe(true);
+
+    // El login es una ACCIÓN, no navegación: por eso se renombró a `platform.login`.
+    expect(acciones.data.some((e: any) => e.action === 'platform.login')).toBe(true);
+
+    const todo = await platform.auditLog({ limit: 200 });
+    expect(acciones.total + accesos.total).toBe(todo.total);
+  });
+
+  it('filtra por actor, por organización y por acción', async () => {
+    const porActor = await platform.auditLog({ actor: 'dueno@cowinance.com' });
+    expect(porActor.data.length).toBeGreaterThan(0);
+    expect(porActor.data.every((e: any) => e.actor_email === 'dueno@cowinance.com')).toBe(true);
+
+    // «¿Quién tocó ESTA finca?» — la pregunta que antes había que responder leyendo todo a ojo.
+    const porFinca = await platform.auditLog({ tenant: demoTenant });
+    expect(porFinca.data.length).toBeGreaterThan(0);
+    expect(porFinca.data.every((e: any) => e.target_tenant_id === demoTenant)).toBe(true);
+
+    const porAccion = await platform.auditLog({ action: 'platform.login' });
+    expect(porAccion.data.every((e: any) => e.action === 'platform.login')).toBe(true);
+
+    const rechazados = await platform.auditLog({ outcome: 'denied' });
+    expect(rechazados.data.every((e: any) => e.outcome === 'denied')).toBe(true);
+  });
+
+  it('el filtro «hasta» incluye el día entero, no solo su medianoche', async () => {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const delDia = await platform.auditLog({ from: hoy, to: hoy, limit: 200 });
+    // Todo lo de esta suite ocurrió hoy: si `to` se aplicara con `<=` sobre el timestamp, esto
+    // daría cero — el error clásico de los filtros de fecha «hasta».
+    expect(delDia.total).toBeGreaterThan(0);
+  });
+
+  it('las facetas salen del conjunto SIN filtrar, para que el selector no se cierre', async () => {
+    // Hace falta MÁS DE UNA acción distinta para que la aserción signifique algo: con una sola, un
+    // selector que se cierra sobre el filtro y uno que no se ven idénticos.
+    await pdb.audit({ actorEmail: 'dueno@cowinance.com', actorRole: 'superadmin', action: 'organization.suspend' });
+
+    const filtrado = await platform.auditLog({ action: 'platform.login' });
+    // Filtrando por UNA acción, el selector sigue ofreciendo las demás: si saliera del conjunto ya
+    // filtrado, quedaría con `platform.login` como única opción y no habría forma de volver.
+    expect(filtrado.facets.actions.length).toBeGreaterThan(1);
+    expect(filtrado.facets.actions).toContain('platform.login');
+    expect(filtrado.facets.actions).toContain('organization.suspend');
+    expect(filtrado.data.every((e: any) => e.action === 'platform.login')).toBe(true);
+    // Y no ofrece acciones que no existen ni entradas de navegación como si fueran acciones.
+    expect(filtrado.facets.actions.every((a: string) => !a.startsWith('GET '))).toBe(true);
   });
 });

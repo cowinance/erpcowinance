@@ -34,6 +34,20 @@ export class PlatformAuditInterceptor implements NestInterceptor {
     // quedar igual en la bitácora como si hubiera pasado.
     if (req.method !== 'GET') return next.handle();
 
+    // Y tampoco se registra la FONTANERÍA del propio panel.
+    //
+    // Medido sobre la bitácora real: de 99 entradas, 75 eran navegación, y 30 de esas eran
+    // `GET /me` —que cada página pide para saber qué botones dibujar—. El resultado es que las
+    // entradas que justifican que este módulo exista (una suspensión, un modo espejo) quedaban
+    // sepultadas y se iban de la ventana en un rato de uso.
+    //
+    // El criterio para excluir no es «hace ruido» sino **«no mira datos de ningún cliente»**:
+    // `/me` es «quién soy yo», `/plans` es el catálogo global de precios y `/audit-log` es esta
+    // misma bitácora. Todo lo que sí toca a un cliente —el listado de organizaciones, la ficha de
+    // una, el buscador de usuarios— se sigue registrando, porque «quién miró esta finca» es
+    // exactamente la pregunta que hay que poder responder.
+    if (SIN_AUDITAR.some((r) => (req.route?.path ?? req.url).endsWith(r))) return next.handle();
+
     return next.handle().pipe(
       tap(() => {
         void this.pdb.audit({
@@ -53,6 +67,14 @@ export class PlatformAuditInterceptor implements NestInterceptor {
     );
   }
 }
+
+/**
+ * Rutas de LECTURA que no se auditan: no consultan datos de ningún cliente.
+ *
+ * Va como lista explícita y corta, no como patrón: agregar una ruta acá tiene que ser una decisión
+ * visible en el diff, porque lo que se decide es dejar algo fuera de la auditoría.
+ */
+const SIN_AUDITAR = ['/me', '/plans', '/audit-log'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(v: unknown): v is string {

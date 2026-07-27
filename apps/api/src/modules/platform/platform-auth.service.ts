@@ -64,7 +64,7 @@ export class PlatformAuthService {
     );
     if (!user || user.status !== 'active' || !(await verifyPassword(password, user.password_hash))) {
       await this.pdb.audit({
-        action: 'POST /v1/platform/auth/login',
+        action: 'platform.login',
         outcome: 'denied',
         targetType: 'user',
         targetId: email,
@@ -85,7 +85,7 @@ export class PlatformAuthService {
       await this.pdb.audit({
         actorUserId: user.id,
         actorEmail: user.email,
-        action: 'POST /v1/platform/auth/login',
+        action: 'platform.login',
         outcome: 'denied',
         detail: { reason: 'no_es_administrador_de_plataforma' },
         ip: meta.ip,
@@ -104,7 +104,7 @@ export class PlatformAuthService {
         actorUserId: user.id,
         actorEmail: user.email,
         actorRole: admin.role,
-        action: 'POST /v1/platform/auth/login',
+        action: 'platform.login',
         outcome: 'denied',
         detail: { reason: 'mfa_requerido' },
         ip: meta.ip,
@@ -120,7 +120,7 @@ export class PlatformAuthService {
       actorUserId: user.id,
       actorEmail: user.email,
       actorRole: admin.role,
-      action: 'POST /v1/platform/auth/login',
+      action: 'platform.login',
       outcome: 'ok',
       detail: { mfa },
       ip: meta.ip,

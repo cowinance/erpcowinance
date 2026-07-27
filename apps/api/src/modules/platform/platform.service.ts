@@ -309,16 +309,97 @@ export class PlatformService {
     );
   }
 
-  /** Bitácora global: quién miró qué. Solo lectura, últimas N entradas. */
-  async auditLog(limit = 100) {
-    return this.pdb.read((q: Q) =>
-      q.query(
+  /**
+   * Bitácora global, filtrable.
+   *
+   * ## Por qué hay dos CLASES de entrada y no una sola lista
+   *
+   * Medido sobre la bitácora real: de 99 entradas, 75 eran navegación del panel. Las que justifican
+   * que este módulo exista —una suspensión, un modo espejo— quedaban sepultadas, y con un tope de
+   * filas se van de la ventana en un rato de uso. Una auditoría que empeora cuanto más se usa el
+   * sistema no sirve para auditar.
+   *
+   * La separación es por lo que la entrada SIGNIFICA:
+   *
+   *  · `accion` — cambió algo o entró a la finca de un cliente. Llevan nombre de dominio
+   *    (`organization.suspend`, `user.impersonate`, `platform.login`) y motivo obligatorio.
+   *  · `acceso` — alguien MIRÓ. Conservan la forma `MÉTODO /ruta` porque salen del interceptor.
+   *
+   * No se descarta ninguna: el panel muestra acciones por defecto y los accesos a un clic. «Quién
+   * miró esta finca» sigue siendo respondible, que era el punto de registrarlos.
+   *
+   * La clase se DERIVA del nombre en vez de guardarse en una columna. Es una migración menos, y la
+   * invariante que la sostiene es simple y ya se cumple: los eventos de dominio llevan punto, los
+   * de navegación empiezan con el verbo HTTP.
+   */
+  async auditLog(filters: AuditFilters = {}) {
+    const { limit, offset } = paginate({ ...filters, limit: filters.limit ?? 100 });
+    const where: string[] = ['1 = 1'];
+    const params: unknown[] = [];
+
+    if (filters.kind === 'accion') where.push(`action NOT LIKE 'GET %'`);
+    if (filters.kind === 'acceso') where.push(`action LIKE 'GET %'`);
+
+    if (filters.actor?.trim()) {
+      params.push(`%${filters.actor.trim()}%`);
+      where.push(`actor_email ILIKE $${params.length}`);
+    }
+    if (filters.tenant?.trim()) {
+      params.push(filters.tenant.trim());
+      where.push(`target_tenant_id = $${params.length}`);
+    }
+    if (filters.action?.trim()) {
+      params.push(filters.action.trim());
+      where.push(`action = $${params.length}`);
+    }
+    if (filters.outcome?.trim()) {
+      params.push(filters.outcome.trim());
+      where.push(`outcome = $${params.length}`);
+    }
+    // Fechas como día suelto (`2026-07-26`): `to` va con `< dia+1` y no con `<=`, porque `<=` sobre
+    // un timestamp deja afuera todo lo que pasó DESPUÉS de la medianoche de ese día — o sea, el día
+    // entero salvo el primer instante. Es el error clásico de los filtros «hasta».
+    if (filters.from?.trim()) {
+      params.push(filters.from.trim());
+      where.push(`occurred_at >= $${params.length}::date`);
+    }
+    if (filters.to?.trim()) {
+      params.push(filters.to.trim());
+      where.push(`occurred_at < ($${params.length}::date + 1)`);
+    }
+    const clause = where.join(' AND ');
+
+    return this.pdb.read(async (q: Q) => {
+      const data = await q.query(
         `SELECT id, actor_email, actor_role, action, outcome, target_type, target_id,
-                target_tenant_id, detail, ip_address, occurred_at
-           FROM platform_audit_logs ORDER BY occurred_at DESC LIMIT $1`,
-        [Math.min(Math.max(limit, 1), 500)],
-      ),
-    );
+                target_tenant_id, detail, ip_address, occurred_at,
+                (action NOT LIKE 'GET %') AS es_accion
+           FROM platform_audit_logs
+          WHERE ${clause}
+          ORDER BY occurred_at DESC
+          LIMIT ${limit} OFFSET ${offset}`,
+        params,
+      );
+      const total = await q.one<{ n: number }>(
+        `SELECT count(*)::int AS n FROM platform_audit_logs WHERE ${clause}`,
+        params,
+      );
+      // Facetas sobre el conjunto SIN filtrar, por lo mismo que en organizaciones: un selector que
+      // se queda solo con el valor ya elegido no deja volver atrás sin editar la URL.
+      const actores = await q.query<{ actor_email: string }>(
+        `SELECT DISTINCT actor_email FROM platform_audit_logs WHERE actor_email IS NOT NULL ORDER BY actor_email`,
+      );
+      const acciones = await q.query<{ action: string }>(
+        `SELECT DISTINCT action FROM platform_audit_logs WHERE action NOT LIKE 'GET %' ORDER BY action`,
+      );
+      return {
+        data,
+        total: total?.n ?? 0,
+        limit,
+        offset,
+        facets: { actors: actores.map((a) => a.actor_email), actions: acciones.map((a) => a.action) },
+      };
+    });
   }
 }
 
@@ -351,6 +432,20 @@ export interface OrganizationFilters {
   status?: string;
   country?: string;
   plan?: string;
+  limit?: string | number;
+  offset?: string | number;
+}
+
+export interface AuditFilters {
+  /** `accion` = cambió algo o entró a una finca · `acceso` = alguien miró. Vacío = todo. */
+  kind?: 'accion' | 'acceso' | '';
+  actor?: string;
+  tenant?: string;
+  action?: string;
+  outcome?: string;
+  /** Día suelto `YYYY-MM-DD`, inclusive en los dos extremos. */
+  from?: string;
+  to?: string;
   limit?: string | number;
   offset?: string | number;
 }
