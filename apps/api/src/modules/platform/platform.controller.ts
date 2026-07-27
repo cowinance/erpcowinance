@@ -126,4 +126,22 @@ export class PlatformActionsController {
   unblock(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
     return this.acciones.unblockUser(req.platformActor, id, body);
   }
+
+  /**
+   * MODO ESPEJO. Devuelve una sesión del ERP de 10 minutos y SOLO LECTURA.
+   *
+   * La respuesta lleva el token en el cuerpo, no en una cookie: quien lo consume es el route
+   * handler de la web, del lado del servidor, que lo guarda como cookie `HttpOnly`. Así el token
+   * de la finca nunca pasa por el JavaScript del navegador, igual que el resto de las sesiones.
+   */
+  @Post('users/:id/impersonate')
+  impersonate(@Req() req: Request & { platformActor: PlatformActor }, @Param('id') id: string, @Body() body: any) {
+    return this.acciones.impersonate(req.platformActor, id, body);
+  }
+
+  /** Cierra la sesión de espejo EN LA BITÁCORA (el token vence solo; ver el servicio). */
+  @Post('impersonation/end')
+  endImpersonation(@Req() req: Request & { platformActor: PlatformActor }, @Body() body: any) {
+    return this.acciones.endImpersonation(req.platformActor, body);
+  }
 }

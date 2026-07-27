@@ -10,7 +10,8 @@ import type { PlatformRole } from './platform-session';
 describe('permisos de plataforma', () => {
   it('superadmin puede todo', () => {
     for (const a of actionsFor('superadmin')) expect(canPerform('superadmin', a)).toBe(true);
-    expect(actionsFor('superadmin')).toHaveLength(5);
+    expect(actionsFor('superadmin')).toHaveLength(6);
+    expect(canPerform('superadmin', 'user.impersonate')).toBe(true);
   });
 
   it('billing decide lo COMERCIAL y no toca usuarios', () => {

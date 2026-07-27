@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { isReadOnlySession } from '../../common/request-context';
 import { ReproService } from '../repro/repro.service';
 import { WeatherService } from '../weather/weather.service';
 import { computeStockRotation, nitrogenAlertMessage, seriesStatus } from '@cowinance/domain';
@@ -189,6 +190,24 @@ export class AlertsService {
   /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente.
    *  `precomputed` evita recomputar cuando el caller ya tiene los hechos (agenda, P4-1). */
   async evaluate(precomputed?: Desired[]) {
+    /**
+     * MODO ESPEJO: no se persiste nada.
+     *
+     * Este método es un read-through — lo dispara un `GET` (`/alerts/kpis`, y de rebote
+     * `/dashboard/home`) y escribe alertas como efecto. En una sesión de solo lectura eso muere en
+     * la transacción READ ONLY y se lleva puesta la pantalla de inicio entera: soporte entraba a
+     * ver la finca del cliente y encontraba «La API no está disponible», que además es mentira.
+     *
+     * Al salir temprano, la agenda y los KPIs se arman con las alertas YA guardadas: exactamente
+     * las que el cliente está viendo en ese momento, que es lo que soporte necesita reproducir. Lo
+     * único que se pierde es la reevaluación fresca, y eso vuelve a correr en la próxima visita del
+     * propio cliente.
+     *
+     * El fail-closed sigue siendo del motor: si esta guarda no estuviera, la escritura fallaría
+     * igual. Esto es para que la pantalla sirva, no para proteger nada.
+     */
+    if (isReadOnlySession()) return { created: 0, updated: 0, resolved: 0, skipped: 'sesion_de_solo_lectura' as const };
+
     const t = this.db.tenant;
     const ruleIds = await this.ensureRules();
     const desired = precomputed ?? (await this.computeDesired());

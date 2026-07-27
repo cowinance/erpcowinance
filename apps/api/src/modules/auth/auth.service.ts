@@ -214,6 +214,26 @@ export class AuthService {
       // producto no tiene forma de explicar el único síntoma que el usuario ve: «no me llega nada».
       email_delivery: (process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'log') === 'log' ? 'log' : 'enabled',
       organization: org,
+      /**
+       * MODO ESPEJO. La web lo usa para dibujar la franja de advertencia.
+       *
+       * **Que esto viaje NO es opcional.** Sin la franja, alguien de soporte con dos pestañas
+       * abiertas no tiene forma de saber en cuál está mirando la finca de un cliente. Ese es el
+       * error que precede a «le conté al cliente algo de otro cliente».
+       *
+       * Va el email de quien está adentro, no el del cliente: la pregunta que la franja responde es
+       * «¿quién soy YO ahora mismo?».
+       */
+      // `sid` viaja para que el botón de salir pueda cerrar la sesión en la bitácora. No es una
+      // credencial —no sirve para entrar a ningún lado—, solo el hilo que ata inicio y cierre.
+      impersonation: ctx.impersonatedBy
+        ? {
+            by_email: ctx.impersonatedBy.by_email,
+            by_role: ctx.impersonatedBy.by_role,
+            sid: ctx.impersonatedBy.sid,
+            read_only: true,
+          }
+        : null,
     };
   }
 

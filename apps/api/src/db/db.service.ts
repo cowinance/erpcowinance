@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PGlite } from '@electric-sql/pglite';
 import { PGliteDriver, PostgresDriver, type SqlDriver, type TxHandle } from './driver';
 import { readFileSync, mkdirSync } from 'fs';
@@ -43,8 +43,24 @@ export type { Q } from './query';
  * cualquier otro error de base sí es un problema del servidor.
  */
 function translateDbError(e: unknown): unknown {
-  if ((e as { code?: string } | null)?.code === '22P02')
+  const code = (e as { code?: string } | null)?.code;
+  if (code === '22P02')
     return new BadRequestException({ code: 'request.invalid_id', title: 'El identificador no tiene un formato válido' });
+  /**
+   * `25006` = «cannot execute … in a read-only transaction». En este sistema solo puede venir del
+   * MODO ESPEJO: el interceptor marca la transacción como READ ONLY cuando el token es de
+   * impersonation (ver `modules/platform/impersonation.ts`).
+   *
+   * Se traduce por el mismo motivo que el `22P02` de arriba: sin esto es un 500 «Internal server
+   * error», que miente sobre de quién es la culpa e invita a reintentar algo que no va a funcionar
+   * nunca. Acá la respuesta correcta es un 403 que dice exactamente qué pasó — el soporte está
+   * mirando la finca de un cliente y no puede modificarla, que es el diseño y no una falla.
+   */
+  if (code === '25006')
+    return new ForbiddenException({
+      code: 'impersonation.read_only',
+      title: 'Estás en modo espejo: podés ver la finca pero no modificar nada.',
+    });
   return e;
 }
 
@@ -428,9 +444,28 @@ export class DbService implements OnModuleInit {
     const existing = requestContext.getStore()?.q;
     if (existing) return fn(existing);
     return this.db.transaction(async (t) => {
+      /**
+       * La traducción de errores va TAMBIÉN acá, no solo en `query()`.
+       *
+       * Se descubrió probando el modo espejo: `DbService.query` traduce, pero el handle `q` que
+       * recibe el callback no traducía nada, y por ahí pasa medio sistema — todo el patrón `…InTx`
+       * (`createEntryInTx`, `recordMovementInTx`, `revokeTenantSessionsInTx`) escribe con `q.query`
+       * directo. Una escritura por ese camino durante una sesión de solo lectura devolvía el error
+       * crudo de PostgreSQL como 500 «Internal server error», en vez del 403 que explica que estás
+       * mirando la finca de un cliente y no podés modificarla.
+       *
+       * Con esto, las dos puertas a la base traducen igual y no hay que acordarse de cuál se usó.
+       */
+      const traducido = async <R>(sql: string, params?: unknown[]) => {
+        try {
+          return (await t.query<R>(sql, params)).rows;
+        } catch (e) {
+          throw translateDbError(e);
+        }
+      };
       const q: Q = {
-        query: async <R>(sql: string, params?: unknown[]) => (await t.query<R>(sql, params)).rows,
-        one: async <R>(sql: string, params?: unknown[]) => (await t.query<R>(sql, params)).rows[0],
+        query: traducido,
+        one: async <R>(sql: string, params?: unknown[]) => (await traducido<R>(sql, params))[0],
       };
       return fn(q);
     });

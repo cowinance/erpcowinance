@@ -22,7 +22,8 @@ export type PlatformAction =
   | 'organization.reactivate'
   | 'organization.change_plan'
   | 'user.block'
-  | 'user.unblock';
+  | 'user.unblock'
+  | 'user.impersonate';
 
 const PERMISOS: Record<PlatformRole, readonly PlatformAction[]> = {
   superadmin: [
@@ -31,9 +32,13 @@ const PERMISOS: Record<PlatformRole, readonly PlatformAction[]> = {
     'organization.change_plan',
     'user.block',
     'user.unblock',
+    'user.impersonate',
   ],
   billing: ['organization.suspend', 'organization.reactivate', 'organization.change_plan'],
-  support: ['user.block', 'user.unblock'],
+  // El modo espejo es de SOPORTE: existe para reproducir el problema que reporta un cliente. No se
+  // le da a `billing` —ver la factura de alguien no requiere entrar a su finca— ni a `auditor`, que
+  // por definición mira la plataforma y no los datos de los clientes.
+  support: ['user.block', 'user.unblock', 'user.impersonate'],
   auditor: [],
 };
 

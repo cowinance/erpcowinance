@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PlatformDb } from './platform.db';
 import { AuthService } from '../auth/auth.service';
 import { canPerform, validateReason, type PlatformAction } from './platform-permissions';
+import { signImpersonationToken } from './impersonation';
 import type { PlatformActor } from './platform-session';
 import type { Q } from '../../db/db.service';
 
@@ -232,6 +233,106 @@ export class PlatformActionsService {
             : 'El usuario puede volver a ingresar.',
       };
     });
+  }
+
+  // ── Modo espejo ──────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Emite una sesión de ESPEJO: soporte entra al ERP como ese usuario, en solo lectura y por 10
+   * minutos (ver `impersonation.ts` para las cuatro restricciones y por qué son del motor).
+   *
+   * El token se devuelve UNA vez y no se guarda: la bitácora registra que se emitió, con motivo y
+   * `sid`, pero no la credencial. Guardarla convertiría a `platform_audit_logs` —la tabla que
+   * existe para poder auditar— en un depósito de llaves de las fincas.
+   */
+  async impersonate(actor: PlatformActor, userId: string, body: { reason?: string }) {
+    this.assertPuede(actor, 'user.impersonate');
+    const motivo = this.motivo(body?.reason);
+
+    return this.pdb.write(async (q) => {
+      const user = await q.one<{ id: string; email: string; full_name: string; status: string }>(
+        `SELECT id, email, full_name, status FROM users WHERE id = $1 AND deleted_at IS NULL`,
+        [userId],
+      );
+      if (!user) throw new NotFoundException({ code: 'platform.user_not_found', title: 'Usuario no encontrado' });
+      if (user.status !== 'active')
+        throw new ConflictException({
+          code: 'platform.user_not_active',
+          title: 'No se puede entrar como un usuario bloqueado o eliminado.',
+        });
+
+      // Tenant y rol: los MISMOS que resolvería el login de ese usuario. Si acá se eligiera otra
+      // asignación, el soporte vería una finca distinta de la que ve el cliente y no serviría para
+      // reproducir su problema.
+      const asignacion = await q.one<{ tenant_id: string; role: string }>(
+        `SELECT ura.tenant_id, r.code AS role
+           FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id
+          WHERE ura.user_id = $1 AND ura.deleted_at IS NULL
+            AND (ura.valid_until IS NULL OR ura.valid_until >= CURRENT_DATE)
+          ORDER BY ura.created_at LIMIT 1`,
+        [userId],
+      );
+      if (!asignacion)
+        throw new ConflictException({
+          code: 'platform.user_no_tenant',
+          title: 'El usuario no pertenece a ninguna organización: no hay finca que mirar.',
+        });
+
+      const org = await q.one<{ name: string; status: string }>(`SELECT name, status FROM organizations WHERE id = $1`, [
+        asignacion.tenant_id,
+      ]);
+
+      const { token, sid, expires_in } = signImpersonationToken(user, asignacion.tenant_id, asignacion.role, {
+        by: actor.userId,
+        by_email: actor.email,
+        by_role: actor.role,
+      });
+
+      await this.auditar(q, actor, {
+        action: 'user.impersonate',
+        targetType: 'user',
+        targetId: userId,
+        targetTenantId: asignacion.tenant_id,
+        detail: {
+          motivo,
+          email: user.email,
+          organizacion: org?.name,
+          rol_espejado: asignacion.role,
+          sid,
+          dura_segundos: expires_in,
+        },
+      });
+
+      return {
+        token,
+        expires_in,
+        sid,
+        user: { id: user.id, name: user.full_name, email: user.email, role: asignacion.role },
+        organization: { id: asignacion.tenant_id, name: org?.name, status: org?.status },
+        read_only: true,
+      };
+    });
+  }
+
+  /**
+   * Cierra la sesión de espejo en la bitácora.
+   *
+   * El token no se puede «revocar» —es un JWT sin estado, y ese es el precio de que dure 10
+   * minutos en vez de necesitar una tabla de sesiones—, así que esto no corta el acceso: lo que
+   * hace es dejar registrado CUÁNDO terminó. Sin este par, la bitácora diría que alguien entró a
+   * la finca de un cliente y no diría hasta cuándo estuvo.
+   */
+  async endImpersonation(actor: PlatformActor, body: { sid?: string }) {
+    const sid = String(body?.sid ?? '').trim();
+    if (!sid) throw new BadRequestException({ code: 'platform.missing_sid', title: 'sid es obligatorio' });
+    await this.pdb.audit({
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'user.impersonate.end',
+      detail: { sid },
+    });
+    return { ok: true };
   }
 
   // ── Comunes ──────────────────────────────────────────────────────────────────────────────────

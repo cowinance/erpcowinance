@@ -4,6 +4,7 @@ import { cookies, headers } from 'next/headers';
 import './globals.css';
 import { Sidebar } from '@/components/Sidebar';
 import { MobileNav } from '@/components/MobileNav';
+import { ImpersonationBanner } from '@/components/ImpersonationBanner';
 import { API_URL } from '@/lib/api';
 import { ACCESS_COOKIE } from '@/lib/session';
 import { PATHNAME_HEADER, isAdminRoute, isPublicRoute } from '@/lib/routes';
@@ -35,6 +36,8 @@ async function sessionContext() {
     for (const f of (flags ?? []) as { key: string; enabled: boolean }[]) moduleFlags[f.key] = f.enabled;
     return {
       userName: me.name as string,
+      userEmail: me.email as string,
+      impersonation: me.impersonation as { by_email: string; sid?: string } | null,
       orgName: me.organization?.name as string,
       farmTimeZone: (me.organization?.timezone as string) ?? null,
       farmName: farms?.[0]?.name as string,
@@ -75,6 +78,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="es" data-density="standard" data-farm-tz={session?.farmTimeZone ?? undefined} className={inter.variable}>
       <body className="font-sans text-[14px] leading-5">
+        {/* Antes que el shell y fuera del contenedor con scroll: la advertencia de estar mirando la
+            finca de un cliente tiene que estar arriba de todo y no perderse al scrollear. */}
+        {session?.impersonation && (
+          <ImpersonationBanner
+            orgName={session.orgName}
+            userEmail={session.userEmail}
+            byEmail={session.impersonation.by_email}
+            sid={session.impersonation.sid}
+          />
+        )}
         <div className="flex min-h-screen">
           <Sidebar
             orgName={session?.orgName}
