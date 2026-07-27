@@ -170,7 +170,10 @@ export default async function OrganizacionPage({ params }: { params: Promise<{ i
                 <tr>
                   <Th>Usuario</Th>
                   <Th>Rol</Th>
-                  <Th>Email</Th>
+                  {/* La columna es el ESTADO de verificación; el email va bajo «Usuario», junto al
+                      nombre. Rotularla «Email» hacía leer «Sin verificar» como si fuera la dirección.
+                      Mismo rótulo que en el listado de usuarios, para que las dos tablas se lean igual. */}
+                  <Th>Email verificado</Th>
                   <Th>Último ingreso</Th>
                 </tr>
               </thead>
