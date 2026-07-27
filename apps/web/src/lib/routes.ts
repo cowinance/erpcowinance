@@ -17,6 +17,28 @@ export function isPublicRoute(pathname: string): boolean {
 }
 
 /**
+ * Panel de plataforma (dueño de Cowinance), que NO es parte del ERP.
+ *
+ * Tiene su propia sesión (`cw_platform`), su propio login y su propio shell: ni el middleware ni el
+ * layout raíz pueden tratarlo como una ruta más de la app, porque no tiene organización, ni finca,
+ * ni menú de módulos. Se decide por prefijo y en un solo lugar por el mismo motivo que
+ * `PUBLIC_ROUTES`: son dos decisiones (¿pide sesión?, ¿dibuja el shell?) que tienen que mirar la
+ * misma lista.
+ *
+ * A FUTURO — `admin.cowinance.com`: mover el panel a su propio host es un cambio acotado
+ * justamente por esta separación. Haría falta (a) que la cookie se emita con `domain` del subhost
+ * en vez de compartir el del ERP, (b) sumar el origen a `resolveCorsOrigin()` de la API, y (c) que
+ * el middleware decida por `host` además de por path. Nada de eso toca el backend, que ya está
+ * separado por token y por policy.
+ */
+export const ADMIN_PREFIX = '/admin';
+export const ADMIN_LOGIN_ROUTE = '/admin/login';
+
+export function isAdminRoute(pathname: string): boolean {
+  return pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`);
+}
+
+/**
  * Cabecera con la que el middleware le pasa el path al layout raíz. Next no expone el pathname a
  * un layout de servidor —no puede, porque el layout se comparte entre rutas—, y el middleware es
  * el único punto que lo conoce antes de renderizar.

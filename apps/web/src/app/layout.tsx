@@ -6,7 +6,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { MobileNav } from '@/components/MobileNav';
 import { API_URL } from '@/lib/api';
 import { ACCESS_COOKIE } from '@/lib/session';
-import { PATHNAME_HEADER, isPublicRoute } from '@/lib/routes';
+import { PATHNAME_HEADER, isAdminRoute, isPublicRoute } from '@/lib/routes';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -55,7 +55,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // menú vacío aparecía al lado del formulario. Se corrige acá —donde se dibuja— en vez de agregar
   // otro parche por pantalla.
   const pathname = (await headers()).get(PATHNAME_HEADER) ?? '';
-  const publica = isPublicRoute(pathname);
+  // El panel de plataforma trae su propio shell (`app/admin/layout.tsx`) y su propia sesión: acá
+  // se lo trata como una ruta sin shell de app, igual que el login. Pedirle los datos de sesión
+  // del ERP sería peor que inútil — son cinco llamadas que fallarían con 401 y dejarían el
+  // encabezado del panel con el nombre de una finca cualquiera.
+  const publica = isPublicRoute(pathname) || isAdminRoute(pathname);
 
   // En una ruta pública tampoco se piden los datos de sesión: son cinco llamadas a la API que no
   // pueden devolver nada útil sin cookie.

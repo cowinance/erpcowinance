@@ -251,3 +251,86 @@ export function rlsMigration(only?: readonly string[]): string {
         WITH CHECK (tenant_id = ${TENANT_GUC});`,
   ).join('\n');
 }
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+// PLANO DE PLATAFORMA — lectura cross-tenant para el panel del dueño de Cowinance.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * El GUC que habilita la lectura global. Lo fija SOLO `PlatformDb` (módulo `platform`), con
+ * `SET LOCAL` dentro de su propia transacción.
+ *
+ * Fail-closed en los dos estados posibles fuera de esa transacción, que es lo que lo hace seguro
+ * en un POOL: antes de cualquier `SET` vale NULL (`NULL = 'on'` → NULL, no da filas) y después de
+ * una transacción que lo fijó vuelve a cadena vacía (`'' = 'on'` → false). Es el mismo residuo que
+ * obligó al `NULLIF` de `app.tenant_id` (ver TENANT_GUC), pero acá no hace falta: comparar contra
+ * un literal ya descarta ambos casos sin castear nada.
+ */
+const PLATFORM_GUC = `current_setting('app.platform_read', true) = 'on'`;
+
+/**
+ * Tablas de tenant que el panel de plataforma puede leer A TRAVÉS de los tenants.
+ *
+ * **Es una lista corta a propósito, y ese es el diseño.** La alternativa obvia —dejar leer las
+ * ~150 de `RLS_TABLES`— convertiría al panel en una ventana a los datos operativos de cada finca:
+ * historia sanitaria, precios de venta, sueldos. Nada de eso hace falta para administrar cuentas.
+ *
+ * El criterio para entrar acá es «¿lo necesita el negocio de Cowinance para operar la plataforma?»:
+ * cuántas fincas hay, cuántos animales/usuarios/dispositivos tiene cada una (que es lo que se
+ * factura), qué plan tiene y cuánto almacenamiento consume. Los CONTENIDOS quedan afuera.
+ *
+ * Consecuencia deliberada: la «actividad reciente» del detalle de organización se deriva de estas
+ * tablas (últimas altas de animales, última subida de archivo, último sync, último login) y NO de
+ * `animal_events`/`health_events`/`sales`. Es señal de si la cuenta está viva, no un espejo de la
+ * finca. Agregar una tabla acá tiene que ser una decisión, no un descuido.
+ */
+export const PLATFORM_READ_TABLES = [
+  'companies',
+  'farms',
+  'animals',
+  'subscriptions',
+  'subscription_usage',
+  'billing_payments',
+  'files',
+  'sync_devices',
+];
+
+/** Tablas del plano de plataforma: no son de tenant, y solo se ven con el GUC puesto. */
+export const PLATFORM_TABLES = ['platform_admins', 'platform_audit_logs'];
+
+/**
+ * Policies del plano de plataforma. CONVERGENTE como `rlsMigration()`: se re-aplica en cada
+ * arranque y se genera desde las listas de arriba, así agregar una tabla a `PLATFORM_READ_TABLES`
+ * crea su policy sola.
+ *
+ * Dos formas distintas, y la diferencia importa:
+ *
+ *  · Sobre las tablas de TENANT se agrega una policy PERMISIVA `FOR SELECT`. Las permisivas se
+ *    OR-ean, así que `tenant_isolation` queda intacta: una sesión de tenant sigue viendo lo suyo y
+ *    nada más. Y al ser `FOR SELECT`, el panel **no puede escribir cross-tenant aunque el código
+ *    lo intente** — `INSERT`/`UPDATE`/`DELETE` siguen pasando solo por `tenant_isolation`, que
+ *    exige un `app.tenant_id` que el plano de plataforma nunca fija. La fase 1 es de solo lectura
+ *    porque el motor no permite otra cosa, no porque los servicios se porten bien.
+ *
+ *  · Sobre las tablas PROPIAS del plano la policy es total (sin `FOR`), porque la bitácora sí se
+ *    escribe. Ahí el aislamiento va al revés: sin el GUC no se ve ni se escribe nada, de modo que
+ *    desde el ERP `platform_admins` y `platform_audit_logs` no existen.
+ */
+export function platformMigration(): string {
+  const readOnly = PLATFORM_READ_TABLES.map(
+    (t) => `
+      DROP POLICY IF EXISTS platform_read ON "${t}";
+      CREATE POLICY platform_read ON "${t}" FOR SELECT
+        USING (${PLATFORM_GUC});`,
+  );
+  const own = PLATFORM_TABLES.map(
+    (t) => `
+      ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE "${t}" FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS platform_only ON "${t}";
+      CREATE POLICY platform_only ON "${t}"
+        USING (${PLATFORM_GUC})
+        WITH CHECK (${PLATFORM_GUC});`,
+  );
+  return [...readOnly, ...own].join('\n');
+}

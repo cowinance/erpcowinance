@@ -6,7 +6,7 @@ import { join } from 'path';
 import { bootstrapCatalogs, seedDemo } from './seed';
 import { farmToday, safeTimeZone } from '@cowinance/domain';
 import { requestContext } from '../common/request-context';
-import { RLS_TABLES, rlsMigration } from './rls';
+import { RLS_TABLES, platformMigration, rlsMigration } from './rls';
 import { checksumOf, loadMigrations, recordBaseline, resolveDbPath, runMigrations } from './migrations';
 import type { Q } from './query';
 
@@ -115,6 +115,13 @@ export class DbService implements OnModuleInit {
       // había que acordarse de sumar al activar cada módulo — y olvidarse dejaba la tabla en
       // deny-all silencioso.
       await this.db.exec(rlsMigration());
+
+      // Plano de plataforma (panel del dueño de Cowinance): policies convergentes igual que las de
+      // tenant, y por el mismo motivo — se generan desde una lista y tienen que seguirla. Va
+      // DESPUÉS de `rlsMigration()` porque agrega una segunda policy sobre tablas que aquella ya
+      // preparó, y después de las migraciones porque `platform_admins`/`platform_audit_logs` nacen
+      // en la 0027.
+      await this.db.exec(platformMigration());
 
       // Catálogos base + roles de sistema: SIEMPRE (idempotente). Una finca que
       // se registra self-service (P1.1) depende de que el rol `owner` exista. Va DENTRO del lock:

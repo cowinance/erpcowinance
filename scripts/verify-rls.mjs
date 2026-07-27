@@ -216,6 +216,87 @@ const notForced = await sqlT(`
 if (!notForced) ok('RLS FORZADA en todas (el owner tampoco la saltea)');
 else bad('RLS sin FORCE', notForced);
 
+// ── 5. PLANO DE PLATAFORMA ─────────────────────────────────────────────────────
+//
+// El panel del dueño de Cowinance lee A TRAVÉS de los tenants con una segunda policy permisiva
+// (`platform_read`, FOR SELECT) habilitada por el GUC `app.platform_read`. Es la única grieta
+// deliberada en el aislamiento, así que es la que más falta hace verificar sobre PostgreSQL real:
+// en PGlite (superusuario) ninguna policy se ejerce, y acá se está probando justo que la grieta
+// tenga la forma exacta que se diseñó y ni un milímetro más.
+console.log('\n\x1b[1m── Plano de plataforma (lectura global acotada)\x1b[0m');
+
+const { platformMigration, PLATFORM_READ_TABLES } = await import(join(ROOT, 'apps/api/dist/db/rls.js'));
+// Las tablas propias del plano (platform_admins/platform_audit_logs) nacen en la migración 0027,
+// que este script no corre: se crean acá con la forma mínima para poder ejercer su policy.
+await sqlT(`
+  CREATE TABLE IF NOT EXISTS platform_admins (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, role varchar(32) NOT NULL,
+    mfa_required boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(),
+    disabled_at timestamptz, created_by uuid);
+  CREATE TABLE IF NOT EXISTS platform_audit_logs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id uuid, actor_email varchar(255),
+    actor_role varchar(32), action varchar(160) NOT NULL, outcome varchar(16) NOT NULL DEFAULT 'ok',
+    target_type varchar(64), target_id varchar(128), target_tenant_id uuid,
+    detail jsonb NOT NULL DEFAULT '{}', ip_address varchar(64), user_agent varchar(255),
+    occurred_at timestamptz NOT NULL DEFAULT now());
+  GRANT SELECT, INSERT, UPDATE, DELETE ON platform_admins, platform_audit_logs TO ${APP_ROLE};
+`);
+await sqlT(platformMigration());
+// Se repuebla `farms` de B: las aserciones D-F de arriba intentaron borrarla y conviene partir de
+// un estado conocido para contar filas de los dos tenants.
+await sqlT(`
+  INSERT INTO farms (tenant_id, company_id, name) VALUES ('${TB}','${TB.replace(/2/g, 'b')}','Finca B2')
+  ON CONFLICT DO NOTHING;
+`);
+
+// P1) Con el GUC de plataforma, se ven las fincas de TODOS los tenants — sin app.tenant_id.
+const global = await asAppT(`SET app.platform_read = 'on'; SELECT count(*) FROM farms;`);
+if (Number(global) >= 2) ok(`con app.platform_read → lectura global (${global} fincas de 2 tenants)`);
+else bad('el plano de plataforma no lee cross-tenant', `count=${global}`);
+
+// P2) SOLO alcanza a las tablas del allowlist. `weighings` no está: los datos operativos de la
+// finca siguen invisibles para el panel. Ésta es la aserción que impide que el allowlist crezca
+// por descuido.
+const fuera = await asAppT(`SET app.platform_read = 'on'; SELECT count(*) FROM weighings;`);
+if (fuera === '0') ok('las tablas fuera del allowlist siguen cerradas al panel (weighings → 0)');
+else bad('el panel lee tablas que no están en PLATFORM_READ_TABLES', `weighings=${fuera}`);
+
+// P3) LA aserción central de la fase 1: el panel NO PUEDE ESCRIBIR cross-tenant. La policy es
+// FOR SELECT, así que el INSERT solo puede pasar por `tenant_isolation`, que exige un
+// app.tenant_id que el plano de plataforma nunca fija. No es disciplina del código: es el motor.
+const escritura = await asAppTErr(`
+  SET app.platform_read = 'on';
+  INSERT INTO farms (tenant_id, company_id, name) VALUES ('${TA}','${TA.replace(/1/g, 'a')}','Finca del panel');
+`);
+if (escritura && /row-level security|violates/i.test(escritura)) ok('el panel NO puede escribir (policy FOR SELECT)');
+else bad('el panel pudo escribir cross-tenant', escritura ?? 'el INSERT no falló');
+
+// P4) Y tampoco puede modificar ni borrar lo ajeno.
+const updPanel = await asAppT(`SET app.platform_read = 'on'; UPDATE farms SET name='tocada' WHERE name='Finca A'; SELECT count(*) FROM farms WHERE name='tocada';`);
+if (updPanel === '0') ok('el panel NO puede modificar filas de ningún tenant');
+else bad('el panel modificó filas', `afectadas=${updPanel}`);
+
+// P5) El GUC de plataforma NO desactiva el aislamiento de tenant: una sesión de finca sigue viendo
+// lo suyo y nada más. Es lo que garantiza que agregar el panel no aflojó el ERP.
+const tenantIntacto = await asAppT(`SET app.tenant_id = '${TA}'; SELECT string_agg(name,',') FROM farms;`);
+if (tenantIntacto === 'Finca A') ok('con app.tenant_id (y sin el de plataforma) el aislamiento es el de siempre');
+else bad('la policy de plataforma alteró el aislamiento por tenant', `A ve: ${tenantIntacto}`);
+
+// P6) Las tablas PROPIAS del plano son invisibles desde una sesión de tenant. Sin esto, el ERP de
+// una finca podría enumerar a los administradores de Cowinance.
+await sqlT(`INSERT INTO platform_admins (user_id, role) VALUES ('${TA}','superadmin');`);
+const desdeTenant = await asAppT(`SET app.tenant_id = '${TA}'; SELECT count(*) FROM platform_admins;`);
+const desdePanel = await asAppT(`SET app.platform_read = 'on'; SELECT count(*) FROM platform_admins;`);
+if (desdeTenant === '0' && desdePanel === '1') ok('platform_admins: invisible desde el ERP, visible desde el panel');
+else bad('platform_admins mal aislada', `tenant=${desdeTenant} panel=${desdePanel}`);
+
+// P7) Y el GUC no sobrevive a la transacción: la conexión vuelve al pool sin permisos de panel.
+const trasTxPanel = await asAppT(
+  `BEGIN; SELECT set_config('app.platform_read','on',true); COMMIT; SELECT count(*) FROM farms;`,
+);
+if (trasTxPanel === '0') ok("tras cerrar la tx el GUC de plataforma queda en '' → 0 filas");
+else bad('el contexto de plataforma sobrevivió a su transacción', `count=${trasTxPanel}`);
+
 console.log(
   failures === 0
     ? '\n\x1b[32m\x1b[1m✓ El aislamiento por tenant funciona sobre PostgreSQL real.\x1b[0m\n'

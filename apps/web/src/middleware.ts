@@ -8,7 +8,8 @@ import {
   setSessionCookies,
   type SessionTokens,
 } from '@/lib/session';
-import { AUTHENTICATED_REDIRECT_ROUTES, PATHNAME_HEADER, isPublicRoute } from '@/lib/routes';
+import { PLATFORM_COOKIE } from '@/lib/admin-session';
+import { ADMIN_LOGIN_ROUTE, AUTHENTICATED_REDIRECT_ROUTES, PATHNAME_HEADER, isAdminRoute, isPublicRoute } from '@/lib/routes';
 
 /**
  * Puerta de sesión de la web y —esto es nuevo— el lugar donde el token se RENUEVA al navegar.
@@ -20,6 +21,19 @@ import { AUTHENTICATED_REDIRECT_ROUTES, PATHNAME_HEADER, isPublicRoute } from '@
  */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // El panel de plataforma tiene su PROPIA puerta y se decide antes que nada: si cayera en la
+  // lógica de abajo, un dueño de Cowinance sin sesión de finca terminaría en `/login` —el login
+  // del ERP— que no le sirve para nada, y peor: uno CON sesión de finca entraría a `/admin` sin
+  // ser administrador de plataforma. La autorización de verdad la hace el backend; esto es solo
+  // para no mostrar una pantalla que va a fallar.
+  if (isAdminRoute(pathname)) {
+    const platform = req.cookies.get(PLATFORM_COOKIE)?.value;
+    if (!platform && pathname !== ADMIN_LOGIN_ROUTE)
+      return NextResponse.redirect(new URL(ADMIN_LOGIN_ROUTE, req.url));
+    return NextResponse.next({ request: { headers: conPathname(req) } });
+  }
+
   const access = req.cookies.get(ACCESS_COOKIE)?.value;
   const refresh = req.cookies.get(REFRESH_COOKIE)?.value;
 
@@ -49,12 +63,18 @@ function decidir(req: NextRequest, haySesion: boolean): NextResponse {
   if (haySesion && AUTHENTICATED_REDIRECT_ROUTES.includes(pathname))
     return NextResponse.redirect(new URL('/', req.url));
 
-  // El path viaja al layout raíz para que decida si dibuja el shell de la app. Es la única forma
-  // de que un layout de servidor sepa en qué ruta está: Next no se lo pasa, porque el layout se
-  // comparte entre rutas y volverlo dependiente del path rompería su cacheo.
+  return NextResponse.next({ request: { headers: conPathname(req) } });
+}
+
+/**
+ * El path viaja al layout raíz para que decida si dibuja el shell de la app. Es la única forma de
+ * que un layout de servidor sepa en qué ruta está: Next no se lo pasa, porque el layout se comparte
+ * entre rutas y volverlo dependiente del path rompería su cacheo.
+ */
+function conPathname(req: NextRequest): Headers {
   const headers = new Headers(req.headers);
-  headers.set(PATHNAME_HEADER, pathname);
-  return NextResponse.next({ request: { headers } });
+  headers.set(PATHNAME_HEADER, req.nextUrl.pathname);
+  return headers;
 }
 
 async function renovar(refreshToken: string): Promise<SessionTokens | null> {
