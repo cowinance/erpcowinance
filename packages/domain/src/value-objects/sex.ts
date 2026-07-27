@@ -28,11 +28,50 @@ export class InvalidSex extends DomainError {
   }
 }
 
+/**
+ * Cómo lo escribe el productor → cómo lo guarda el sistema.
+ *
+ * El sexo se ALMACENA como {F,M}, que es la convención inglesa (female/male). Pero en castellano
+ * la notación de campo es **H de hembra y M de macho**, y es la que sale de cualquier planilla
+ * hecha en la finca. Aceptar solo `F` rechazaba exactamente la mitad de cada importación —todas
+ * las hembras— con un error por fila que obligaba a buscar y reemplazar en el Excel.
+ *
+ * `M` significa macho y male: misma letra, mismo sexo, sin ambigüedad. Se acepta también la
+ * palabra entera, que es lo que escribe quien no usa abreviaturas.
+ *
+ * A propósito NO se aceptan categorías (`vaca`, `toro`, `novillo`): son otro campo, y adivinar el
+ * sexo desde ahí taparía una columna mal mapeada en vez de señalarla.
+ */
+const ESCRITURAS: Record<string, 'F' | 'M'> = {
+  f: 'F',
+  h: 'F',
+  hembra: 'F',
+  female: 'F',
+  m: 'M',
+  macho: 'M',
+  male: 'M',
+};
+
 export const Sex = {
   /** Construye el sexo; lanza InvalidSex si no es 'F' ni 'M'. */
   of(raw: unknown): Sex {
     if (raw !== 'F' && raw !== 'M') throw new InvalidSex(raw);
     return raw as Sex;
+  },
+
+  /**
+   * Interpreta cómo viene escrito el sexo en una planilla y lo lleva a {F,M}; `null` si no se
+   * entiende. Es tolerante a propósito: mayúsculas, espacios y acentos son ruido de tipeo, no
+   * información. Distinto de `of()`, que es la frontera estricta del dominio.
+   */
+  parse(raw: unknown): Sex | null {
+    if (raw === undefined || raw === null) return null;
+    const limpio = String(raw)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    return (ESCRITURAS[limpio] as Sex | undefined) ?? null;
   },
   /** ¿`of()` tendría éxito con este valor? */
   isValid(raw: unknown): raw is Sex {

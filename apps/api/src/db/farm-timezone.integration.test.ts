@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from './db.service';
+import { safeTimeZone } from '@cowinance/domain';
 
 /**
  * El día de la finca, de punta a punta.
@@ -27,10 +28,23 @@ describe('el día de la finca (zona de la organización)', () => {
   const hoyEn = (tz: string) =>
     new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
+  /**
+   * La organización pasa a estar en esta zona, en los DOS lugares donde eso se nota.
+   *
+   * La zona vive por duplicado a propósito: `db.today()` la lee de `organizations` (con caché en
+   * memoria) y los `CURRENT_DATE` la leen del `TimeZone` de la SESIÓN. El arranque las deja
+   * alineadas; cambiar la columna con el proceso vivo alinea solo una. Si el helper moviera nada
+   * más la columna, los tests que vienen después compararían la zona nueva contra la sesión vieja
+   * y fallarían por el andamiaje, no por el sistema.
+   */
   const conZona = async (tz: string) => {
     await db.query(`UPDATE organizations SET timezone = $1 WHERE id = $2`, [tz, db.tenant]);
     // El caché es por tenant y vive en memoria: hay que vaciarlo para leer la zona nueva.
     (db as unknown as { tzCache: Map<string, string> }).tzCache.clear();
+    // `safeTimeZone` igual que el arranque: PostgreSQL RECHAZA una zona que no conoce, así que
+    // pasarle la cruda haría explotar al helper justo en el test que comprueba que una zona
+    // inválida no tumba la app.
+    await db.query(`SELECT set_config('TimeZone', $1, false)`, [safeTimeZone(tz)]);
   };
 
   beforeAll(async () => {
@@ -87,10 +101,15 @@ describe('el día de la finca (zona de la organización)', () => {
     // pasaba 21 horas por día y fallaba 3, sin que nadie hubiera tocado nada. Un test que depende
     // de la hora a la que se corre es peor que uno que falla siempre.
     //
-    // Se comprueba con la zona del demo tal como arrancó, sin tocar nada: es la situación real.
+    // El test fija su propia zona en vez de heredar la que dejó el test anterior: si dependiera de
+    // eso, volvería a ser un test que pasa o falla según la hora y el orden en que se lo corra.
+    // Con una zona EXTREMA (UTC+14) además se distingue de UTC casi todo el día, así que compara
+    // algo de verdad en vez de pasar vacío.
+    await conZona('Pacific/Kiritimati');
     const hoy = await db.today();
     const [{ d }] = await db.query<{ d: string }>(`SELECT CURRENT_DATE::text AS d`);
     expect(d).toBe(hoy);
+    expect(hoy).toBe(hoyEn('Pacific/Kiritimati'));
   });
 
   it('una zona inválida NO tumba la app: cae a UTC', async () => {
@@ -104,10 +123,16 @@ describe('el día de la finca (zona de la organización)', () => {
     // Con un pool, un TimeZone que sobrevive a la tx lo hereda la request siguiente: sería el mismo
     // tipo de estado residual que convierte un bug en una fuga entre fincas.
     await conZona('Pacific/Kiritimati');
-    await db.tx(async (q) => {
+    // La sesión arranca en OTRA zona a propósito: así se ve si la de la transacción la pisa para
+    // siempre. Comprobar solo `not.toBe(Kiritimati)` no distinguiría entre "no se pegó" y "nunca
+    // se llegó a aplicar", que es justo lo que hay que separar acá.
+    await db.query(`SELECT set_config('TimeZone', 'UTC', false)`);
+    const dentro = await db.tx(async (q) => {
       await db.applyTenantContext(q, db.tenant);
+      return (await q.one<{ tz: string }>(`SELECT current_setting('TimeZone') AS tz`))!.tz;
     });
     const fuera = (await db.one<{ tz: string }>(`SELECT current_setting('TimeZone') AS tz`))!.tz;
-    expect(fuera).not.toBe('Pacific/Kiritimati');
+    expect(dentro).toBe('Pacific/Kiritimati'); // se aplicó
+    expect(fuera).toBe('UTC'); // y se fue con la transacción
   });
 });

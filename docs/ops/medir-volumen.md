@@ -86,9 +86,42 @@ as-of del lote (`animal_movements` ordenado por `moved_at`) tenía índice por `
 | Sincronización · push `event` | lineal, ~0,2 ms/op ✅ |
 | Sincronización · push `put`/LWW | lineal, ~1 ms/op ✅ |
 | Sincronización · pull | 500 changesets en 13 ms, paginado ✅ |
+| Importador CSV | lineal ✅ (3.000 filas en 5,7 s) |
 
-**Sin medir todavía:** el importador con un CSV de miles de filas, que es lo que hace un productor
-el primer día.
+---
+
+## El importador: lo que encontró no fue el tiempo
+
+Medido con el CSV que sube un productor el primer día, en tres tamaños:
+
+```
+  200 filas ( 10 KB)  subida 27 ms · preview 10 ms · commit 1.324 ms
+1.000 filas ( 50 KB)  subida 25 ms · preview  8 ms · commit 2.154 ms
+3.000 filas (151 KB)  subida 65 ms · preview 15 ms · commit 5.664 ms
+```
+
+Sublineal por fila (6,6 → 2,2 → 1,9 ms). El tiempo nunca fue el problema.
+
+**El problema fue que entraba la mitad del hato.** La primera corrida cerró `completed` —sin
+errores a la vista— con `creados: 0` y la mitad de las filas en `inválidos`. Bajando al detalle
+por fila, todas las rechazadas decían lo mismo: `Sexo inválido: se esperaba 'F' o 'M'`.
+
+El CSV decía `H` de hembra. El importador aceptaba **el encabezado** en castellano —y con una
+generosidad notable: `caravana`, `arete`, `chapeta`, `crotal`, `rp`— pero exigía **el valor** en
+la convención inglesa. Como el sexo se reparte mitad y mitad, eso rechazaba exactamente una fila
+por cada hembra del hato, y dejaba al productor haciendo buscar-y-reemplazar en su Excel el primer
+día. Ahora `Sex.parse()` interpreta cómo está escrito (`H`/`hembra`/`F`, `M`/`macho`) y guarda la
+forma canónica; `Sex.of()` sigue siendo la frontera estricta puertas adentro.
+
+> Que un lote termine `completed` no quiere decir que haya entrado algo. Mirar `created_count`,
+> no el estado.
+
+Dos cosas que esto deja como método:
+
+1. **Medir con el dato escrito como lo escribe quien lo escribe**, no como lo guarda la base. El
+   tamaño del archivo encontró cero problemas; la *forma* del contenido encontró el que importaba.
+2. A propósito **no** se adivina el sexo desde la categoría (`vaca` → hembra): taparía una columna
+   mal mapeada en vez de señalarla, y el productor se enteraría con los animales ya cargados.
 
 **Anotado, sin urgencia:** `sync_changesets` crece sin límite (~1,7 KB por changeset) y no hay
 política de retención. No es un problema hoy; conviene decidirlo antes de que lo sea.

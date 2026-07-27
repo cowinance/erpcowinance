@@ -129,10 +129,24 @@ export class AnimalWriteService {
     }
 
     // Sexo (Sex): obligatorio + conjunto cerrado {F,M}.
-    if (raw.sex === undefined || raw.sex === null || raw.sex === '') {
+    //
+    // Se INTERPRETA cómo viene escrito (`Sex.parse`) en vez de exigir la forma almacenada. La
+    // planilla la escribe el productor, y en castellano la notación de campo es H de hembra: pedir
+    // `F` rechazaba la mitad exacta de cada importación —todas las hembras— y lo mandaba a hacer
+    // buscar-y-reemplazar en el Excel. Los encabezados ya eran generosos (`caravana`, `arete`,
+    // `crotal`); la generosidad se cortaba justo en los valores.
+    let sex: 'F' | 'M' | null = null;
+    if (raw.sex === undefined || raw.sex === null || String(raw.sex).trim() === '') {
       errors.push({ field: 'sex', code: 'required', message: 'El sexo es obligatorio' });
-    } else if (!Sex.isValid(raw.sex)) {
-      errors.push({ field: 'sex', code: 'invalid', message: "Sexo inválido: se esperaba 'F' o 'M'" });
+    } else {
+      sex = Sex.parse(raw.sex);
+      if (sex === null) {
+        errors.push({
+          field: 'sex',
+          code: 'invalid',
+          message: `Sexo inválido: se esperaba H o M (hembra/macho); también se aceptan F/M`,
+        });
+      }
     }
 
     // Categoría (código): obligatoria (su existencia se valida contra la base en (b)).
@@ -156,7 +170,7 @@ export class AnimalWriteService {
       ok: true,
       input: {
         tag,
-        sex: raw.sex as 'F' | 'M',
+        sex: sex as 'F' | 'M',
         categoryCode: raw.category_code as string,
         name: (raw.name as string) ?? null,
         birthDate: (raw.birth_date as string) ?? null,

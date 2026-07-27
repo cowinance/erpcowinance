@@ -81,6 +81,28 @@ describe('normalizeAndValidate · valores inválidos', () => {
     expect(svc.normalizeAndValidate({ ...base, sex: 'M' }).ok).toBe(true);
   });
 
+  it('«H» DE HEMBRA ENTRA Y SE GUARDA COMO F', () => {
+    // El bug medido: importar 3.000 animales creaba 1.500. Todas las filas de hembras se rechazaban
+    // porque la planilla decía `H` y el importador exigía `F`. Se verifica el valor NORMALIZADO,
+    // no solo que la fila pase: si entrara como 'H' rompería el CHECK de la base.
+    const r = svc.normalizeAndValidate({ ...base, sex: 'H' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.input.sex).toBe('F');
+  });
+
+  it('acepta la palabra entera y no se distrae con mayúsculas', () => {
+    for (const [escrito, guardado] of [['hembra', 'F'], ['Macho', 'M'], ['  h ', 'F']] as const) {
+      const r = svc.normalizeAndValidate({ ...base, sex: escrito });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.input.sex).toBe(guardado);
+    }
+  });
+
+  it('una categoría en la columna de sexo sigue siendo un error', () => {
+    // Adivinar «vaca» → F taparía una columna mal mapeada en vez de señalarla.
+    expect(svc.normalizeAndValidate({ ...base, sex: 'vaca' }).ok).toBe(false);
+  });
+
   it('origen fuera del enum → invalid', () => {
     const r = svc.normalizeAndValidate({ ...base, origin: 'cloned' });
     expect(r.ok).toBe(false);
