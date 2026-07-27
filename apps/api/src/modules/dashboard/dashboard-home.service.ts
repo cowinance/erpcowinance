@@ -173,12 +173,31 @@ export class DashboardHomeService {
     );
   }
 
-  /** Conteo barato de animales activos sin pesaje en 90 días (umbral, no regla de negocio). */
+  /**
+   * Conteo de animales activos sin pesaje en 90 días (umbral, no regla de negocio).
+   *
+   * Va contra `weighings`, la tabla, y NO contra `v_weighings`, la vista.
+   *
+   * La vista existe para derivar la GDP con un `LAG` sobre los pesajes de cada animal. Preguntarle
+   * «¿este animal se pesó?» desde un `NOT EXISTS` correlacionado hacía que por CADA animal se
+   * pagara el cálculo de esa ventana: O(animales × pesajes). Medido, con el hato inflado:
+   *
+   *     65 animales →    49 ms
+   *   1.065        →   990 ms
+   *   3.065        → 7.156 ms      ← el triple de datos, siete veces el tiempo
+   *
+   * Era el 99% del tiempo de `/dashboard/home`, la pantalla que más se abre, y no se veía con los
+   * 66 animales del demo. Acá no hace falta la GDP: solo si hay una fila, y eso está en la tabla
+   * base, que además tiene el índice `(tenant_id, animal_id, weighed_at)`.
+   */
   private async noRecentWeighing(): Promise<number> {
     const row = await this.db.one<{ n: number }>(
       `SELECT count(*)::int AS n FROM animals a
        WHERE a.tenant_id = $1 AND a.status = 'active' AND a.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM v_weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL AND w.weighed_at >= now() - interval '90 days')`,
+         AND NOT EXISTS (
+           SELECT 1 FROM weighings w
+            WHERE w.animal_id = a.id AND w.tenant_id = a.tenant_id AND w.deleted_at IS NULL
+              AND w.weighed_at >= now() - interval '90 days')`,
       [this.db.tenant],
     );
     return row?.n ?? 0;

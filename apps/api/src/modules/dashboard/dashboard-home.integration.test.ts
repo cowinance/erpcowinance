@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
@@ -135,4 +135,68 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     // Incluye la tarea vencida (category 'task').
     expect(h.agenda.some((a: any) => a.category === 'task')).toBe(true);
   }, 60_000);
+
+  /**
+   * «Sin pesar hace 90 días»: el número y su costo.
+   *
+   * Este conteo iba contra `v_weighings` —la vista que deriva la GDP con un `LAG`— desde un
+   * `NOT EXISTS` correlacionado, así que por cada animal se pagaba el cálculo de la ventana entera.
+   * Con los 66 animales del demo no se notaba; con 3.000 el Inicio tardaba SIETE SEGUNDOS.
+   *
+   * El test fija las dos mitades del arreglo: que el número siga siendo el correcto (velocidad sin
+   * corrección no sirve de nada) y que se lo pida a la tabla y no a la vista.
+   */
+  describe('animales sin pesaje reciente', () => {
+    it('CUENTA IGUAL QUE LA VISTA, que es lo que hacía antes', async () => {
+      const t = db.tenant;
+      // Un animal con pesaje viejo (cuenta), otro con pesaje reciente (no cuenta), y un tercero con
+      // el pesaje reciente BORRADO lógicamente (cuenta: un pesaje borrado no es un pesaje).
+      const [{ id: species }] = await db.query<any>(`SELECT id FROM species WHERE code='bovine'`);
+      const [{ id: farm }] = await db.query<any>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [t]);
+      const nuevo = async () =>
+        (await db.query<any>(
+          `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, origin) VALUES ($1,$2,$3,'M','active','born') RETURNING id`,
+          [t, farm, species],
+        ))[0].id as string;
+      const pesar = (a: string, diasAtras: number, borrado = false) =>
+        db.query(
+          `INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method, deleted_at)
+           VALUES ($1,$2, now() - ($3::int || ' days')::interval, 300, 'scale', $4)`,
+          [t, a, diasAtras, borrado ? new Date().toISOString() : null],
+        );
+
+      await pesar(await nuevo(), 200);
+      await pesar(await nuevo(), 10);
+      await pesar(await nuevo(), 10, true);
+
+      const porLaTabla = (
+        await db.query<any>(
+          `SELECT count(*)::int AS n FROM animals a WHERE a.tenant_id=$1 AND a.status='active' AND a.deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM weighings w WHERE w.animal_id=a.id AND w.tenant_id=a.tenant_id AND w.deleted_at IS NULL
+                               AND w.weighed_at >= now() - interval '90 days')`,
+          [t],
+        )
+      )[0].n;
+      const porLaVista = (
+        await db.query<any>(
+          `SELECT count(*)::int AS n FROM animals a WHERE a.tenant_id=$1 AND a.status='active' AND a.deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL
+                               AND w.weighed_at >= now() - interval '90 days')`,
+          [t],
+        )
+      )[0].n;
+
+      expect(porLaTabla).toBe(porLaVista);
+      expect(porLaTabla).toBeGreaterThan(0); // si diera 0, la igualdad de arriba no probaría nada
+      expect((await home.home()).kpis.no_recent_weighing).toBe(porLaTabla);
+    }, 60_000);
+
+    it('NO consulta la vista de GDP: es lo que lo volvía cuadrático', async () => {
+      // Se mira el código porque el costo no se ve en un test con datos de demo — se vio con el hato
+      // inflado a 3.000, donde el Inicio pasaba de 49 ms a 7.156.
+      const src = readFileSync(join(originalCwd, 'apps/api/src/modules/dashboard/dashboard-home.service.ts'), 'utf8');
+      const fn = src.slice(src.indexOf('private async noRecentWeighing'));
+      expect(fn.slice(0, 900)).not.toContain('v_weighings');
+    });
+  });
 });
