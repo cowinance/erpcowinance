@@ -134,5 +134,12 @@ Dejan basura en `tenant-de-prueba/` — borrable a mano, o correrlas contra un b
   plano durante las pruebas. Tratarlas como comprometidas antes de que entren datos reales.
 - **`NEXT_PUBLIC_API_URL`** apuntando al host local + rebuild de la web (se inlinea en build, no se
   lee en runtime).
-- **Verificar que `cowinance_app` tenga `rolsuper=false` y `rolbypassrls=false`** — si es
-  superusuario, la RLS no se aplica y el aislamiento entre fincas es solo aparente.
+- ~~Verificar que `cowinance_app` tenga `rolsuper=false` y `rolbypassrls=false`~~ **YA NO HAY QUE
+  VERIFICARLO A MANO.** Desde el 26/07/2026 la API lo comprueba sola al arrancar
+  (`apps/api/src/db/role-privileges.ts`): con `NODE_ENV=production`, un rol con `SUPERUSER` o
+  `BYPASSRLS` **impide el arranque**, y el error trae el `ALTER ROLE` exacto.
+
+  **Ojo con esto en el primer deploy después de ese cambio:** si el rol hoy es privilegiado, la API
+  no va a levantar. Eso es la guardia funcionando, no una regresión — pero visto sin contexto se
+  parece a un deploy roto. A partir de ahí, que la API arranque *es* la prueba de que el
+  aislamiento entre fincas existe.
