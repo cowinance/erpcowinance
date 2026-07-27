@@ -7,6 +7,8 @@ import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { TaskService } from './task.service';
 import { TaskRulesService } from './task-rules.service';
+import { addFarmDays } from '@cowinance/domain';
+import { testToday, testDay } from '../../db/test-today';
 
 /**
  * Tareas E4 — reglas ganaderas automáticas. Dedup por rule_key (una tarea viva por regla+entidad),
@@ -93,7 +95,7 @@ describe('TaskRulesService · reglas automáticas (E4)', () => {
   });
 
   it('recurrencia: genera 1 instancia al crear; completar avanza next_due; una viva a la vez', async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = testToday();
     const { id, generated } = await rules.createRecurrence({ title: 'Revisar bebederos', interval_days: 7, anchor: 'due_date', next_due: today, type: 'maintenance' });
     expect(generated).toBe(1); // primera instancia creada de una
     const inst1 = (await db.query<any>(`SELECT id, status, due_date::text AS due FROM tasks WHERE recurrence_id=$1 AND deleted_at IS NULL`, [id]));
@@ -108,7 +110,7 @@ describe('TaskRulesService · reglas automáticas (E4)', () => {
     // Completar la instancia → next_due avanza +7 días (anchor due_date).
     await db.tx((q) => tasks.completeTask(q, { taskId: inst1[0].id }, ctx()));
     const nd = (await db.query<any>(`SELECT next_due::text AS next_due FROM task_recurrences WHERE id=$1`, [id]))[0].next_due;
-    const expected = new Date(new Date(today).getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    const expected = addFarmDays(today, 7);
     expect(nd).toContain(expected);
 
     // Como next_due es futuro, materializar NO genera todavía (evita duplicar).
@@ -123,7 +125,7 @@ describe('TaskRulesService · reglas automáticas (E4)', () => {
   });
 
   it('desactivar recurrencia detiene la generación', async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = testToday();
     const { id } = await rules.createRecurrence({ title: 'Limpieza de corral', interval_days: 30, next_due: today });
     // completar la instancia para que la clave quede libre
     const inst = (await db.query<any>(`SELECT id FROM tasks WHERE recurrence_id=$1 AND status='pending'`, [id]))[0];

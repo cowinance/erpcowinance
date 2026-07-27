@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { LocalFileStorage } from '../../infra/storage/local-file-storage';
 import { DocumentsService } from './documents.service';
+import { testToday, testDay } from '../../db/test-today';
 
 /**
  * Integración del DMS (A6): alta de documento (archivo + metadatos), derivación de vencido/por-vencer y
@@ -18,7 +19,7 @@ describe('documents — DMS', () => {
   let tmp: string;
 
   const pdf = (marker: string) => `data:application/pdf;base64,${Buffer.from('PDF-' + marker).toString('base64')}`;
-  const day = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const day = (n: number) => testDay(n);
 
   beforeAll(async () => {
     originalCwd = process.cwd();

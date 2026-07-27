@@ -7,6 +7,7 @@ import { AlertsService } from '../alerts/alerts.service';
 import { WeatherService } from './weather.service';
 import { NitrogenService } from '../genetics/nitrogen.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { testToday, testDay } from '../../db/test-today';
 
 /**
  * D4 · E2 — el clima entra al motor de alertas existente (A5).
@@ -23,7 +24,7 @@ describe('alertas de clima (D4 · E2)', () => {
   let originalCwd: string;
   let stationId: string;
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = testToday();
 
   beforeAll(async () => {
     originalCwd = process.cwd();

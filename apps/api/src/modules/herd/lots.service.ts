@@ -60,17 +60,28 @@ export class LotsService {
     );
   }
 
+  /**
+   * Listado de lotes con sus contadores.
+   *
+   * Los agregados de peso van contra `weighings`, la TABLA, y no contra `v_weighings`, la vista.
+   * La vista existe para derivar la GDP con un `LAG` sobre los pesajes de cada animal; acá se
+   * necesita el último peso y si existe un pesaje reciente, y ninguna de las dos cosas la usa. Al
+   * consultarla desde un LATERAL por animal, cada lote pagaba el cálculo de esa ventana tantas
+   * veces como animales tuviera: con 3.000 animales, este listado de SEIS filas tardaba 5 segundos.
+   *
+   * `lotMetrics` sí conserva la vista, porque ahí la GDP se usa de verdad.
+   */
   async lots(includeArchived = false) {
     const rows = await this.db.query<any>(
       `SELECT l.id, l.name, l.purpose, l.is_active, l.current_paddock_id, p.name AS paddock_name,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS animal_count,
               (SELECT round(avg(lw.weight_kg))::int FROM animals a
-                 LEFT JOIN LATERAL (SELECT weight_kg FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) lw ON true
+                 LEFT JOIN LATERAL (SELECT weight_kg FROM weighings w WHERE w.animal_id=a.id AND w.tenant_id=l.tenant_id AND w.deleted_at IS NULL ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) lw ON true
                  WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS avg_weight_kg,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL
                  AND NOT EXISTS(SELECT 1 FROM animal_identifiers ai WHERE ai.animal_id=a.id AND ai.type='visual' AND ai.deleted_at IS NULL)) AS sin_id,
               (SELECT count(*)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL
-                 AND NOT EXISTS(SELECT 1 FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90)) AS sin_pesaje,
+                 AND NOT EXISTS(SELECT 1 FROM weighings w WHERE w.animal_id=a.id AND w.tenant_id=a.tenant_id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90)) AS sin_pesaje,
               (SELECT count(DISTINCT a.category_id)::int FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL) AS categorias
        FROM lots l LEFT JOIN paddocks p ON p.id = l.current_paddock_id
        WHERE l.tenant_id = $1 AND (l.deleted_at IS NULL OR $2) ORDER BY l.is_active DESC, l.name`,
@@ -214,7 +225,7 @@ export class LotsService {
       ),
       this.db.one<any>(
         `SELECT count(*) FILTER (WHERE NOT EXISTS(SELECT 1 FROM animal_identifiers ai WHERE ai.animal_id=a.id AND ai.type='visual' AND ai.deleted_at IS NULL))::int AS sin_id,
-                count(*) FILTER (WHERE NOT EXISTS(SELECT 1 FROM v_weighings w WHERE w.animal_id=a.id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90))::int AS sin_pesaje,
+                count(*) FILTER (WHERE NOT EXISTS(SELECT 1 FROM weighings w WHERE w.animal_id=a.id AND w.tenant_id=a.tenant_id AND w.deleted_at IS NULL AND w.weighed_at >= CURRENT_DATE - 90))::int AS sin_pesaje,
                 count(DISTINCT a.category_id)::int AS categorias
          FROM animals a WHERE a.current_lot_id=$1 AND a.tenant_id=$2 AND a.status='active' AND a.deleted_at IS NULL`,
         [id, t],

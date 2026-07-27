@@ -11,6 +11,10 @@ import { buildReportsService } from './reports.test-factory';
  * de fechas futuras (el demo carga eventos ~2026) y animales propios. Fija: fórmulas, semántica de
  * `null`, exclusión de eliminados y acotación por período. `db.tenant` cae al tenant demo.
  */
+// Las fechas van SIN hora a propósito. Anclarlas a medianoche UTC (`T00:00:00Z`) las corría al día
+// anterior una vez que la sesión pasó a correr en la zona de la finca (UTC−3): un servicio del 1 de
+// marzo caía el 28 de febrero y quedaba fuera del período. Sin hora, PostgreSQL la interpreta en la
+// zona de la sesión y el hecho cae el día que el fixture dice.
 describe('reports.reproduction — índices del período', () => {
   let db: DbService;
   let reports: ReportsService;
@@ -62,12 +66,12 @@ describe('reports.reproduction — índices del período', () => {
     const a2 = await mkAnimal();
     await pregnancy(a1, '2027-03-05');
     await pregnancy(a2, '2027-03-10');
-    await negative(a1, '2027-03-08T00:00:00Z');
+    await negative(a1, '2027-03-08');
     // 4 servicios en ventana + 1 fuera de rango (no debe contar).
-    await service(a1, 'service_ai', '2027-03-01T00:00:00Z');
-    await service(a1, 'service_natural', '2027-03-02T00:00:00Z');
-    await service(a2, 'service_ai', '2027-03-03T00:00:00Z');
-    await service(a2, 'embryo_transfer', '2027-03-04T00:00:00Z');
+    await service(a1, 'service_ai', '2027-03-01');
+    await service(a1, 'service_natural', '2027-03-02');
+    await service(a2, 'service_ai', '2027-03-03');
+    await service(a2, 'embryo_transfer', '2027-03-04');
     await pregnancy(a1, '2027-06-01'); // fuera del período → excluido
 
     const r = await reports.reproduction('2027-03-01', '2027-03-31');
@@ -104,8 +108,8 @@ describe('reports.reproduction — índices del período', () => {
 
   it('caso 6 aislado: servicios sin ninguna preñez → servicios_por_prenez null', async () => {
     const a = await mkAnimal();
-    await service(a, 'service_ai', '2030-05-01T00:00:00Z');
-    await service(a, 'service_natural', '2030-05-02T00:00:00Z');
+    await service(a, 'service_ai', '2030-05-01');
+    await service(a, 'service_natural', '2030-05-02');
     const r = await reports.reproduction('2030-05-01', '2030-05-31');
     expect(r.servicios.total).toBe(2);
     expect(r.indices.servicios_por_prenez).toBeNull();
@@ -116,7 +120,7 @@ describe('reports.reproduction — índices del período', () => {
     const a = await mkAnimal();
     const [{ id: pid }] = await pregnancy(a, '2031-06-05');
     await db.query(`UPDATE pregnancies SET deleted_at = now() WHERE id = $1`, [pid]); // positivo eliminado
-    await negative(a, '2031-06-06T00:00:00Z'); // negativo vigente
+    await negative(a, '2031-06-06'); // negativo vigente
     const r = await reports.reproduction('2031-06-01', '2031-06-30');
     expect(r.diagnosticos).toEqual({ positivos: 0, negativos: 1, total: 1 });
     expect(r.indices.prenez_pct).toBe(0); // 0/1 → 0%, NO null (sí hubo diagnóstico)

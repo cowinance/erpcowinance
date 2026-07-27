@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PGlite } from '@electric-sql/pglite';
 import { PGliteDriver, PostgresDriver, type SqlDriver, type TxHandle } from './driver';
 import { readFileSync, mkdirSync } from 'fs';
@@ -19,6 +19,34 @@ export type { Q } from './query';
  * En producción el mismo DDL corre sobre PostgreSQL 17 + PostGIS + TimescaleDB;
  * aquí los tipos geography se degradan a jsonb (PGlite no soporta PostGIS).
  */
+/**
+ * Un identificador con forma inválida es un error DEL CLIENTE, no del servidor.
+ *
+ * Las rutas `:id` reciben el parámetro como texto y lo pasan a la consulta, donde PostgreSQL lo
+ * convierte a `uuid`. Si no tiene forma de uuid falla con `22P02` y esa excepción subía sin
+ * traducir: el cliente recibía **500 «Internal server error»**. Comprobado en seis rutas de seis
+ * (`/tasks/:id`, `/animals/:id`, `/lots/:id`, `/clinical-cases/:id`, `/commerce/sales/:id`,
+ * `/machinery/:id`).
+ *
+ * Importa por tres motivos: miente sobre de quién es la culpa (un 500 invita a reintentar algo que
+ * no va a funcionar nunca), ensucia el monitoreo (cada enlace viejo entra al log como ERROR y tapa
+ * los 500 de verdad), y filtra la clase del error de PostgreSQL.
+ *
+ * **Se traduce ACÁ y no en un filtro global.** Se intentaron las dos formas de filtro —re-lanzar
+ * escapa al handler de Express y devuelve HTML; `BaseExceptionFilter` necesita el adaptador HTTP—
+ * y las dos rompían la forma `{code, title}` de la que depende la web entera. `DbService.query` es
+ * la única puerta a la base: el error nace acá, y acá se lo traduce a la excepción que el resto del
+ * sistema ya sabe serializar.
+ *
+ * Deliberadamente estrecho: SOLO `22P02`. Cualquier otro error de base sigue siendo un 500, porque
+ * cualquier otro error de base sí es un problema del servidor.
+ */
+function translateDbError(e: unknown): unknown {
+  if ((e as { code?: string } | null)?.code === '22P02')
+    return new BadRequestException({ code: 'request.invalid_id', title: 'El identificador no tiene un formato válido' });
+  return e;
+}
+
 @Injectable()
 export class DbService implements OnModuleInit {
   private readonly logger = new Logger(DbService.name);
@@ -130,6 +158,15 @@ export class DbService implements OnModuleInit {
     // propio contexto y sin él la RLS deniega (fail-closed).
     if (this.db.kind === 'pglite') {
       await this.db.query(`SELECT set_config('app.tenant_id', $1, false)`, [this.tenantId]);
+      // Y la ZONA, por el mismo motivo y para que el proceso sea internamente coherente.
+      //
+      // Sin esto, el código que corre FUERA de una request —el seed, los jobs, y sobre todo los
+      // tests— tenía `db.today()` en hora de finca y `CURRENT_DATE` en UTC. Entre las 00:00 y las
+      // 03:00 UTC eso son días distintos, así que la suite pasaba 21 horas por día y fallaba 3.
+      // Un test que depende de la hora a la que se lo corre es peor que uno que falla siempre:
+      // pasa en CI de mañana y explota de noche sin que nadie haya tocado nada.
+      const org = await this.db.query<{ timezone: string | null }>(`SELECT timezone FROM organizations WHERE id = $1`, [this.tenantId]);
+      await this.db.query(`SELECT set_config('TimeZone', $1, false)`, [safeTimeZone(org.rows[0]?.timezone)]);
     }
     const farm = await this.db.query<{ id: string }>(
       `SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
@@ -312,11 +349,15 @@ export class DbService implements OnModuleInit {
   }
 
   async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
-    // Dentro de una request autenticada, todo va por su transacción (RLS activa)
-    const q = requestContext.getStore()?.q;
-    if (q) return q.query<T>(sql, params);
-    const res = await this.db.query<T>(sql, params);
-    return res.rows;
+    try {
+      // Dentro de una request autenticada, todo va por su transacción (RLS activa)
+      const q = requestContext.getStore()?.q;
+      if (q) return await q.query<T>(sql, params);
+      const res = await this.db.query<T>(sql, params);
+      return res.rows;
+    } catch (e) {
+      throw translateDbError(e);
+    }
   }
 
   async one<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined> {

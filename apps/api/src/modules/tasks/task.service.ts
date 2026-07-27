@@ -322,10 +322,19 @@ export class TaskService {
 
     const newDue = input.dueDate ?? null;
     const curDue = existing.due_date ?? null;
-    // due_date es timestamptz → comparar por instante (una fecha y su timestamptz coinciden).
-    const same =
-      (curDue == null && newDue == null) ||
-      (curDue != null && newDue != null && new Date(curDue).getTime() === new Date(newDue).getTime());
+    /**
+     * Se comparan DÍAS, no instantes.
+     *
+     * Un vencimiento es una fecha calendario, aunque la columna sea `timestamptz`. La versión
+     * anterior comparaba instantes —decía que «una fecha y su timestamptz coinciden»— y eso solo
+     * era cierto mientras la sesión corría en UTC: con la sesión en la zona de la finca,
+     * `'2026-08-15'` y lo que devuelve la base (`2026-08-15 00:00:00-03`) están a tres horas, así
+     * que reprogramar a la MISMA fecha se registraba como un cambio, con su versión y su entrada
+     * en el historial.
+     */
+    const tz = await this.db.timeZone(q);
+    const dia = (v: string | null) => (v == null ? null : asFarmDate(v, tz));
+    const same = dia(curDue) === dia(newDue);
     if (same) return { changed: false, syncOp: null }; // no-op
 
     const hlc = ctx.hlc ?? this.serverClock.tick();

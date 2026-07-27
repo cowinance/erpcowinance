@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
-import { computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError, computeReproStatus, DEFAULT_REPRO_CONFIG } from '@cowinance/domain';
+import { addFarmDays, computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError, computeReproStatus, DEFAULT_REPRO_CONFIG } from '@cowinance/domain';
 import type { ReproConfig, ReproFacts } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
@@ -826,7 +826,11 @@ export class ReproService {
       const farm = (await q.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`, [t]))?.id ?? null;
       let created = 0;
       for (const s of steps) {
-        const due = new Date(new Date(`${startDate}T00:00:00.000Z`).getTime() + Number(s.day) * 86400000).toISOString();
+        // Fecha CALENDARIO como texto, no un instante en UTC. `due_date` es `timestamptz`: si se
+        // guarda la medianoche de UTC, al leerla en la zona de la finca cae el día anterior. Pasando
+        // `YYYY-MM-DD`, PostgreSQL la interpreta en la zona de la sesión —la de la finca— y el ida y
+        // vuelta cierra: el paso «día 8» se lee el día 8.
+        const due = addFarmDays(startDate, Number(s.day));
         await this.tasks.createTask(
           q,
           { title: `${s.action} — ${target.label} (${ids.length} vientres)`, type: 'breeding', dueDate: due, priority: 'normal', relatedType: 'protocol_assignment', relatedId: assignment.id, farmId: farm },
@@ -952,13 +956,13 @@ export class ReproService {
     if (!a) throw new NotFoundException({ code: 'assignment.not_found', title: 'Asignación no encontrada' });
     const steps: any[] = Array.isArray(a.steps) ? a.steps : [];
     const done: number[] = Array.isArray(a.completed_steps) ? a.completed_steps : [];
-    const start = new Date(`${a.start_date}T00:00:00.000Z`).getTime();
+    const start = String(a.start_date).slice(0, 10);
     return {
       id: a.id, protocol_name: a.protocol_name, status: a.status, animal_count: a.animal_count,
       steps_total: steps.length, steps_done: done.length,
       steps: steps.map((s, i) => ({
         index: i, day: s.day, action: s.action, kind: s.kind ?? 'other',
-        due_date: new Date(start + Number(s.day) * 86400000).toISOString().slice(0, 10),
+        due_date: addFarmDays(start, Number(s.day)),
         completed: done.includes(i),
       })),
     };

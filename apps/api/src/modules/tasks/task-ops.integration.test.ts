@@ -6,6 +6,7 @@ import { DbService } from '../../db/db.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { TaskService } from './task.service';
+import { testToday, testDay } from '../../db/test-today';
 
 /**
  * Tareas → centro operativo E1: máquina de estados ampliada (in_progress), reprogramación,
@@ -111,9 +112,9 @@ describe('TaskService · centro operativo (E1)', () => {
   });
 
   it('board: buckets derivados, días de atraso, filtros por bucket/responsable/búsqueda', async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const past = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
-    const soon = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    const today = testToday();
+    const past = testDay(-5);
+    const soon = testDay(3);
     const overdueId = await mk({ title: 'Revisar aguada vencida', dueDate: past });
     const todayId = await mk({ title: 'Vacunar hoy', dueDate: today });
     await mk({ title: 'Mover lote pronto', dueDate: soon });
@@ -197,9 +198,9 @@ describe('TaskService · centro operativo (E1)', () => {
   });
 
   it('kpis: vencidas, completadas, cumplimiento, carga por responsable y módulo', async () => {
-    const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const past = testDay(-3);
     await mk({ title: 'KPI vencida crítica', dueDate: past, priority: 'urgent' });
-    const doneId = await mk({ title: 'KPI a completar', dueDate: new Date().toISOString().slice(0, 10) });
+    const doneId = await mk({ title: 'KPI a completar', dueDate: testToday() });
     await db.tx((q) => tasks.completeTask(q, { taskId: doneId }, ctx()));
 
     const k: any = await tasks.kpis();

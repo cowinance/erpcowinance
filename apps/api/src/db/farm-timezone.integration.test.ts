@@ -81,6 +81,18 @@ describe('el día de la finca (zona de la organización)', () => {
     expect(d).toBe('2026-07-26');
   });
 
+  it('FUERA DE UNA REQUEST, `today()` y `CURRENT_DATE` hablan del MISMO día', async () => {
+    // El seed, los jobs y los tests corren sin interceptor. Cuando ahí la sesión quedaba en UTC y
+    // `db.today()` en hora de finca, entre las 00:00 y las 03:00 UTC eran días distintos: la suite
+    // pasaba 21 horas por día y fallaba 3, sin que nadie hubiera tocado nada. Un test que depende
+    // de la hora a la que se corre es peor que uno que falla siempre.
+    //
+    // Se comprueba con la zona del demo tal como arrancó, sin tocar nada: es la situación real.
+    const hoy = await db.today();
+    const [{ d }] = await db.query<{ d: string }>(`SELECT CURRENT_DATE::text AS d`);
+    expect(d).toBe(hoy);
+  });
+
   it('una zona inválida NO tumba la app: cae a UTC', async () => {
     // La zona sale de una columna editable. Si alguien guarda basura, la app tiene que seguir.
     await conZona('America/Nowhere');
