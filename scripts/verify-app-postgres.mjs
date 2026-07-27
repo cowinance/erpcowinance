@@ -148,6 +148,11 @@ try {
   if (roleFlags === 'false|false') ok('la app sirve con un rol restringido (NOSUPERUSER NOBYPASSRLS → la RLS le aplica)');
   else bad('el rol de servicio puede saltear la RLS', `rolsuper|rolbypassrls = ${roleFlags}`);
 
+  // Y la app lo COMPROBÓ por su cuenta al arrancar, que es lo que protege a un despliegue donde
+  // nadie corre este script.
+  if (/sin SUPERUSER ni BYPASSRLS/.test(bootLog)) ok('la app verifica sus propios privilegios al arrancar y lo registra');
+  else bad('la guardia de privilegios no dejó rastro en el arranque', bootLog.slice(-400));
+
   if (/PostgreSQL real \(DATABASE_URL\)/.test(bootLog)) ok('arranca usando el driver de PostgreSQL (no PGlite)');
   else bad('no se confirmó el driver de PostgreSQL', bootLog.slice(0, 400));
 
@@ -200,6 +205,84 @@ try {
 } finally {
   stop();
 }
+
+// ── La guardia de privilegios, probada EN NEGATIVO ─────────────────────────────
+//
+// Que la app registre «sin SUPERUSER ni BYPASSRLS» cuando todo está bien no prueba gran cosa: un
+// `console.log` fijo pasaría igual. Lo que hay que demostrar es que la guardia DISPARA — que con un
+// rol capaz de saltear la RLS, la app de producción se NIEGA a arrancar.
+//
+// Se ejerce sobre BYPASSRLS y no sobre SUPERUSER a propósito: es el más fácil de conceder sin
+// darse cuenta (un `GRANT` de más, un rol heredado) y el que no salta a la vista revisando quién es
+// superusuario.
+console.log('\n\x1b[1m── Guardia de privilegios del rol de servicio\x1b[0m');
+
+/** Arranca el binario con el env dado y devuelve {code, log} cuando el proceso termina solo. */
+const bootUntilExit = (env, timeoutMs = 90_000) =>
+  new Promise((resolve) => {
+    const p = spawn(process.execPath, [join(ROOT, 'apps/api/dist/main.js')], {
+      cwd: ROOT,
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let log = '';
+    p.stdout.on('data', (d) => (log += d));
+    p.stderr.on('data', (d) => (log += d));
+    const timer = setTimeout(() => {
+      try {
+        p.kill('SIGKILL');
+      } catch {}
+      resolve({ code: 'timeout', log });
+    }, timeoutMs);
+    p.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ code, log });
+    });
+  });
+
+const PROD_ENV = {
+  DATABASE_URL: URL_APP,
+  DATABASE_ADMIN_URL: URL_ADMIN,
+  NODE_ENV: 'production',
+  SEED_DEMO: 'off',
+  PORT: String(PORT + 1),
+  EMAIL_PROVIDER: 'log',
+  // Producción exige clave propia (≥32, ≠ la de dev). Sin esto el proceso muere por OTRO motivo y
+  // la prueba diría «no arrancó» sin haber ejercido nada.
+  JWT_SECRET: 'clave-de-verificacion-suficientemente-larga-0123456789',
+};
+
+await psql(`ALTER ROLE app_user BYPASSRLS;`);
+try {
+  const flags = await psql(`select rolbypassrls::text from pg_roles where rolname='app_user'`);
+  if (flags !== 'true') bad('no se pudo conceder BYPASSRLS para la prueba', `rolbypassrls=${flags}`);
+
+  const caido = await bootUntilExit(PROD_ENV);
+  if (caido.code !== 0 && caido.code !== 'timeout' && /BYPASSRLS/.test(caido.log))
+    ok(`con BYPASSRLS la app de producción NO arranca (exit ${caido.code})`);
+  else bad('la app arrancó con un rol que saltea la RLS', `exit=${caido.code} ${caido.log.slice(-500)}`);
+
+  if (/ALTER ROLE app_user NOSUPERUSER NOBYPASSRLS/.test(caido.log))
+    ok('el mensaje trae el comando exacto para arreglarlo');
+  else bad('el mensaje de error no dice cómo corregirlo', caido.log.slice(-400));
+
+  // Y no llegó a tocar el esquema: la guardia corre ANTES del DDL, así que un despliegue mal
+  // configurado se detiene sin haber migrado a medias.
+  if (!/Migraciones pendientes/.test(caido.log)) ok('aborta ANTES de correr migraciones');
+  else bad('alcanzó a migrar antes de abortar', caido.log.slice(-400));
+} finally {
+  // Devolver el rol a su estado sano SIEMPRE: si esto no corre, la próxima corrida del script
+  // arrancaría con un rol privilegiado y las aserciones de aislamiento pasarían por la razón
+  // equivocada.
+  await psql(`ALTER ROLE app_user NOBYPASSRLS;`);
+}
+
+// Restituido: la app vuelve a arrancar. Cierra el ciclo — demuestra que lo que la frenaba era el
+// privilegio y no cualquier otra cosa del entorno de producción.
+const sano = await bootUntilExit({ ...PROD_ENV, PORT: String(PORT + 2) }, 25_000);
+if (sano.code === 'timeout' && /sin SUPERUSER ni BYPASSRLS/.test(sano.log))
+  ok('quitado el BYPASSRLS, la misma configuración arranca y sirve');
+else bad('la app no arrancó con el rol ya restringido', `exit=${sano.code} ${sano.log.slice(-500)}`);
 
 console.log(
   failures === 0

@@ -7,6 +7,7 @@ import { bootstrapCatalogs, seedDemo } from './seed';
 import { farmToday, safeTimeZone } from '@cowinance/domain';
 import { requestContext } from '../common/request-context';
 import { RLS_TABLES, platformMigration, rlsMigration } from './rls';
+import { ROLE_PRIVILEGES_SQL, assessRolePrivileges, type RolePrivileges } from './role-privileges';
 import { checksumOf, loadMigrations, recordBaseline, resolveDbPath, runMigrations } from './migrations';
 import type { Q } from './query';
 
@@ -88,6 +89,11 @@ export class DbService implements OnModuleInit {
       this.db = new PGliteDriver(new PGlite(dataDir));
     }
     await this.db.ready();
+
+    // ANTES de tocar el esquema: ¿el rol con el que vamos a SERVIR tiene la RLS aplicada? Si no la
+    // tiene, no hay aislamiento entre fincas y no tiene sentido seguir arrancando en producción.
+    // Va acá y no más abajo para fallar antes de correr migraciones (ver `role-privileges.ts`).
+    await this.assertServiceRoleIsRestricted();
 
     // Todo el DDL de arranque va bajo un LOCK: dos instancias que arrancan a la vez —lo normal en
     // un despliegue rodante— cargarían el esquema las dos y la segunda muere con «duplicate key
@@ -183,6 +189,45 @@ export class DbService implements OnModuleInit {
     const user = await this.db.query<{ id: string }>(`SELECT id FROM users ORDER BY created_at LIMIT 1`);
     this.userId = user.rows[0].id;
     this.logger.log(`Contexto dev: tenant=${this.tenantId} farm=${this.farmId} · RLS forzada en ${RLS_TABLES.length} tablas`);
+  }
+
+  /**
+   * Comprueba que el rol de SERVICIO no saltee la RLS. Aborta el arranque en producción si la
+   * saltea; fuera de producción avisa (ver `role-privileges.ts` para el razonamiento completo).
+   *
+   * La consulta va por `this.db.query`, que en `PostgresDriver` usa el pool de `DATABASE_URL` — la
+   * conexión de servicio. NO la administrativa, que tiene que ser privilegiada para correr el DDL.
+   *
+   * En PGlite se saltea: es superusuario por diseño (base embebida, un solo proceso) y avisar en
+   * cada arranque de desarrollo entrenaría a ignorar exactamente el mensaje que importa en
+   * producción. Que en dev la RLS no se ejerce ya está documentado y lo cubre `verify:rls`.
+   */
+  private async assertServiceRoleIsRestricted(): Promise<void> {
+    if (this.db.kind !== 'postgres') return;
+
+    let priv: RolePrivileges | undefined;
+    try {
+      const res = await this.db.query<RolePrivileges>(ROLE_PRIVILEGES_SQL);
+      priv = res.rows[0];
+    } catch (e) {
+      // No poder COMPROBAR no es lo mismo que fallar la comprobación: `pg_roles` es legible por
+      // cualquiera, así que un error acá es una rareza del entorno, y tumbar el arranque por eso
+      // sería peor que el problema. Se avisa fuerte y se sigue.
+      this.logger.warn(
+        `No se pudieron leer los privilegios del rol de servicio (${(e as Error).message}). ` +
+          'Comprobalo a mano: SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;',
+      );
+      return;
+    }
+    if (!priv) {
+      this.logger.warn('pg_roles no devolvió el rol actual: no se pudo verificar el aislamiento.');
+      return;
+    }
+
+    const verdict = assessRolePrivileges(priv, { production: process.env.NODE_ENV === 'production' });
+    if (verdict.level === 'fatal') throw new Error(verdict.message);
+    if (verdict.level === 'warn') this.logger.warn(verdict.message);
+    else this.logger.log(verdict.message);
   }
 
   /**
