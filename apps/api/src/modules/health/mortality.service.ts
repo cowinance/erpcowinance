@@ -99,6 +99,15 @@ export class MortalityService {
       throw new BadRequestException({ code: 'mortality.already_dead', title: `El animal ${animal.tag ?? ''} ya está registrado como muerto` });
 
     const diedAt = input.diedAt ?? new Date().toISOString();
+
+    // Una muerte es un hecho, no un pronóstico. Un tipeo con fecha futura descoloca la mortalidad
+    // del período y las anomalías que se calculan sobre ella.
+    const hoy = await this.db.today(q);
+    if (String(diedAt).slice(0, 10) > hoy)
+      throw new BadRequestException({
+        code: 'mortality.future_date',
+        title: 'La fecha de muerte es futura. Se registra lo que ya ocurrió.',
+      });
     const hlc = input.hlc ?? this.serverClock.tick();
 
     // (1) hecho: fila mortalities con id determinista = mortalityId. animal_id UNIQUE.

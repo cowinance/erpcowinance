@@ -38,6 +38,14 @@ export class ClinicalCaseService {
     const caseId = idempotencyKey ? this.deriveId(idempotencyKey, body.animal_id) : randomUUID();
     const startedAt = body.started_at ?? new Date().toISOString();
 
+    // Un caso clínico empieza cuando se ve el problema, no antes de que pase.
+    const hoy = await this.db.today();
+    if (String(startedAt).slice(0, 10) > hoy)
+      throw new BadRequestException({
+        code: 'clinical_case.future_date',
+        title: 'La fecha de inicio del caso es futura. Se registra lo que ya ocurrió.',
+      });
+
     return this.db.tx(async (q) => {
       const existing = await q.one<any>(`SELECT id FROM clinical_cases WHERE id = $1 AND tenant_id = $2`, [caseId, this.db.tenant]);
       if (existing) return { ...(await this.header(q, caseId)), already_created: true };

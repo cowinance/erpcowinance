@@ -875,11 +875,21 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (!d) return { meatUntil: null };
         const now = new Date();
         const product = store()?.getRow('products_veterinary', productId)?.fields as any;
-        // Cálculo LOCAL de retiros (el operario necesita saberlo en el campo, sin señal)
+        // Cálculo LOCAL de retiros (el operario necesita saberlo en el campo, sin señal).
+        //
+        // La zona del DISPOSITIVO: el retiro de carne se cuenta en días de calendario, y el teléfono
+        // está físicamente en la finca, así que su zona es la de la finca. Sin esto se contaba en
+        // UTC y el retiro salía corrido un día — y en un huso positivo, corrido hacia ANTES, que es
+        // carne con residuos dada por habilitada.
+        //
+        // El servidor sigue siendo la autoridad y recalcula con la zona de la organización; esto es
+        // lo que el operario ve en la manga mientras tanto, y ahora coincide.
+        const zonaDelDispositivo = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const { meatWithdrawalUntil: meatUntil, milkWithdrawalUntil: milkUntil } = computeWithdrawal(
           now,
           product?.withdrawal_meat_days ?? null,
           product?.withdrawal_milk_hours ?? null,
+          zonaDelDispositivo,
         );
         d.addEvent('treatments', Crypto.randomUUID(), {
           animal_id: animalId,

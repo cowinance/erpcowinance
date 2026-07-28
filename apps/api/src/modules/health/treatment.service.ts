@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { assertTreatable, computeWithdrawal, TREATMENT_APPLIED } from '@cowinance/domain';
 import type { TreatmentApplied } from '@cowinance/domain';
@@ -96,9 +96,34 @@ export class TreatmentService {
     const product = await this.requireProduct(q, input.productId);
 
     const appliedAt = new Date(input.appliedAt ?? Date.now());
+
+    // La dosis tiene que ser una dosis. Una negativa entraba y ensuciaba el consumo y el costo del
+    // período; peor, si el producto está enlazado al inventario, descontar una cantidad negativa
+    // SUMA stock — el sistema termina diciendo que hay más frascos de los que hay.
+    if (input.dose != null && !(Number(input.dose) > 0))
+      throw new BadRequestException({
+        code: 'treatment.invalid_dose',
+        title: 'La dosis tiene que ser mayor que cero. Si no la anotaste, dejá el campo vacío.',
+      });
+
+    // Un tratamiento es un HECHO: no puede estar en el futuro. Y acá el tipeo se paga doble, porque
+    // la fecha de aplicación es la que arranca el retiro: un 2030 deja al animal retirado cuatro
+    // años.
+    const hoy = await this.db.today(q);
+    if (appliedAt.toISOString().slice(0, 10) > hoy)
+      throw new BadRequestException({
+        code: 'treatment.future_date',
+        title: `La fecha de aplicación es futura. Un tratamiento se registra cuando se aplicó.`,
+      });
     // Server Authority: el retiro es SIEMPRE el derivado por el dominio desde el producto.
+    // La zona de la FINCA: el retiro de carne se cuenta en días de calendario, y el calendario es
+    // el de donde está el animal. Calcularlo en UTC lo corría un día — tarde de este lado del
+    // meridiano y ANTES del otro, que es carne con residuos habilitada para vender.
     const { meatWithdrawalUntil, milkWithdrawalUntil } = computeWithdrawal(
-      appliedAt, product.withdrawal_meat_days, product.withdrawal_milk_hours,
+      // Se pasa lo que llegó, sin convertir a Date primero: una fecha pelada («2026-06-01», lo que
+      // manda el formulario) es un día calendario y no un instante, y `new Date()` la volvería
+      // medianoche UTC — que en América es el día anterior.
+      input.appliedAt ?? appliedAt, product.withdrawal_meat_days, product.withdrawal_milk_hours, await this.db.timeZone(q),
     );
     const withdrawalMismatch = this.detectMismatch(input, meatWithdrawalUntil, milkWithdrawalUntil);
 

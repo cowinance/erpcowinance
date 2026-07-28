@@ -59,9 +59,36 @@ export class HealthService {
     );
   }
 
+  /**
+   * Un retiro NEGATIVO desactiva la protección en silencio.
+   *
+   * `computeWithdrawal` suma los días a la fecha de aplicación: con −5, el retiro «termina» cinco
+   * días ANTES de aplicarse, y la consulta de retiros activos —que filtra por fecha futura— no
+   * devuelve nada. El animal figura libre para vender con el antibiótico todavía en el cuerpo.
+   *
+   * Un signo de menos mal tipeado, o una importación con la columna corrida, alcanzan. Y no hay
+   * ningún síntoma: la pantalla se ve igual de sana que con un producto sin retiro.
+   */
+  private validarProducto(body: any): void {
+    for (const [campo, etiqueta] of [
+      ['withdrawal_meat_days', 'de retiro de carne'],
+      ['withdrawal_milk_hours', 'de retiro de leche'],
+      ['default_dose', 'de la dosis por defecto'],
+    ] as const) {
+      const v = body?.[campo];
+      if (v === undefined || v === null || v === '') continue;
+      if (!Number.isFinite(Number(v)) || Number(v) < 0)
+        throw new BadRequestException({
+          code: 'product.invalid_number',
+          title: `El valor ${etiqueta} no puede ser negativo.`,
+        });
+    }
+  }
+
   async createProduct(body: any) {
     if (!body?.name || !body?.type)
       throw new BadRequestException({ code: 'product.missing_fields', title: 'name y type son obligatorios' });
+    this.validarProducto(body);
     if (body.inventory_item_id) await this.requireInventoryItem(body.inventory_item_id);
     return this.db.one(
       `INSERT INTO products_veterinary (tenant_id, name, type, active_ingredient, withdrawal_meat_days, withdrawal_milk_hours, default_dose, inventory_item_id, created_by)
@@ -72,6 +99,7 @@ export class HealthService {
 
   /** Edita un producto veterinario (incluye enlazar/desenlazar el ítem de inventario). */
   async updateProduct(id: string, body: any) {
+    this.validarProducto(body);
     const sets: string[] = [];
     const args: unknown[] = [id, this.db.tenant];
     const set = (col: string, val: unknown) => { args.push(val); sets.push(`${col} = $${args.length}`); };

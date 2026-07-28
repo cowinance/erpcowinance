@@ -70,11 +70,11 @@ describe('TreatmentService · integración', () => {
     const a = await animal('active', uniq('T'));
     const tid = randomUUID();
     const res = await db.tx((q) =>
-      svc.recordTreatment(q, { animalId: a, productId, appliedAt: '2030-06-01T00:00:00.000Z', actorUserId: userId, origin: 'rest', treatmentId: tid }),
+      svc.recordTreatment(q, { animalId: a, productId, appliedAt: '2026-06-01T00:00:00.000Z', actorUserId: userId, origin: 'rest', treatmentId: tid }),
     );
     expect(res.recorded).toBe(true);
-    expect(res.meatWithdrawalUntil).toBe('2030-06-29'); // +28 días
-    expect(res.milkWithdrawalUntil).toBe('2030-06-04T00:00:00.000Z'); // +72 horas
+    expect(res.meatWithdrawalUntil).toBe('2026-06-28'); // +28 días desde el día de FINCA: medianoche UTC del 1 es el 31 de mayo en Caracas
+    expect(res.milkWithdrawalUntil).toBe('2026-06-04T00:00:00.000Z'); // +72 horas
 
     const rows = await trtRows(a);
     expect(rows).toHaveLength(1);
@@ -117,12 +117,12 @@ describe('TreatmentService · integración', () => {
     const tid = randomUUID();
     const res = await db.tx((q) =>
       svc.recordTreatment(q, {
-        animalId: a, productId, appliedAt: '2030-06-01T00:00:00.000Z', actorUserId: userId, origin: 'sync', treatmentId: tid,
-        clientMeatWithdrawalUntil: '2030-06-10', // cliente mintió
+        animalId: a, productId, appliedAt: '2026-06-01T00:00:00.000Z', actorUserId: userId, origin: 'sync', treatmentId: tid,
+        clientMeatWithdrawalUntil: '2026-06-10', // cliente mintió
       }),
     );
     expect(res.withdrawalMismatch.some((m) => m.field === 'meat_withdrawal_until')).toBe(true);
     const rows = await trtRows(a);
-    expect(rows[0].meat_withdrawal_until).toBe('2030-06-29'); // el servidor manda
+    expect(rows[0].meat_withdrawal_until).toBe('2026-06-28'); // el servidor manda
   });
 });
