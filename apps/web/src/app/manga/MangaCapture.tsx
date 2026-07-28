@@ -33,6 +33,8 @@ interface Catalogs {
   products: any[];
   lots: { id: string; name: string }[];
   bulls: { id: string; tag?: string; name?: string }[];
+  /** Partidas de semen CON pajuelas disponibles: es de donde salen el toro y el descuento en una IA. */
+  semenBatches?: { id: string; batch_code: string; sire_id: string | null; sire_tag?: string | null; sire_name_external?: string | null; straws_available: number }[];
 }
 
 const NOTE_TEMPLATES = ['cojea', 'flaco', 'revisar ojo', 'revisar ubre', 'agresivo', 'sin novedad'];
@@ -241,15 +243,24 @@ function MoveForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
  * Sin el dato (sin señal, o mientras carga) se devuelve el orden original: el selector tiene que
  * funcionar igual, con el animal ya encerrado.
  */
-function ordenarPorParentesco(bulls: any[], parentesco: Map<string, MatingCandidate> | null): any[] {
-  if (!parentesco) return bulls;
-  return [...bulls].sort((a, b) => (parentesco.get(a.id)?.f ?? 0) - (parentesco.get(b.id)?.f ?? 0));
+function ordenarPorParentesco(
+  items: any[],
+  parentesco: Map<string, MatingCandidate> | null,
+  sireDe: (x: any) => string | null = (x) => x.id,
+): any[] {
+  if (!parentesco) return items;
+  const f = (x: any) => {
+    const id = sireDe(x);
+    return id ? (parentesco.get(id)?.f ?? 0) : 0;
+  };
+  return [...items].sort((a, b) => f(a) - f(b));
 }
 
 function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
   const [action, setAction] = useState<'celo' | 'servicio' | 'diagnostico' | null>(null);
   const [method, setMethod] = useState('ai');
   const [sireId, setSireId] = useState('');
+  const [batchId, setBatchId] = useState('');
   const [result, setResult] = useState('pregnant');
   const [parentesco, setParentesco] = useState<Map<string, MatingCandidate> | null>(null);
 
@@ -265,6 +276,9 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
   }, [action, animal.id, animal.sex, parentesco]);
 
   const elegido = sireId ? parentesco?.get(sireId) : undefined;
+  // El toro de la partida elegida: la consanguinidad de una IA es la del toro que hay en la pajuela.
+  const toroDeLaPartida = (catalogs.semenBatches ?? []).find((b: any) => b.id === batchId)?.sire_id;
+  const elegidaBloquea = toroDeLaPartida ? parentesco?.get(toroDeLaPartida) : undefined;
 
   if (animal.sex !== 'F') {
     return (
@@ -283,7 +297,13 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
       await post(`/animals/${animal.id}/heats`, {});
       onSaved({ action: 'Celo', detail: 'registrado' });
     } else if (action === 'servicio') {
-      await post(`/animals/${animal.id}/services`, { method, sire_id: sireId || undefined });
+      // En IA va la PARTIDA, no el toro: de ahí el servidor deriva el padre (la partida lo sabe) y
+      // descuenta la pajuela del termo. Mandar el toro suelto dejaría el inventario sin tocar.
+      await post(`/animals/${animal.id}/services`, {
+        method,
+        sire_id: method === 'natural' ? sireId || undefined : undefined,
+        semen_batch_id: method === 'ai' ? batchId || undefined : undefined,
+      });
       onSaved({ action: 'Servicio', detail: method === 'ai' ? 'IA' : 'monta' });
     } else if (action === 'diagnostico') {
       // Idem: la fecha del diagnóstico la pone el servidor en hora de finca.
@@ -310,6 +330,28 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
               <button key={v} onClick={() => setMethod(v)} className={`h-12 flex-1 rounded-lg text-[17px] font-bold ${method === v ? 'bg-[#4ade80] text-black' : 'bg-white/10 text-white/80'}`}>{l}</button>
             ))}
           </div>
+          {method === 'ai' && (
+            <>
+            <select value={batchId} onChange={(e) => setBatchId(e.target.value)} className={inputCls + ' h-12 text-[18px]'}>
+              <option value="">Sin partida (no descuenta pajuela)</option>
+              {ordenarPorParentesco(catalogs.semenBatches ?? [], parentesco, (b: any) => b.sire_id).map((b: any) => {
+                const p = b.sire_id ? parentesco?.get(b.sire_id) : undefined;
+                const toro = b.sire_tag ?? b.sire_name_external ?? 'sin toro';
+                return (
+                  <option key={b.id} value={b.id}>
+                    {b.batch_code} — {toro} ({b.straws_available})
+                    {p ? (p.blocks ? `  ⚠ ${p.f_pct}% parentesco` : p.f_pct > 0 ? `  · ${p.f_pct}%` : '') : ''}
+                  </option>
+                );
+              })}
+            </select>
+            {elegidaBloquea && (
+              <div className="rounded-lg bg-[#ef4444]/15 px-3 py-2 text-[17px] font-bold text-[#f87171]">
+                Parentesco {elegidaBloquea.f_pct}% — el servicio se va a rechazar por consanguinidad.
+              </div>
+            )}
+            </>
+          )}
           {method === 'natural' && (
             <>
             <select value={sireId} onChange={(e) => setSireId(e.target.value)} className={inputCls + ' h-12 text-[18px]'}>

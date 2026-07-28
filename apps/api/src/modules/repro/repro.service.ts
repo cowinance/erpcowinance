@@ -92,6 +92,36 @@ export class ReproService {
   }
 
   /**
+   * El padre efectivo de un servicio.
+   *
+   * Lo explícito manda —el técnico puede corregir—, y si no vino se deriva de lo que se usó: la
+   * partida de semen en una IA, el embrión en una transferencia. Las dos tablas guardan su
+   * `sire_id`, así que pedirle al cliente que lo repita es pedirle que lo repita BIEN: alcanza con
+   * que una pantalla se olvide para que el ternero nazca sin padre.
+   *
+   * Si la partida no tiene toro cargado devuelve `null`, igual que antes. No se inventa un padre.
+   */
+  private async resolveSire(explicito: string | null, semenBatchId: string | null, embryoId: string | null): Promise<string | null> {
+    if (explicito) return explicito;
+    const t = this.db.tenant;
+    if (semenBatchId) {
+      const b = await this.db.one<{ sire_id: string | null }>(
+        `SELECT sire_id FROM semen_batches WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+        [semenBatchId, t],
+      );
+      return b?.sire_id ?? null;
+    }
+    if (embryoId) {
+      const e = await this.db.one<{ sire_id: string | null }>(
+        `SELECT sire_id FROM embryos WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+        [embryoId, t],
+      );
+      return e?.sire_id ?? null;
+    }
+    return null;
+  }
+
+  /**
    * Estado reproductivo AGREGADO por lote (E6): reusa `herdStatus` (regla única) y agrupa por lote —
    * cabezas, preñez %, listas para servicio, diagnóstico pendiente y abiertas. Rankea por «listas».
    */
@@ -149,13 +179,34 @@ export class ReproService {
     const id = idempotencyKey ? this.deriveId(idempotencyKey, animalId) : randomUUID();
     const existing = await this.db.one<any>(`SELECT id, type, occurred_at FROM breeding_events WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
     if (existing) return { ...existing, tag: animal.tag, already: true };
+    const semenBatchId = method === 'service_ai' && body?.semen_batch_id ? body.semen_batch_id : null;
+    const embryoId = method === 'embryo_transfer' && body?.embryo_id ? body.embryo_id : null;
+
+    // El PADRE de una inseminación sale de la partida de semen, no hay que repetirlo.
+    //
+    // Antes se guardaba únicamente lo que mandara el cliente, y en una IA nadie lo manda —el toro va
+    // implícito en la pajuela—. Resultado: `breeding_events.sire_id` quedaba NULL justo en los
+    // servicios donde la genética se compró y se pagó. Tres consecuencias, todas silenciosas:
+    // el ternero nacía sin padre (el parto copia el sire del evento), la evaluación de toros no veía
+    // esas crías, y la guarda de consanguinidad no corría porque recibía `null`. Se podía inseminar
+    // una vaca con semen de su propio padre y el sistema no decía nada.
+    const sireId = await this.resolveSire(body?.sire_id ?? null, semenBatchId, embryoId);
+
     // Guardas (E6): retiro sanitario activo / caso clínico grave / consanguinidad. Bloquea salvo force.
-    const warnings = await this.serviceGuards(animalId, body?.sire_id ?? null, body?.force === true);
+    //
+    // En una TRANSFERENCIA de embrión no se evalúa consanguinidad contra la receptora: ella gesta,
+    // no aporta genes. El apareamiento que importaba —donante × toro— ya ocurrió cuando se armó el
+    // embrión. Chequearla acá bloquearía transferencias perfectamente sanas por un parentesco que no
+    // se hereda.
+    const warnings = await this.serviceGuards(
+      animalId,
+      method === 'embryo_transfer' ? null : sireId,
+      body?.force === true,
+    );
+
     // Consumo de pajuela/embrión (G-2): solo en AI con partida o en transferencia con embrión. Se
     // descuenta ANTES de registrar el servicio (regla única del saldo); si no alcanza (403), no queda
     // ni el servicio ni el consumo (en una request comparten la misma tx). Móvil/sync aún no lo envía.
-    const semenBatchId = method === 'service_ai' && body?.semen_batch_id ? body.semen_batch_id : null;
-    const embryoId = method === 'embryo_transfer' && body?.embryo_id ? body.embryo_id : null;
     // `straw_id` (GT-2/GT-3): la pajuela CONCRETA. Si viene, se consume ésa —es el plan de servicio,
     // y también el desvío en el corral cuando el técnico usa otra distinta de la planificada—. Si no
     // viene, se toma la disponible más antigua y ubicada.
@@ -166,7 +217,7 @@ export class ReproService {
     const row = await this.db.one<any>(
       `INSERT INTO breeding_events (id, tenant_id, animal_id, type, occurred_at, sire_id, semen_batch_id, embryo_id, technician_id, protocol_id, notes, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING RETURNING id, type, occurred_at`,
-      [id, this.db.tenant, animalId, method, occurredAt, body?.sire_id ?? null, semenBatchId, embryoId, body?.technician_id ?? null, body?.protocol_id ?? null, body?.notes ?? null, this.db.user],
+      [id, this.db.tenant, animalId, method, occurredAt, sireId, semenBatchId, embryoId, body?.technician_id ?? null, body?.protocol_id ?? null, body?.notes ?? null, this.db.user],
     );
     // Atar la pajuela al servicio: es lo que responde «¿QUÉ le pusimos a la 001?» con la unidad
     // concreta y no solo con la partida. Va después del INSERT porque necesita el id del evento, y
@@ -176,7 +227,7 @@ export class ReproService {
       this.db,
       animalId,
       'service',
-      { method: body.method, sire_id: body?.sire_id ?? null, expected_due: computeExpectedDueDateFromService(new Date(occurredAt)) },
+      { method: body.method, sire_id: sireId, expected_due: computeExpectedDueDateFromService(new Date(occurredAt)) },
       occurredAt,
     );
     return { ...row, tag: animal.tag, warnings, straw_ids: consumidas };

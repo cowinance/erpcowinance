@@ -128,6 +128,7 @@ export default function MangaPage() {
   const [lots, setLots] = useState<{ id: string; name: string }[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [bulls, setBulls] = useState<any[]>([]);
+  const [semenBatches, setSemenBatches] = useState<any[]>([]);
   const [startedAt, setStartedAt] = useState<number>(0);
   const [records, setRecords] = useState<SessionRecord[]>([]);
   const [errors, setErrors] = useState(0);
@@ -174,6 +175,12 @@ export default function MangaPage() {
       .then((r) => r.json())
       .then((d) => setBulls(d?.data ?? []))
       .catch(() => setBulls([]));
+    // Partidas de semen para la IA: sin esto, una inseminación en la manga no descontaba pajuelas
+    // del termo NI dejaba registrado el toro — y el toro de una IA es justamente el que se pagó.
+    fetch(`${API_URL}/genetics/semen`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setSemenBatches(Array.isArray(d) ? d.filter((b: any) => (b.straws_available ?? 0) > 0) : []))
+      .catch(() => setSemenBatches([]));
   }, []);
 
   useEffect(() => {
@@ -660,7 +667,7 @@ export default function MangaPage() {
                 <MangaCapture
                   animal={animal}
                   mode={mode}
-                  catalogs={{ products, lots, bulls }}
+                  catalogs={{ products, lots, bulls, semenBatches }}
                   onSaved={(rec) => {
                     soundSaved();
                     setRecords((r) => [{ key: crypto.randomUUID(), tag: animal.tag, action: rec.action, detail: rec.detail, at: Date.now(), status: 'saved' }, ...r]);
