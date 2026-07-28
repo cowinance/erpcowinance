@@ -6,7 +6,9 @@ import { usePathname } from 'next/navigation';
 const TABS: [string, string][] = [
   ['/genetica', 'Semen'],
   ['/genetica/embriones', 'Embriones'],
-  ['/genetica/desempeno', 'Desempeño'],
+  ['/genetica/desempeno', 'Toros'],
+  ['/genetica/madres', 'Madres'],
+  ['/genetica/apareamientos', 'Apareamientos'],
   ['/genetica/evaluaciones', 'Evaluaciones'],
   ['/genetica/termos', 'Termos'],
 ];

@@ -2,6 +2,7 @@ import { apiSafe } from '@/lib/server-api';
 import { EmptyState } from '@/components/ui';
 import { GeneticsNav } from '../GeneticsNav';
 import { SirePerformance } from './SirePerformance';
+import { SireCareer, type Career } from './SireCareer';
 
 /**
  * Genética — desempeño y costo por toro (Fase 2.3 a 2.5).
@@ -17,7 +18,11 @@ import { SirePerformance } from './SirePerformance';
 export default async function SirePerformancePage({ searchParams }: { searchParams: Promise<{ year?: string }> }) {
   const { year } = await searchParams;
   const qs = year ? `?year=${encodeURIComponent(year)}` : '';
-  const [cost, carcass] = await Promise.all([apiSafe<any>(`/genetics/sire-cost${qs}`), apiSafe<any>('/genetics/carcass-by-sire')]);
+  const [cost, carcass, career] = await Promise.all([
+    apiSafe<any>(`/genetics/sire-cost${qs}`),
+    apiSafe<any>('/genetics/carcass-by-sire'),
+    apiSafe<Career>('/genetics/sire-career'),
+  ]);
 
   if (cost === null) {
     return <EmptyState title="La API no está disponible" body="Iniciá el backend con `npm run api` y recargá." />;
@@ -31,6 +36,10 @@ export default async function SirePerformancePage({ searchParams }: { searchPara
       </div>
       <GeneticsNav />
       <SirePerformance cost={cost} carcass={carcass} />
+      {/* La carrera va DEBAJO de la temporada: el productor entra a mirar la parición actual, y la
+          trayectoria es el contexto que le da peso a ese número. Se oculta sola con una sola
+          temporada cargada, donde no diría nada. */}
+      <SireCareer career={career} />
     </div>
   );
 }

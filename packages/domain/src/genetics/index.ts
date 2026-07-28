@@ -77,3 +77,6 @@ export type { Pedigree, PedigreeNode, InbreedingLevel } from './inbreeding';
 
 export { sireCareers } from './sire-career';
 export type { ContemporaryGroupResult, SireCareer } from './sire-career';
+
+export { damProductivity, damConfidenceFor, cullCandidates } from './dam-productivity';
+export type { DamRecord, DamProductivity, DamConfidence } from './dam-productivity';
