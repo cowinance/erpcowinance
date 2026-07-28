@@ -3,7 +3,7 @@ import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, KpiCard, EmptyState, TagMono } from '@/components/ui';
 import { WeightChart } from '@/components/WeightChart';
 import { VerificationBanner } from '@/components/VerificationBanner';
-import { EmptyFarmState } from '@/components/EmptyFarmState';
+import { FarmSetup, type Setup } from '@/components/FarmSetup';
 import { EVENT_LABELS, relativeTime } from '@/lib/format';
 import { Plus, Zap, CheckSquare, Stethoscope, Syringe, Heart, Baby, ArrowLeftRight, AlertTriangle, Scale, Scissors, StickyNote, Tag } from 'lucide-react';
 import { AgendaAttention } from '@/components/AgendaAttention';
@@ -87,6 +87,9 @@ export default async function Dashboard() {
   const neverPopulated = (k.total_animals ?? 0) === 0;
   const noActiveButHasHistory = !neverPopulated && (k.active_animals ?? 0) === 0;
   const fs = home.farm_status ?? {};
+  // Qué le falta a la finca para estar en marcha (O-2). Derivado del estado real por el backend:
+  // acá no se decide nada, solo se dibuja.
+  const setup = home.setup as Setup;
 
   // Personalización por rol (E5): reordena énfasis sin ocultar nada. owner/admin/otros → orden base.
   const focus = focusFor(home.role);
@@ -103,7 +106,7 @@ export default async function Dashboard() {
       />
 
       {neverPopulated ? (
-        <EmptyFarmState greetingName={me?.name} farmName={farms?.[0]?.name} />
+        <FarmSetup setup={setup} greetingName={me?.name} farmName={farms?.[0]?.name} />
       ) : noActiveButHasHistory ? (
         <EmptyState
           title="No tenés animales activos"
@@ -113,6 +116,10 @@ export default async function Dashboard() {
         />
       ) : (
         <>
+          {/* Primeros pasos: sigue estando hasta que la finca esté armada. El panel viejo se iba
+              al cargar el primer animal, justo cuando empezaba a hacer falta. */}
+          <FarmSetup setup={setup} />
+
           {/* Cabecera */}
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>

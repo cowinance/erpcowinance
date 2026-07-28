@@ -5,6 +5,7 @@ import { TaskService } from '../tasks/task.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { HealthService } from '../health/health.service';
 import { ReproService } from '../repro/repro.service';
+import { farmSetupProgress } from '@cowinance/domain';
 
 /**
  * Inicio como CENTRO DE CONTROL DIARIO (mejora Home). Endpoint agregado `/dashboard/home`:
@@ -34,7 +35,7 @@ export class DashboardHomeService {
   async home() {
     // `alerts.agendaAndKpis()` comparte el computeDesired (lo caro: herdStatus O(vientres)) entre
     // la agenda y los KPIs. Antes se llamaba agenda() + kpis() por separado → se computaba DOS veces.
-    const [base, taskK, alertsBundle, healthK, reproK, openTasks, noWeigh, recent]: any[] = await Promise.all([
+    const [base, taskK, alertsBundle, healthK, reproK, openTasks, noWeigh, recent, setup]: any[] = await Promise.all([
       this.dashboard.kpis(),
       this.tasks.kpis(),
       this.alerts.agendaAndKpis(),
@@ -43,6 +44,7 @@ export class DashboardHomeService {
       this.tasks.board({ status: 'open' }),
       this.noRecentWeighing(),
       this.recentActivity(),
+      this.farmSetup(),
     ]);
     const { agenda, kpis: alertK } = alertsBundle as { agenda: any[]; kpis: any };
 
@@ -140,6 +142,9 @@ export class DashboardHomeService {
 
     return {
       role: this.db.role ?? null,
+      // Qué le falta a la finca para estar en marcha. Va SIEMPRE, no solo con el hato vacío: el
+      // panel viejo se iba al cargar el primer animal, justo cuando empezaba a hacer falta.
+      setup,
       kpis,
       priority,
       farm_status,
@@ -152,6 +157,81 @@ export class DashboardHomeService {
         tasks_by_assignee: taskK.by_assignee,
         alerts: { open: alertK.open, critical: alertK.critical, warning: alertK.warning },
       },
+    };
+  }
+
+  /**
+   * Qué le falta a la finca para estar en marcha (O-2), con los textos y los enlaces.
+   *
+   * La REGLA —cuáles son los pasos, en qué orden y cuándo está dado cada uno— vive en el dominio
+   * (`farmSetupProgress`). Acá solo se averiguan los hechos y se les pone nombre, igual que hace la
+   * atención prioritaria: el backend devuelve el texto en español y el `href`, y la pantalla dibuja.
+   *
+   * Se pregunta con `EXISTS` y no con `count(*)`: la pregunta es «¿hay al menos uno?», y `EXISTS`
+   * corta en la primera fila. Con `count(*)` una finca de miles de animales pagaría el recorrido
+   * entero de cuatro tablas en CADA carga del Inicio, que es la pantalla que más se abre — la misma
+   * lección que dejaron los dos cuadráticos del barrido de volumen.
+   */
+  private async farmSetup() {
+    const f = (await this.db.one<{
+      animales: boolean;
+      lotes: boolean;
+      pesajes: boolean;
+      sanidad: boolean;
+    }>(
+      `SELECT
+         EXISTS (SELECT 1 FROM animals   WHERE tenant_id=$1 AND deleted_at IS NULL) AS animales,
+         EXISTS (SELECT 1 FROM lots      WHERE tenant_id=$1 AND deleted_at IS NULL) AS lotes,
+         EXISTS (SELECT 1 FROM weighings WHERE tenant_id=$1 AND deleted_at IS NULL) AS pesajes,
+         EXISTS (
+           SELECT 1 FROM treatments   WHERE tenant_id=$1 AND deleted_at IS NULL
+           UNION ALL
+           SELECT 1 FROM vaccinations WHERE tenant_id=$1 AND deleted_at IS NULL
+         ) AS sanidad`,
+      [this.db.tenant],
+    ))!;
+
+    const progreso = farmSetupProgress({
+      hasAnimals: f.animales,
+      hasLots: f.lotes,
+      hasWeighings: f.pesajes,
+      hasHealthRecords: f.sanidad,
+    });
+
+    // Cada paso dice QUÉ desbloquea, no solo qué hacer: «cargá tus animales» sin el porqué es una
+    // tarea; «sin esto el sistema no puede decirte nada» es una razón.
+    const COPY: Record<string, { title: string; body: string; href: string; action: string; altHref?: string; altAction?: string }> = {
+      herd: {
+        title: 'Cargá tu hato',
+        body: 'Todo lo demás cuelga de acá. Si ya lo tenés en una planilla, importalo de una vez en lugar de cargarlo animal por animal.',
+        href: '/animales/nuevo',
+        action: 'Cargar un animal',
+        altHref: '/animales/importar',
+        altAction: 'Importar planilla',
+      },
+      lots: {
+        title: 'Agrupá en lotes',
+        body: 'El trabajo de campo se organiza por grupo: mover, pesar, vacunar y sacar cuentas se hace por lote, no animal por animal.',
+        href: '/lotes',
+        action: 'Crear un lote',
+      },
+      weighing: {
+        title: 'Registrá un pesaje',
+        body: 'Con dos pesajes la app calcula sola la ganancia diaria de peso, que es el número que dice si el rodeo está andando.',
+        href: '/manga',
+        action: 'Abrir modo manga',
+      },
+      health: {
+        title: 'Anotá una sanidad',
+        body: 'Un tratamiento o una vacuna encienden los retiros y los avisos sanitarios: la app pasa a avisarte antes de que se te pase algo.',
+        href: '/sanidad',
+        action: 'Registrar sanidad',
+      },
+    };
+
+    return {
+      ...progreso,
+      steps: progreso.steps.map((s) => ({ code: s.code, done: s.done, ...COPY[s.code] })),
     };
   }
 

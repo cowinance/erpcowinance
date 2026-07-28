@@ -191,6 +191,39 @@ describe('DashboardHomeService · home agregado (E1)', () => {
       expect((await home.home()).kpis.no_recent_weighing).toBe(porLaTabla);
     }, 60_000);
 
+    it('los primeros pasos SALEN DEL ESTADO REAL, no de un flag', async () => {
+      // El demo tiene hato, lotes, pesajes y sanidad: los cuatro pasos tienen que estar dados. Si
+      // alguna de las cuatro consultas mirara la tabla equivocada, acá se vería como un paso que no
+      // se tilda nunca por más que el productor cargue el dato.
+      const s: any = (await home.home()).setup;
+      expect(s.total).toBe(4);
+      expect(s.steps.map((x: any) => x.code)).toEqual(['herd', 'lots', 'weighing', 'health']);
+      expect(s.steps.every((x: any) => x.done), `pendientes: ${s.steps.filter((x: any) => !x.done).map((x: any) => x.code)}`).toBe(true);
+      expect(s.complete).toBe(true);
+      expect(s.next).toBeNull();
+    }, 60_000);
+
+    it('CADA PASO TRAE TEXTO Y UN ENLACE: sin eso es una lista de reproches', async () => {
+      // Un checklist que dice qué falta pero no adónde ir obliga a buscarlo en un menú de 30
+      // módulos. Los enlaces se comprueban contra las rutas que existen en la web.
+      const s: any = (await home.home()).setup;
+      const rutas = ['/animales/nuevo', '/lotes', '/manga', '/sanidad'];
+      for (const paso of s.steps) {
+        expect(paso.title, `paso ${paso.code} sin título`).toBeTruthy();
+        expect(paso.body, `paso ${paso.code} sin explicación`).toBeTruthy();
+        expect(rutas, `el paso ${paso.code} apunta a ${paso.href}`).toContain(paso.href);
+      }
+    }, 60_000);
+
+    it('NO cuenta filas para saber si hay al menos una', async () => {
+      // `count(*)` recorre la tabla entera; `EXISTS` corta en la primera fila. Con miles de animales
+      // eso son cuatro recorridos completos en CADA carga del Inicio, la pantalla que más se abre.
+      const src = readFileSync(join(originalCwd, 'apps/api/src/modules/dashboard/dashboard-home.service.ts'), 'utf8');
+      const fn = src.slice(src.indexOf('private async farmSetup'), src.indexOf('/** Actividad reciente'));
+      expect(fn).toContain('EXISTS');
+      expect(fn).not.toContain('count(');
+    });
+
     it('NO consulta la vista de GDP: es lo que lo volvía cuadrático', async () => {
       // Se mira el código porque el costo no se ve en un test con datos de demo — se vio con el hato
       // inflado a 3.000, donde el Inicio pasaba de 49 ms a 7.156.

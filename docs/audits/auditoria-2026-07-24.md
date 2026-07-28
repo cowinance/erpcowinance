@@ -419,8 +419,35 @@ software esté completo.
    Verificado registrando un tenant contra la app: 40 cuentas (24 imputables, 16 títulos), 24
    períodos abiertos, un depósito, y una venta que se asienta en el mayor de punta a punta.
 
-   Falta de este punto: **O-2** primeros pasos derivados del estado real, **O-3** datos de ejemplo
-   opcionales, **O-4** importador guiado en la web.
+   **O-2 · Primeros pasos derivados del estado real — HECHO (27 jul 2026).** El Inicio ya tenía una
+   guía de tres pasos para el hato vacío, pero era **una foto, no un estado**: los pasos no se
+   tildaban nunca y el panel entero desaparecía al cargar el primer animal — justo cuando el
+   productor todavía no tiene lotes, ni un pesaje, ni una sanidad, y la app no puede decirle nada
+   útil porque no hay de dónde. La guía se iba en el peor momento: cuando empezaba a hacer falta.
+
+   Ahora son cuatro pasos que se tildan solos, derivados de la finca: **cargá tu hato → agrupá en
+   lotes → registrá un pesaje → anotá una sanidad**. No hay tabla de «progreso de onboarding» que
+   alguien tenga que acordarse de actualizar; si el productor borra su único animal, el paso vuelve
+   a faltar. El panel se apaga solo al llegar a 4 de 4 y no vuelve.
+
+   Dos formas según cuánto falte: con el hato vacío la tarjeta ES la pantalla (no hay KPIs que
+   mostrar y fingirlos sería peor); con algo cargado queda arriba del panel sin robarle la pantalla
+   al trabajo del día. Cada paso dice **qué desbloquea**, no solo qué hacer, y trae su enlace — el
+   primero ofrece además importar la planilla, que es la vía rápida ahora que el importador anda.
+
+   **Por qué cuatro y no diez:** un checklist que no se termina nunca es ruido, y ruido en la
+   pantalla que más se abre. Los cuatro los hace cualquier explotación ganadera en sus primeras
+   semanas. Potreros, equipo o genética son reales pero NO universales: pedirlos dejaría el panel
+   encendido para siempre en una finca que legítimamente no los usa. El test fija esa lista.
+
+   Se pregunta con `EXISTS` y no con `count(*)`: la pregunta es «¿hay al menos uno?». Con `count`
+   una finca de miles de animales pagaría el recorrido entero de cuatro tablas en cada carga del
+   Inicio — la lección de los dos cuadráticos del barrido de volumen, aplicada antes de que duela.
+
+   Verificado contra la app: 0/4 → 1/4 → 2/4 → 3/4 → 4/4 cargando los datos de verdad, y las dos
+   formas del panel en pantalla.
+
+   Falta de este punto: **O-3** datos de ejemplo opcionales, **O-4** importador guiado en la web.
 2. **Verificar los planes de facturación end-to-end** con un proveedor de pagos.
 3. **Beta con un socio de diseño** (`docs/product/design-partner-strategy.md`) sobre datos reales:
    es lo único que revela si el modelo de datos aguanta una finca de verdad.
