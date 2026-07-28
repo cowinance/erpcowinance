@@ -262,7 +262,7 @@ export class AnimalWriteService {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active') RETURNING id`,
       [
         t,
-        await this.db.defaultFarm(),
+        await this.db.defaultFarm(q), // `q`: se resuelve DENTRO de la tx — sin él, la caché fría cuelga la conexión
         resolved.speciesId,
         resolved.categoryId,
         input.sex,

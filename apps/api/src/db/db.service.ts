@@ -330,12 +330,27 @@ export class DbService implements OnModuleInit {
   }
 
   private farmCache = new Map<string, string>();
-  /** Primera finca del tenant actual (v0: finca única por tenant). */
-  async defaultFarm(): Promise<string> {
+  /**
+   * Primera finca del tenant actual (v0: finca única por tenant).
+   *
+   * **`q` cuando el llamador ya está DENTRO de una transacción**, exactamente por el mismo motivo
+   * que `timeZone(q)`: en PGlite la conexión es única, así que una consulta suelta mientras hay una
+   * tx abierta espera a que la tx cierre, y la tx espera a la consulta. No se nota casi nunca
+   * porque la caché se llena en la primera request y a partir de ahí no hay consulta que colgar —
+   * pero con la caché fría, `persistNewAnimal` cuelga la conexión entera desde adentro de su
+   * propia transacción.
+   *
+   * Estaba "resuelto" con un `await db.defaultFarm()` de precalentamiento en un test y un comentario
+   * explicando por qué hacía falta. Eso no es un arreglo: es una trampa que cada test nuevo tiene
+   * que descubrir de nuevo, y que en el servidor le toca a cualquier código que cree un animal
+   * como primera operación después de arrancar (un job, el seed, una carga de datos de ejemplo).
+   */
+  async defaultFarm(q?: Q): Promise<string> {
     const t = this.tenant;
     const cached = this.farmCache.get(t);
     if (cached) return cached;
-    const farm = await this.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]);
+    const sql = `SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`;
+    const farm = q ? await q.one<{ id: string }>(sql, [t]) : await this.one<{ id: string }>(sql, [t]);
     if (!farm) throw new Error(`El tenant ${t} no tiene fincas`);
     this.farmCache.set(t, farm.id);
     return farm.id;

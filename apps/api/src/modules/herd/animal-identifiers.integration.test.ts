@@ -30,7 +30,6 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
     await db.onModuleInit();
     const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     herd = new HerdService(db, writer, new BillingService(db));
-    await db.defaultFarm(); // warmea la caché de finca: persistNewAnimal la usa dentro de la tx (evita colgar la conexión única en tests)
     const created: any = await herd.createAnimal({ tag: 'IDF-1', sex: 'F', category_code: 'vaca' });
     animalId = created.id;
     breedId = (await db.query<{ id: string }>(`SELECT id FROM breeds LIMIT 1`))[0].id;
