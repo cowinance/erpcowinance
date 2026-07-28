@@ -517,7 +517,14 @@ describe('platform — panel de administración global', () => {
   });
 
   it('el filtro «hasta» incluye el día entero, no solo su medianoche', async () => {
-    const hoy = new Date().toISOString().slice(0, 10);
+    // El día se le pregunta a la BASE, no a `new Date().toISOString()`, que es UTC siempre.
+    //
+    // La consulta interpreta `$1::date` en la zona de la SESIÓN, y las filas se sellaron con `now()`
+    // en esa misma zona. Tomar el día de UTC hacía que entre la medianoche UTC y la de la finca
+    // —cuatro horas por día en Venezuela— el test pidiera el día siguiente y encontrara cero filas.
+    // Un test que pasa 20 horas al día y falla 4 es peor que uno que falla siempre: nadie sabe si
+    // lo que rompió fue el cambio o el reloj.
+    const hoy = (await db.one<{ d: string }>(`SELECT CURRENT_DATE::text AS d`))!.d;
     const delDia = await platform.auditLog({ from: hoy, to: hoy, limit: 200 });
     // Todo lo de esta suite ocurrió hoy: si `to` se aplicara con `<=` sobre el timestamp, esto
     // daría cero — el error clásico de los filtros de fecha «hasta».
