@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEV_API_URL, apiErrorTitle, resolveDirectApiUrl } from './api';
+import { DEV_API_URL, apiErrorTitle, fileUrl, resolveDirectApiUrl } from './api';
 
 /**
  * El motivo de error que ve el usuario.
@@ -82,5 +82,36 @@ describe('URL interna de la API', () => {
 
   it('recorta los espacios accidentales alrededor del valor', () => {
     expect(resolveDirectApiUrl('  http://127.0.0.1:3001/v1  ')).toBe('http://127.0.0.1:3001/v1');
+  });
+});
+
+/**
+ * URL de archivo: SIEMPRE del mismo origen.
+ *
+ * El bug que cubre se veía como «la foto está pero en la ficha del animal sale rota». La ficha es
+ * un Server Component, así que `API_URL` resolvía ahí a la URL interna de la API y esa dirección
+ * quedaba escrita en el `src`; el listado y la galería, que son de cliente, resolvían a `/api/cw` y
+ * se veían bien. De ahí la confusión: la misma foto aparecía en un lado y no en el otro.
+ *
+ * En desarrollo pasaba desapercibido —`localhost:3001` es alcanzable desde el navegador— y se
+ * volvía permanente en producción al apuntar la URL interna al bucle local.
+ */
+describe('URL de archivo firmada', () => {
+  const ref = { file_id: 'abc-123', token: 'tok', mime: 'image/png' };
+
+  it('es del MISMO ORIGEN: nunca una URL absoluta a la API', () => {
+    const url = fileUrl(ref)!;
+    expect(url.startsWith('/api/cw/')).toBe(true);
+    // La aserción que importa: si vuelve a colarse un `http://…`, el navegador no llega.
+    expect(url).not.toMatch(/^https?:\/\//);
+  });
+
+  it('lleva el id y el token firmado', () => {
+    expect(fileUrl(ref)).toBe('/api/cw/files/abc-123/content?t=tok');
+  });
+
+  it('sin referencia devuelve null (para poder dibujar el marcador de «sin foto»)', () => {
+    expect(fileUrl(null)).toBeNull();
+    expect(fileUrl({ file_id: '', token: 't', mime: 'image/png' })).toBeNull();
   });
 });

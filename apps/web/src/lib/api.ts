@@ -55,6 +55,17 @@ export const DIRECT_API_URL = resolveDirectApiUrl(process.env.API_INTERNAL_URL, 
 export const API_URL = typeof window === 'undefined' ? DIRECT_API_URL : '/api/cw';
 
 /**
+ * Base que SIEMPRE resuelve el navegador, corra donde corra este código.
+ *
+ * Existe por una asimetría que `API_URL` no puede cubrir: esa constante contesta «¿desde dónde
+ * llamo yo a la API?», y la respuesta cambia según se ejecute en el servidor o en el navegador.
+ * Pero una URL que se ESCRIBE EN EL HTML —el `src` de una foto, el `href` de un documento— no la
+ * pide quien la construye: la pide el navegador, después. Ahí la pregunta correcta es siempre
+ * «¿desde dónde la va a pedir el navegador?», y la respuesta es siempre el proxy del mismo origen.
+ */
+export const BROWSER_API_URL = '/api/cw';
+
+/**
  * Se conserva para no reescribir los ~200 llamados que ya la usan, pero devuelve vacío: la
  * autenticación la resuelve el proxy con la cookie `HttpOnly`. Antes leía el token de
  * `document.cookie` — exactamente lo que se quitó.
@@ -69,10 +80,24 @@ export interface PhotoRef {
   mime: string;
 }
 
-/** URL firmada de un archivo (funciona en `<img>` sin cabecera de auth). */
+/**
+ * URL firmada de un archivo (funciona en `<img>` sin cabecera de auth).
+ *
+ * **Usa `BROWSER_API_URL` y NO `API_URL`, y esa es toda la corrección de un bug real:** la ficha de
+ * un animal es un Server Component, así que `API_URL` resolvía ahí a la URL INTERNA de la API y esa
+ * dirección terminaba escrita en el `src` de la foto. El navegador después intentaba buscarla y no
+ * llegaba: la foto salía rota justo en la ficha, mientras se veía bien en el listado y en la
+ * galería —que son componentes de cliente— y por eso parecía que «la foto está pero no aparece».
+ *
+ * Con la URL interna apuntando al bucle local (`http://127.0.0.1:3001/v1`, que es lo correcto para
+ * que el servidor no salga a internet para hablar consigo mismo) el fallo pasa a ser permanente en
+ * producción: ninguna imagen renderizada del lado del servidor cargaría nunca.
+ *
+ * Lo que sigue: cualquier URL que se ESCRIBA para que la pida el navegador va por acá.
+ */
 export function fileUrl(ref?: PhotoRef | null): string | null {
   if (!ref?.file_id) return null;
-  return `${API_URL}/files/${ref.file_id}/content?t=${ref.token}`;
+  return `${BROWSER_API_URL}/files/${ref.file_id}/content?t=${ref.token}`;
 }
 
 /**
