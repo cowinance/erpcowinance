@@ -5,6 +5,7 @@ import { UploadCloud } from 'lucide-react';
 import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { Field, fieldDescribedBy } from '@/components/Field';
+import { PlanillaGuide } from './PlanillaGuide';
 
 /** Batch devuelto por `POST /imports` (DTO + headers del CSV). */
 export interface ImportBatch {
@@ -92,7 +93,12 @@ export function UploadStep({ onUploaded }: { onUploaded: (batch: ImportBatch) =>
   }
 
   return (
-    <div className="rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
+    <>
+      {/* Qué se espera del archivo ANTES de pedirlo: el paso decía cómo tenía que estar guardado
+          pero no qué tenía que decir adentro. */}
+      <PlanillaGuide />
+
+      <div className="rounded-[10px] border border-subtle bg-surface p-6 shadow-[var(--shadow-1)]">
       <Field
         label="Archivo CSV"
         htmlFor="import-file"
@@ -121,6 +127,7 @@ export function UploadStep({ onUploaded }: { onUploaded: (batch: ImportBatch) =>
       <Button className="mt-5" size="md" loading={uploading} disabled={!file} onClick={submit}>
         {uploading ? 'Subiendo…' : 'Subir y continuar'}
       </Button>
-    </div>
+      </div>
+    </>
   );
 }

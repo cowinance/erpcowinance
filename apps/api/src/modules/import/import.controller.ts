@@ -54,6 +54,12 @@ export class ImportController {
     return this.imports.listFields(entityType);
   }
 
+  /** Datos de la planilla de ejemplo (3 segmentos, igual que `fields` → no colisiona con `:id`). */
+  @Get('imports/:entityType/template')
+  template(@Param('entityType') entityType: string) {
+    return this.imports.templateRows(entityType);
+  }
+
   @Get('imports/:id')
   get(@Param('id') id: string) {
     return this.imports.getBatch(id);

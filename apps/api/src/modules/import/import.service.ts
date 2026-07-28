@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { parseCsv } from './csv';
+import { acceptedSexInputs } from '@cowinance/domain';
+import { ORIGINS } from '../herd/animal-write.service';
 import { suggestMapping, DuplicateHeadersError, buildRawRow } from './mapping';
 import { ANIMAL_IMPORT_DESCRIPTOR, REQUIRED_ANIMAL_IMPORT_FIELDS, type AnimalImportField } from '../herd/animal-import-descriptor';
 import { AnimalWriteService, type RowError } from '../herd/animal-write.service';
@@ -137,14 +139,121 @@ export class ImportService {
   /**
    * GET /v1/imports/:entityType/fields — catálogo de campos asignables del
    * descriptor (label + obligatorio), fuente ÚNICA para la UI de mapeo (no se
-   * duplica en el front). Estático y sin tenant; los sinónimos NO se exponen (el
-   * matching es responsabilidad del servidor).
+   * duplica en el front).
+   *
+   * Devuelve además CÓMO SE ESCRIBE cada cosa (O-4), porque la pantalla de importación no explicaba
+   * nada de eso: le pedía al productor subir un archivo diciéndole el formato —UTF-8, comas, 5 MB—
+   * y ni una palabra sobre qué columnas tenía que traer su planilla. Con eso, la única forma de
+   * enterarse de que la caravana también se puede llamar «arete» o de que `H` vale por hembra era
+   * subir el archivo y ver qué rebotaba.
+   *
+   *  - `synonyms`: los encabezados que se auto-mapean. Se exponen a propósito (antes no): el
+   *    matching lo sigue haciendo el servidor, pero ocultar la lista no protegía nada y dejaba al
+   *    productor adivinando cómo titular sus columnas.
+   *  - `accepts`: los valores válidos de los campos con conjunto cerrado, leídos de donde de verdad
+   *    se validan: el sexo del dominio (`acceptedSexInputs`), los orígenes de `AnimalWriteService` y
+   *    las categorías de la BASE. Nada de listas copiadas a mano en la pantalla, que es como una
+   *    ayuda empieza a prometer valores que el importador ya no acepta.
    */
-  listFields(entityType: string): { field: string; label: string; required: boolean }[] {
+  async listFields(entityType: string): Promise<
+    { field: string; label: string; required: boolean; synonyms: string[]; accepts?: string[]; hint?: string }[]
+  > {
     if (entityType !== 'animal') {
       throw new BadRequestException({ code: 'import.invalid_entity_type', title: "entity_type debe ser 'animal'" });
     }
-    return ANIMAL_IMPORT_DESCRIPTOR.fields.map((f) => ({ field: f.field, label: f.label, required: f.required }));
+
+    // `animal_categories` es catálogo GLOBAL (no tiene tenant_id): las mismas para toda finca.
+    const categorias = await this.db.query<{ code: string }>(
+      `SELECT code FROM animal_categories WHERE deleted_at IS NULL ORDER BY code`,
+    );
+    const sexos = acceptedSexInputs().flatMap((g) => g.written);
+
+    const ACCEPTS: Partial<Record<string, string[]>> = {
+      sex: sexos,
+      category_code: categorias.map((c) => c.code),
+      origin: [...ORIGINS],
+    };
+
+    // El sexo necesita decir CUÁL es cuál: una lista plana («f · h · hembra · m · macho») no
+    // distingue las formas de hembra de las de macho, y quien la lea puede escribir cualquiera
+    // creyendo que da igual. El agrupado sale del dominio, así que sigue sin poder mentir.
+    const HINTS: Partial<Record<string, string>> = {
+      sex: acceptedSexInputs()
+        .map((g) => `${g.stored === 'F' ? 'hembra' : 'macho'}: ${g.written.join(', ')}`)
+        .join(' · '),
+    };
+
+    return ANIMAL_IMPORT_DESCRIPTOR.fields.map((f) => ({
+      field: f.field,
+      label: f.label,
+      required: f.required,
+      synonyms: f.synonyms,
+      ...(ACCEPTS[f.field] ? { accepts: ACCEPTS[f.field] } : {}),
+      ...(HINTS[f.field] ? { hint: HINTS[f.field] } : {}),
+    }));
+  }
+
+  /**
+   * GET /v1/imports/:entityType/template — los datos de una planilla de ejemplo (O-4).
+   *
+   * Devuelve DATOS, no un CSV: serializarlo es trabajo de la web, que ya tiene un `toCsv` endurecido
+   * contra inyección de fórmulas y con BOM para que Excel respete los acentos. Escribir el escapado
+   * de CSV una segunda vez acá sería tener dos cosas que pueden diferir.
+   *
+   * Las filas las arma el SERVIDOR porque la coherencia vive acá: cada categoría tiene su sexo
+   * (`vaca` es hembra, `novillo` es macho), y una plantilla que sugiera «hembra, novillo» le enseña
+   * al productor una combinación que el propio importador después le va a rechazar. La primera
+   * versión mezclaba sexo y categoría por separado y salía justo eso.
+   *
+   * Las columnas opcionales van con la celda vacía: muestran el encabezado sin inventar datos. Una
+   * planilla de ejemplo con un lote o una raza puestos por nosotros crea ese lote y esa raza el día
+   * que alguien la sube tal cual, que es exactamente lo que hace medio mundo con una plantilla.
+   */
+  async templateRows(entityType: string): Promise<{ headers: string[]; rows: string[][] }> {
+    if (entityType !== 'animal') {
+      throw new BadRequestException({ code: 'import.invalid_entity_type', title: "entity_type debe ser 'animal'" });
+    }
+
+    const cats = await this.db.query<{ code: string; sex: string | null; min_age_months: number | null }>(
+      `SELECT code, sex, min_age_months FROM animal_categories WHERE deleted_at IS NULL ORDER BY code`,
+    );
+
+    /**
+     * La categoría que le corresponde a un animal de ese sexo y esa edad.
+     *
+     * Se elige por edad y no la primera de la lista porque la primera alfabética era `ternera`, y
+     * una fila que dice «ternera, nacida en 2022» es un animal de cuatro años llamado ternera:
+     * cualquiera que trabaje con hacienda lo ve al toque, y una planilla de ejemplo que se equivoca
+     * en eso no invita a confiar en el resto. Se toma la categoría más específica que el animal ya
+     * alcanzó — la de mayor `min_age_months` que no supere su edad.
+     */
+    const categoriaPara = (sexo: 'F' | 'M', meses: number) => {
+      const posibles = cats.filter((c) => c.sex === sexo && (c.min_age_months ?? 0) <= meses);
+      const elegida = posibles.sort((a, b) => (b.min_age_months ?? 0) - (a.min_age_months ?? 0))[0];
+      return elegida?.code ?? cats.find((c) => c.sex === sexo)?.code ?? cats[0]?.code ?? '';
+    };
+
+    // Tres filas coherentes, con el sexo escrito como lo escribe el productor (H/M): una vaca
+    // adulta, un macho de recría y una hembra joven — el reparto típico de un hato.
+    const ejemplos: { tag: string; sexo: 'H' | 'M'; cat: string; nac: string }[] = [
+      { tag: 'A-101', sexo: 'H', cat: categoriaPara('F', 52), nac: '2022-03-14' },
+      { tag: 'A-102', sexo: 'M', cat: categoriaPara('M', 35), nac: '2023-08-30' },
+      { tag: 'A-103', sexo: 'H', cat: categoriaPara('F', 6), nac: '2025-11-09' },
+    ];
+
+    // Las columnas salen del descriptor, con su primer sinónimo como encabezado: el que el
+    // auto-mapeo reconoce sin que el productor tenga que tocar nada en el paso siguiente.
+    const columnas = ANIMAL_IMPORT_DESCRIPTOR.fields.filter(
+      (f) => f.required || ['birth_date', 'breed', 'lot'].includes(f.field),
+    );
+
+    const celda = (field: string, e: (typeof ejemplos)[number]) =>
+      field === 'tag' ? e.tag : field === 'sex' ? e.sexo : field === 'category_code' ? e.cat : field === 'birth_date' ? e.nac : '';
+
+    return {
+      headers: columnas.map((f) => f.synonyms[0] ?? f.field),
+      rows: ejemplos.map((e) => columnas.map((f) => celda(f.field, e))),
+    };
   }
 
   /** GET /v1/imports/:id — batch del tenant actual (404 si no existe o es ajeno). */

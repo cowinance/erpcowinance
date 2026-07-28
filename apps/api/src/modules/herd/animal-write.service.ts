@@ -76,7 +76,8 @@ export interface GenealogyPair {
   parentId: string;
 }
 
-const ORIGINS = new Set(['born', 'purchased', 'transferred']);
+/** Orígenes aceptados. Exportado para que la ayuda de la importación los MUESTRE sin copiarlos. */
+export const ORIGINS = new Set(['born', 'purchased', 'transferred']);
 
 /** Campos crudos que ambos canales mapean a un alta de animal. */
 export interface RawAnimalRow {

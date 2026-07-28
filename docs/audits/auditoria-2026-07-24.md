@@ -447,7 +447,38 @@ software esté completo.
    Verificado contra la app: 0/4 → 1/4 → 2/4 → 3/4 → 4/4 cargando los datos de verdad, y las dos
    formas del panel en pantalla.
 
-   Falta de este punto: **O-3** datos de ejemplo opcionales, **O-4** importador guiado en la web.
+   **O-4 · Importador guiado — HECHO (27 jul 2026).** El asistente de 5 pasos ya estaba completo y
+   funcionando; lo que faltaba no era mecánica sino GUÍA. El paso «Subir» explicaba el formato del
+   ARCHIVO —UTF-8, comas, 5 MB, encabezados en la primera fila— y ni una palabra sobre su
+   CONTENIDO. Un productor con su planilla de siempre no tenía forma de saber que hacen falta
+   caravana, sexo y categoría; que la caravana también puede titularse `arete`, `chapeta` o
+   `crotal`; que `H` vale por hembra; ni qué categorías existen. La única manera de averiguarlo era
+   subir el archivo y leer qué rebotaba — aprender a fuerza de errores algo que la app ya sabía.
+
+   Ahora, antes de pedir el archivo: **qué columnas hacen falta**, con qué nombres se pueden
+   titular y qué valores aceptan, más una **planilla de ejemplo para descargar**.
+
+   **Todo sale de donde se valida de verdad** — el sexo del dominio (`acceptedSexInputs`), los
+   orígenes de `AnimalWriteService`, las categorías de la base. Nada de listas copiadas en la
+   pantalla: una ayuda con su propia copia de las reglas termina prometiendo algo que el importador
+   ya no acepta, y no hay peor error que el que produce la propia guía. Cuatro tests fijan eso: todo
+   valor anunciado tiene que pasar la validación real.
+
+   **Lo que encontró la verificación.** La primera plantilla armaba cada columna por su lado y salía
+   `A-101, f, novillo` — hembra con categoría de macho castrado, una combinación que el propio
+   importador rechaza. Las filas ahora las arma el servidor, que es donde vive la coherencia (cada
+   categoría tiene su sexo), y la categoría se elige por EDAD: la primera versión decía «ternera,
+   nacida en 2022», un animal de cuatro años llamado ternera. Las columnas opcionales van vacías a
+   propósito: una plantilla con un lote o una raza puestos por nosotros los crea el día que alguien
+   la sube tal cual, que es lo que hace medio mundo con una plantilla de ejemplo.
+
+   El CSV lo serializa la web con el `toCsv` de la casa (anti-inyección de fórmulas + BOM): el
+   backend devuelve datos, no un archivo. Escribir el escapado de CSV una segunda vez serían dos
+   cosas que pueden diferir.
+
+   Verificado bajando la plantilla e importándola tal cual: 3 válidas, 3 creadas, 0 errores.
+
+   Falta de este punto: **O-3** datos de ejemplo opcionales (cargar y borrar un hato de muestra).
 2. **Verificar los planes de facturación end-to-end** con un proveedor de pagos.
 3. **Beta con un socio de diseño** (`docs/product/design-partner-strategy.md`) sobre datos reales:
    es lo único que revela si el modelo de datos aguanta una finca de verdad.

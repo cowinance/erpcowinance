@@ -52,6 +52,22 @@ const ESCRITURAS: Record<string, 'F' | 'M'> = {
   male: 'M',
 };
 
+/**
+ * Las formas aceptadas, para poder MOSTRARLAS.
+ *
+ * Que el importador entienda `H` no sirve de nada si el productor no se entera: la ayuda de la
+ * pantalla de importación se arma con esta lista, así que no puede prometer algo que `parse()` no
+ * acepte ni callarse algo que sí. Agrupadas por el valor que guardan, que es como se explican.
+ */
+export function acceptedSexInputs(): { stored: 'F' | 'M'; written: string[] }[] {
+  return (['F', 'M'] as const).map((stored) => ({
+    stored,
+    written: Object.entries(ESCRITURAS)
+      .filter(([, v]) => v === stored)
+      .map(([k]) => k),
+  }));
+}
+
 export const Sex = {
   /** Construye el sexo; lanza InvalidSex si no es 'F' ni 'M'. */
   of(raw: unknown): Sex {

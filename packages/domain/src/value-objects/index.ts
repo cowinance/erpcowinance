@@ -4,4 +4,4 @@ export type { IdentifierFactory } from './identifier';
 export { TenantId, FarmId, AnimalId, LotId } from './ids';
 export { TagNumber, InvalidTagNumber } from './tag-number';
 export { Weight, InvalidWeight, WEIGHT_SCALE } from './weight';
-export { Sex, InvalidSex } from './sex';
+export { Sex, InvalidSex, acceptedSexInputs } from './sex';

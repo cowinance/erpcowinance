@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Sex, InvalidSex } from './sex';
+import { Sex, InvalidSex, acceptedSexInputs } from './sex';
 import { DomainError } from '../shared/domain-error';
 
 describe('Sex · sexo del animal', () => {
@@ -90,5 +90,29 @@ describe('cómo lo escribe el productor → cómo lo guarda el sistema', () => {
     expect(() => Sex.of('H')).toThrow();
     expect(() => Sex.of('hembra')).toThrow();
     expect(Sex.isValid('H')).toBe(false);
+  });
+});
+
+describe('la lista que se le muestra al productor no puede mentir', () => {
+  it('TODO LO QUE SE ANUNCIA, parse() LO ACEPTA', () => {
+    // El invariante: la ayuda de la pantalla de importación se arma con esta lista. Si anunciara
+    // una forma que `parse()` rechaza, el productor la escribiría y le rebotaría la fila — con la
+    // app diciéndole que estaba bien.
+    for (const { stored, written } of acceptedSexInputs())
+      for (const w of written) expect(Sex.parse(w), `se anuncia '${w}' pero parse() no lo acepta`).toBe(stored);
+  });
+
+  it('y no se calla nada que parse() acepte', () => {
+    // Al revés: una forma aceptada pero no anunciada es una función que nadie va a usar.
+    const anunciadas = acceptedSexInputs().flatMap((g) => g.written);
+    for (const w of ['h', 'f', 'm', 'hembra', 'macho', 'female', 'male'])
+      expect(anunciadas, `parse() acepta '${w}' y la ayuda no lo dice`).toContain(w);
+  });
+
+  it('agrupa por el valor que se guarda', () => {
+    const g = acceptedSexInputs();
+    expect(g.map((x) => x.stored)).toEqual(['F', 'M']);
+    expect(g[0].written).toContain('h');
+    expect(g[1].written).toContain('macho');
   });
 });
