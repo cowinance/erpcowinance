@@ -29,7 +29,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // Sin cookie el middleware ya redirigió; este chequeo cubre el render directo (build, prefetch)
   // sin disparar una llamada que sabemos que va a fallar.
   const haySesion = (await cookies()).get(PLATFORM_COOKIE)?.value;
-  const actor = haySesion ? await adminApi<{ name: string; email: string; role: string }>('/me') : null;
+  const actor = haySesion
+    ? await adminApi<{ name: string; email: string; role: string; actions: string[] }>('/me')
+    : null;
+
+  // ¿Esta persona puede HACER algo, o solo mirar? Se pregunta por las acciones que el backend le
+  // reconoce, no por el nombre del rol: si mañana cambia qué puede hacer un `auditor`, el aviso
+  // sigue diciendo la verdad sin que haya que acordarse de tocarlo acá.
+  const soloLectura = !!actor && (actor.actions?.length ?? 0) === 0;
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -73,11 +80,18 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </div>
         </div>
       </header>
-      {/* Aviso permanente y no descartable: la fase 1 es de solo lectura, y decirlo evita que
-          alguien busque durante diez minutos el botón de suspender una cuenta. */}
-      <div className="border-b border-subtle bg-warning/10 px-6 py-1.5 text-center text-caption text-ink-2">
-        Panel en modo <strong>solo lectura</strong> · las acciones sobre cuentas llegan en la fase 2
-      </div>
+      {/* El aviso decía «las acciones llegan en la fase 2» y quedó MINTIENDO cuando la fase 2 se
+          entregó: el panel ya suspende cuentas, bloquea usuarios y cambia planes. Un cartel fijo
+          que contradice lo que la pantalla hace es peor que no tenerlo — enseña a ignorar los
+          carteles, justo donde el siguiente puede ser importante.
+
+          Ahora solo aparece cuando ES cierto: para un rol sin ninguna acción (`auditor`), que si no
+          se pasaría un rato buscando un botón de suspender que nunca va a ver. */}
+      {soloLectura && (
+        <div className="border-b border-subtle bg-warning/10 px-6 py-1.5 text-center text-caption text-ink-2">
+          Tu rol es de <strong>solo lectura</strong> · podés consultar y auditar, no modificar cuentas
+        </div>
+      )}
       <main className="mx-auto max-w-[1440px] px-6 py-6">{children}</main>
     </div>
   );
