@@ -150,10 +150,10 @@ export class SemenService {
     await this.requireRef('suppliers', body?.supplier_id, 'genetics.supplier_not_found', 'Proveedor no encontrado');
     await this.requireRef('storage_tanks', body?.tank_id, 'genetics.tank_not_found', 'Termo no encontrado');
     const row = await this.db.one<any>(
-      `INSERT INTO semen_batches (tenant_id, sire_id, sire_name_external, breed_id, supplier_id, batch_code, tank_id, canister, acquired_date, unit_cost, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, tank_id, canister AS legacy_location, acquired_date, unit_cost::float AS unit_cost`,
-      [this.db.tenant, body?.sire_id ?? null, body?.sire_name_external ?? null, body?.breed_id ?? null, body?.supplier_id ?? null, code, body?.tank_id ?? null, body?.canister ?? null, body?.acquired_date ?? null, body?.unit_cost ?? null, this.db.user],
+      `INSERT INTO semen_batches (tenant_id, sire_id, sire_name_external, breed_id, supplier_id, batch_code, tank_id, canister, acquired_date, unit_cost, expiry_date, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, tank_id, canister AS legacy_location, acquired_date, unit_cost::float AS unit_cost, expiry_date::text AS expiry_date`,
+      [this.db.tenant, body?.sire_id ?? null, body?.sire_name_external ?? null, body?.breed_id ?? null, body?.supplier_id ?? null, code, body?.tank_id ?? null, body?.canister ?? null, body?.acquired_date ?? null, body?.unit_cost ?? null, body?.expiry_date ?? null, this.db.user],
     );
     // Comprar una partida es comprar pajuelas: se dan de alta como unidades sin ubicar, porque la
     // caja llegó y todavía nadie abrió el termo para cargarlas.
@@ -181,7 +181,9 @@ export class SemenService {
       await this.requireRef('storage_tanks', body.tank_id, 'genetics.tank_not_found', 'Termo no encontrado');
       set('tank_id', body.tank_id ?? null);
     }
-    for (const f of ['sire_name_external', 'canister', 'acquired_date', 'unit_cost'] as const) {
+    // `expiry_date` en la lista: sin esto la columna existía y el dominio la evaluaba, pero NADA
+    // podía cargarla — la mitad de la función quedaba inalcanzable desde la app.
+    for (const f of ['sire_name_external', 'canister', 'acquired_date', 'unit_cost', 'expiry_date'] as const) {
       if (body?.[f] !== undefined) set(f, body[f] ?? null);
     }
     if (!sets.length) throw new BadRequestException({ code: 'genetics.no_changes', title: 'Nada para actualizar' });

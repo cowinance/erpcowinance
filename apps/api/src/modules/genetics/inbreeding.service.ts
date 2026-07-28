@@ -40,6 +40,15 @@ export interface MatingInbreeding {
 /** Generaciones hacia atrás que se cargan. Ver el porqué en el comentario de la clase. */
 const GENERATIONS = 6;
 
+/**
+ * La categoría que identifica a un reproductor macho.
+ *
+ * El modelo no guarda si un animal está castrado: un novillo se distingue de un toro solo por su
+ * categoría. Mientras eso sea así, éste es el único criterio disponible — y es el mismo que usa el
+ * modo manga para armar su lista de toros.
+ */
+const BULL_CATEGORY_CODE = 'toro';
+
 @Injectable()
 export class InbreedingService {
   constructor(private readonly db: DbService) {}
@@ -115,8 +124,17 @@ export class InbreedingService {
            SELECT value FROM animal_identifiers x
             WHERE x.animal_id = a.id AND x.type = 'visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL
             ORDER BY x.created_at DESC LIMIT 1) ai ON true
-        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.sex = 'M' AND a.status = 'active'`,
-      [this.db.tenant],
+         JOIN animal_categories cat ON cat.id = a.category_id AND cat.deleted_at IS NULL
+        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.status = 'active'
+          -- REPRODUCTORES, no «machos». Filtrar por sexo ofrecía novillos —que están castrados— y
+          -- terneros de tres meses como candidatos para servir. En este modelo lo único que
+          -- distingue a un toro de un novillo es la CATEGORÍA: no hay marca de castración.
+          --
+          -- Es además el mismo conjunto que ofrece el modo manga (/animals?category=toro): si las
+          -- dos pantallas mostraran listas distintas de «los toros de la finca», ninguna sería
+          -- creíble.
+          AND cat.code = $2`,
+      [this.db.tenant, BULL_CATEGORY_CODE],
     );
     if (!toros.length) return { dam_id: damId, sires: [] };
 

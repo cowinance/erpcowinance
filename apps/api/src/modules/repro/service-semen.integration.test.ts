@@ -150,6 +150,27 @@ describe('repro — consumo de pajuela en inseminación', () => {
     await expect(semen.recordQualityCheck(batch.id, { motility_pct: 'muy buena' })).rejects.toMatchObject({ status: 400 });
   });
 
+  it('EL VENCIMIENTO SE PUEDE CARGAR Y BLOQUEA', async () => {
+    // La columna existía, el dominio la evaluaba… y `create` no la escribía: la mitad de la función
+    // era inalcanzable desde la app. Se descubrió auditando, no testeando — el test del dominio
+    // pasaba porque le pasaban la fecha a mano.
+    const batch: any = await semen.create({ batch_code: 'AI-VENC', sire_name_external: 'Toro R', straws_available: 3, expiry_date: '2020-01-01' });
+    const b: any = await semen.get(batch.id);
+    expect(b.expiry_date, 'el vencimiento no se guardó').toBe('2020-01-01');
+    expect(b.usability.blocks).toBe(true);
+    expect(b.usability.reasons[0]).toContain('sigue siendo buena'); // no dice que el semen esté malo
+
+    await expect(repro.service(hembraId, { method: 'ai', semen_batch_id: batch.id })).rejects.toMatchObject({
+      response: { code: 'service.blocked', reasons: ['semen_quality'] },
+    });
+  });
+
+  it('el vencimiento también se puede corregir después', async () => {
+    const batch: any = await semen.create({ batch_code: 'AI-VENC2', sire_name_external: 'Toro Q', straws_available: 1 });
+    await semen.update(batch.id, { expiry_date: '2030-06-01' });
+    expect(((await semen.get(batch.id)) as any).expiry_date).toBe('2030-06-01');
+  });
+
   it('saldo insuficiente → 403 y NO queda el evento (rollback lógico: consumo antes del insert)', async () => {
     const batch: any = await semen.create({ batch_code: 'AI-0', sire_name_external: 'Toro Y', straws_available: 0 });
     await expect(repro.service(hembraId, { method: 'ai', semen_batch_id: batch.id })).rejects.toMatchObject({ status: 403 });
