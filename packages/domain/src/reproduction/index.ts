@@ -7,3 +7,6 @@ export { computeBreedingKpis } from './breeding-kpis';
 export type { BreedingKpisInput, BreedingKpis } from './breeding-kpis';
 export { REPRO_STATUSES, DEFAULT_REPRO_CONFIG, computeReproStatus } from './repro-status';
 export type { ReproStatus, ReproConfig, ReproFacts, ReproState } from './repro-status';
+
+export { computeSyncResponse, MIN_SYNC_SAMPLE } from './synchronization';
+export type { SyncResponse, SyncResponseInput } from './synchronization';

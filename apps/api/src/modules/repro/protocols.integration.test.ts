@@ -11,6 +11,7 @@ import { EmbryosService } from '../genetics/embryos.service';
 import type { WeaningService } from './weaning.service';
 import type { TaskService } from '../tasks/task.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
+import { ProtocolService } from './protocol.service';
 
 /**
  * Integración del CRUD de protocolos reproductivos (R-2.a): alta con validación de dominio,
@@ -19,6 +20,7 @@ import { InbreedingService } from '../genetics/inbreeding.service';
 describe('repro protocolos — CRUD', () => {
   let db: DbService;
   let repro: ReproService;
+  let protocols: ProtocolService;
   let originalCwd: string;
   let tmp: string;
 
@@ -30,6 +32,7 @@ describe('repro protocolos — CRUD', () => {
     db = new DbService();
     await db.onModuleInit();
     repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
+    protocols = new ProtocolService(db, {} as TaskService, new ServicePlanService(db, new StrawsService(db)), repro);
   }, 120_000);
 
   afterAll(() => {
@@ -39,32 +42,32 @@ describe('repro protocolos — CRUD', () => {
 
   it('crea, valida, lista, edita, archiva y maneja errores', async () => {
     // Alta: pasos normalizados (action recortada), is_active por defecto.
-    const created = await repro.createProtocol({ name: '  IATF 10 días  ', steps: [{ day: 0, action: ' Implante ' }, { day: 8, action: 'Retiro + PGF' }, { day: 10, action: 'IATF' }] });
+    const created = await protocols.createProtocol({ name: '  IATF 10 días  ', steps: [{ day: 0, action: ' Implante ' }, { day: 8, action: 'Retiro + PGF' }, { day: 10, action: 'IATF' }] });
     expect(created.name).toBe('IATF 10 días');
     expect(created.is_active).toBe(true);
     expect(created.steps).toEqual([{ day: 0, action: 'Implante' }, { day: 8, action: 'Retiro + PGF' }, { day: 10, action: 'IATF' }]);
 
     // Validación: pasos inválidos y nombre vacío → BadRequest.
-    await expect(repro.createProtocol({ name: 'x', steps: [{ day: -1, action: 'x' }] })).rejects.toMatchObject({ status: 400 });
-    await expect(repro.createProtocol({ name: '   ', steps: [] })).rejects.toMatchObject({ status: 400 });
+    await expect(protocols.createProtocol({ name: 'x', steps: [{ day: -1, action: 'x' }] })).rejects.toMatchObject({ status: 400 });
+    await expect(protocols.createProtocol({ name: '   ', steps: [] })).rejects.toMatchObject({ status: 400 });
 
     // Listado incluye el creado.
-    const list = await repro.listProtocols();
+    const list = await protocols.listProtocols();
     expect(list.find((p: any) => p.id === created.id)).toBeTruthy();
 
     // Edición: renombra, cambia pasos y archiva (is_active=false).
-    const updated = await repro.updateProtocol(created.id, { name: 'IATF 9 días', steps: [{ day: 0, action: 'A' }], is_active: false });
+    const updated = await protocols.updateProtocol(created.id, { name: 'IATF 9 días', steps: [{ day: 0, action: 'A' }], is_active: false });
     expect(updated.name).toBe('IATF 9 días');
     expect(updated.is_active).toBe(false);
     expect(updated.steps).toEqual([{ day: 0, action: 'A' }]);
 
     // Baja lógica: desaparece del listado.
-    await repro.deleteProtocol(created.id);
-    const after = await repro.listProtocols();
+    await protocols.deleteProtocol(created.id);
+    const after = await protocols.listProtocols();
     expect(after.find((p: any) => p.id === created.id)).toBeFalsy();
 
     // Errores sobre inexistente / eliminado.
-    await expect(repro.updateProtocol(created.id, { name: 'z' })).rejects.toMatchObject({ status: 404 });
-    await expect(repro.deleteProtocol(created.id)).rejects.toMatchObject({ status: 404 });
+    await expect(protocols.updateProtocol(created.id, { name: 'z' })).rejects.toMatchObject({ status: 404 });
+    await expect(protocols.deleteProtocol(created.id)).rejects.toMatchObject({ status: 404 });
   });
 });

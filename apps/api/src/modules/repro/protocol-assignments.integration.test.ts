@@ -13,6 +13,7 @@ import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import type { WeaningService } from './weaning.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
+import { ProtocolService } from './protocol.service';
 
 /**
  * Integración de la asignación de protocolos (R-2.b.1): asignar a un lote genera UNA tarea por
@@ -22,6 +23,7 @@ import { InbreedingService } from '../genetics/inbreeding.service';
 describe('repro asignaciones de protocolo', () => {
   let db: DbService;
   let repro: ReproService;
+  let protocols: ProtocolService;
   let t: string;
   let farmId: string;
   let speciesId: string;
@@ -42,6 +44,7 @@ describe('repro asignaciones de protocolo', () => {
     db = new DbService();
     await db.onModuleInit();
     repro = new ReproService(db, {} as WeaningService, new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
+    protocols = new ProtocolService(db, new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), new ServicePlanService(db, new StrawsService(db)), repro);
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
@@ -55,13 +58,13 @@ describe('repro asignaciones de protocolo', () => {
   });
 
   it('asigna → 1 tarea por paso con due_date correcto y animal_count; cancelar cancela todo', async () => {
-    const proto = await repro.createProtocol({ name: 'IATF asign', steps: [{ day: 0, action: 'Implante' }, { day: 8, action: 'Retiro' }, { day: 10, action: 'IATF' }] });
+    const proto = await protocols.createProtocol({ name: 'IATF asign', steps: [{ day: 0, action: 'Implante' }, { day: 8, action: 'Retiro' }, { day: 10, action: 'IATF' }] });
     const lot = await mkLot(`Lote asign ${Date.now()}`);
     await mkAnimal(vaca, lot);
     await mkAnimal(vaca, lot);
     await mkAnimal(novillo, lot); // no-vientre → no cuenta
 
-    const res = await repro.assignProtocol({ protocol_id: proto.id, lot_id: lot, start_date: '2027-05-01' });
+    const res = await protocols.assignProtocol({ protocol_id: proto.id, lot_id: lot, start_date: '2027-05-01' });
     expect(res.assignment.animal_count).toBe(2);
     expect(res.tasks_created).toBe(3);
 
@@ -75,22 +78,22 @@ describe('repro asignaciones de protocolo', () => {
     expect(tasks[0].title).toContain('2 vientres');
 
     // Cancelar → asignación canceled + tareas pendientes canceladas.
-    const cancel = await repro.cancelAssignment(res.assignment.id);
+    const cancel = await protocols.cancelAssignment(res.assignment.id);
     expect(cancel.canceled_tasks).toBe(3);
     const after = await db.query<any>(`SELECT status FROM tasks WHERE tenant_id=$1 AND related_id=$2`, [t, res.assignment.id]);
     expect(after.every((x: any) => x.status === 'canceled')).toBe(true);
-    const list = await repro.listAssignments();
+    const list = await protocols.listAssignments();
     expect(list.find((a: any) => a.id === res.assignment.id)?.status).toBe('canceled');
   });
 
   it('objetivo vacío → 400; errores de validación', async () => {
-    const empty = await repro.createProtocol({ name: 'Sin pasos', steps: [] });
+    const empty = await protocols.createProtocol({ name: 'Sin pasos', steps: [] });
     const lot = await mkLot(`Lote vacío ${Date.now()}`);
     // Lote sin vientres → no hay objetivo → 400 (antes creaba una asignación vacía).
-    await expect(repro.assignProtocol({ protocol_id: empty.id, lot_id: lot, start_date: '2027-06-01' })).rejects.toMatchObject({ status: 400 });
+    await expect(protocols.assignProtocol({ protocol_id: empty.id, lot_id: lot, start_date: '2027-06-01' })).rejects.toMatchObject({ status: 400 });
 
-    await expect(repro.assignProtocol({ protocol_id: empty.id, lot_id: lot })).rejects.toMatchObject({ status: 400 });
-    await expect(repro.assignProtocol({ protocol_id: '00000000-0000-0000-0000-000000000000', lot_id: lot, start_date: '2027-06-01' })).rejects.toMatchObject({ status: 404 });
-    await expect(repro.cancelAssignment('00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({ status: 404 });
+    await expect(protocols.assignProtocol({ protocol_id: empty.id, lot_id: lot })).rejects.toMatchObject({ status: 400 });
+    await expect(protocols.assignProtocol({ protocol_id: '00000000-0000-0000-0000-000000000000', lot_id: lot, start_date: '2027-06-01' })).rejects.toMatchObject({ status: 404 });
+    await expect(protocols.cancelAssignment('00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({ status: 404 });
   });
 });

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
+import { computeSyncResponse } from '@cowinance/domain';
 
 /**
  * Reportes reproductivos (Reproducción E5). KPIs de período (concepción, servicios/concepción,
@@ -22,6 +23,52 @@ export class ReproReportsService {
     const toD = to ? String(to).slice(0, 10) : await this.db.today();
     const fromD = from ? String(from).slice(0, 10) : addFarmDays(toD, -365);
     return [fromD, toD];
+  }
+
+  /**
+   * Cuántas de las receptoras preparadas respondieron a la sincronización.
+   *
+   * Es lo que dice cuántas hay que sincronizar la próxima vez para colocar los embriones que se
+   * tienen. Sin este número el productor prepara vacas a ciegas: si responde la mitad y sincroniza
+   * veinte para veinte embriones, diez se quedan un año más en el termo.
+   *
+   * El denominador son TODAS las revisadas —no solo las que fallaron—, porque una transferencia se
+   * anota sola como respuesta afirmativa: no se puede transferir sin cuerpo lúteo.
+   */
+  async synchronization(fromRaw?: string, toRaw?: string) {
+    const [from, to] = await this.range(fromRaw, toRaw);
+    const fila = await this.db.one<{ checked: number; responded: number }>(
+      `SELECT count(*)::int AS checked,
+              count(*) FILTER (WHERE (payload->>'responded')::boolean)::int AS responded
+         FROM animal_events
+        WHERE tenant_id = $1 AND deleted_at IS NULL AND event_type = 'synchronization_check'
+          AND occurred_at::date BETWEEN $2::date AND $3::date`,
+      [this.db.tenant, from, to],
+    );
+
+    // Las que no respondieron, con nombre: el productor quiere saber CUÁLES para mirarlas —condición
+    // corporal, si estaban en anestro, si conviene volver a sincronizarlas—.
+    const sinRespuesta = await this.db.query<any>(
+      `SELECT e.animal_id, ai.value AS tag, a.name, e.occurred_at::date::text AS fecha
+         FROM animal_events e
+         JOIN animals a ON a.id = e.animal_id AND a.deleted_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT value FROM animal_identifiers x
+            WHERE x.animal_id = e.animal_id AND x.type='visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL
+            ORDER BY x.created_at DESC LIMIT 1) ai ON true
+        WHERE e.tenant_id = $1 AND e.deleted_at IS NULL AND e.event_type = 'synchronization_check'
+          AND (e.payload->>'responded')::boolean IS NOT TRUE
+          AND e.occurred_at::date BETWEEN $2::date AND $3::date
+        ORDER BY e.occurred_at DESC`,
+      [this.db.tenant, from, to],
+    );
+
+    return {
+      from,
+      to,
+      ...computeSyncResponse({ checked: fila?.checked ?? 0, responded: fila?.responded ?? 0 }),
+      not_responded: sinRespuesta,
+    };
   }
 
   /** KPIs reproductivos del período: servicios, concepción, partos (vivos/muertos), abortos, destetes, intervalos. */

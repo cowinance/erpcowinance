@@ -11,6 +11,8 @@ import { EmbryosService } from '../genetics/embryos.service';
 import type { WeaningService } from './weaning.service';
 import type { TaskService } from '../tasks/task.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
+import { ProtocolService } from './protocol.service';
+import { ReproDashboardService } from './repro-dashboard.service';
 
 /**
  * Integración del estado reproductivo RICO (Reproducción E1): `herdStatus` deriva el estado por
@@ -21,6 +23,7 @@ import { InbreedingService } from '../genetics/inbreeding.service';
 describe('repro.herdStatus — estado rico + días abiertos', () => {
   let db: DbService;
   let repro: ReproService;
+  let panel: ReproDashboardService;
   let t: string;
   let farmId: string;
   let speciesId: string;
@@ -54,6 +57,7 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
     db = new DbService();
     await db.onModuleInit();
     repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
+    panel = new ReproDashboardService(repro, new ProtocolService(db, {} as TaskService, new ServicePlanService(db, new StrawsService(db)), repro));
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
@@ -126,7 +130,7 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
   it('dashboard compone buckets: diagnóstico pendiente + abiertas críticas + KPIs', async () => {
     const vDiag = await mkAnimal(vaca); await service(vDiag, 50); // diagnóstico pendiente
     const vOpen2 = await mkAnimal(vaca); await calving(vOpen2, 140); // abierta crítica
-    const d: any = await repro.reproDashboard();
+    const d: any = await panel.reproDashboard();
     expect(d.kpis).toBeTruthy();
     expect(d.counts.total).toBeGreaterThan(0);
     expect(d.diagnosis_pending.some((r: any) => r.animal_id === vDiag)).toBe(true);

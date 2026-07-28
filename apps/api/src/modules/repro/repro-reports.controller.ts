@@ -30,6 +30,12 @@ export class ReproReportsController {
     return this.reports.repeatBreeders();
   }
 
+  /** Respuesta a la sincronización: cuántas receptoras preparar para colocar un embrión. */
+  @Get('reproduction/reports/synchronization')
+  synchronization(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.reports.synchronization(from, to);
+  }
+
   @Get('reproduction/reports/diagnosis-pending')
   diagnosisPending() {
     return this.reports.diagnosisPending();

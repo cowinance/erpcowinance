@@ -284,9 +284,10 @@ function TransferForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) 
   }
 
   async function noRespondio() {
-    // Queda en la línea de tiempo del animal. Sin esto, la receptora que no respondió no deja rastro
-    // y al final de la jornada no se puede saber cuántas del lote sirvieron.
-    await post(`/animals/${animal.id}/events`, { type: 'note', text: 'Sincronizada sin respuesta: sin cuerpo lúteo, no apta para transferencia' });
+    // Evento PROPIO y no una nota: una nota queda visible en la ficha y es invisible para cualquier
+    // cuenta. Con un tipo propio, al final de la jornada se puede decir cuántas del lote sirvieron —
+    // que es lo que define cuántas receptoras preparar la próxima vez.
+    await post(`/synchronization-checks`, { animal_id: animal.id, responded: false }, false);
     onSaved({ action: 'No respondió', detail: 'sin cuerpo lúteo' });
   }
 
