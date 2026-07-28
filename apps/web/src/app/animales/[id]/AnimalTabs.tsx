@@ -18,6 +18,7 @@ import { EVENT_LABELS, ageFrom, formatDate, formatKg, relativeTime } from '@/lib
 import { WeighingForm } from './WeighingForm';
 import { PhotoGallery } from './PhotoGallery';
 import { IdentifiersManager } from './IdentifiersManager';
+import { MatingSuggestion } from '@/components/MatingSuggestion';
 
 const EVENT_ICON: Record<string, any> = {
   birth: Baby, weighing: Scale, treatment: Stethoscope, vaccination: Syringe,
@@ -84,7 +85,7 @@ export function AnimalTabs({
 
       {tab === 'Resumen' && <ResumenTab animal={animal} timeline={timeline} />}
       {tab === 'Sanidad' && <SanidadTab treatments={treatments} vaccinations={vaccinations} openCases={openCases} animalTag={animal.identifiers?.find((i: any) => i.type === 'visual')?.value} />}
-      {tab === 'Reproducción' && isFemale && <ReproTab status={reproStatus} />}
+      {tab === 'Reproducción' && isFemale && <ReproTab status={reproStatus} animalId={animal.id} />}
       {tab === 'Movimientos' && <MovimientosTab movements={movements} daysInLot={overview?.days_in_current_lot} lotName={animal.lot_name} paddockName={animal.paddock_name} />}
       {tab === 'Genealogía' && <GenealogiaTab animal={animal} genealogy={genealogy} milk={overview?.production?.milk_30d} calvings={overview?.production?.calvings} />}
     </div>
@@ -234,7 +235,7 @@ function SanidadTab({ treatments, vaccinations, openCases, animalTag }: { treatm
   );
 }
 
-function ReproTab({ status }: { status: any }) {
+function ReproTab({ status, animalId }: { status: any; animalId: string }) {
   if (!status) {
     return <Card><p className="py-4 text-center text-body text-ink-3">Este animal no es un vientre activo (o no hay datos reproductivos).</p></Card>;
   }
@@ -262,6 +263,9 @@ function ReproTab({ status }: { status: any }) {
           </div>
         ))}
       </dl>
+      {/* La pregunta que sigue a «lista para servicio: sí». Antes había que ir a otra pantalla —o
+          elegir mal y enterarse cuando el servicio rebotaba por consanguinidad. */}
+      <MatingSuggestion damId={animalId} />
     </Card>
   );
 }

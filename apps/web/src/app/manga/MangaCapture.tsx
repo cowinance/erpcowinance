@@ -11,8 +11,9 @@
  *  - Reproducción → POST /animals/:id/heats|services + /pregnancy-diagnoses.
  * El modo Pesaje vive en page.tsx (con validateWeighing). Idempotency-Key en los guardados.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
+import { fetchMatingCandidates, type MatingCandidate } from '@/lib/mating';
 
 export interface MangaAnimal {
   id: string;
@@ -234,11 +235,36 @@ function MoveForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
   );
 }
 
+/**
+ * Los toros ordenados por cuán poco emparentados están con la vaca; los que no convienen, al final.
+ *
+ * Sin el dato (sin señal, o mientras carga) se devuelve el orden original: el selector tiene que
+ * funcionar igual, con el animal ya encerrado.
+ */
+function ordenarPorParentesco(bulls: any[], parentesco: Map<string, MatingCandidate> | null): any[] {
+  if (!parentesco) return bulls;
+  return [...bulls].sort((a, b) => (parentesco.get(a.id)?.f ?? 0) - (parentesco.get(b.id)?.f ?? 0));
+}
+
 function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
   const [action, setAction] = useState<'celo' | 'servicio' | 'diagnostico' | null>(null);
   const [method, setMethod] = useState('ai');
   const [sireId, setSireId] = useState('');
   const [result, setResult] = useState('pregnant');
+  const [parentesco, setParentesco] = useState<Map<string, MatingCandidate> | null>(null);
+
+  // El parentesco de cada toro con ESTA vaca, en una sola consulta y solo cuando se elige
+  // «servicio»: en la manga el animal está encerrado esperando, y no se paga una consulta que
+  // quizás no se use. Si falla —en el corral puede no haber señal— el selector queda como estaba:
+  // una pantalla de captura no se rompe porque falló un dato de apoyo.
+  useEffect(() => {
+    if (action !== 'servicio' || animal.sex !== 'F' || parentesco) return;
+    void fetchMatingCandidates(animal.id).then((c) => {
+      if (c) setParentesco(new Map(c.map((x) => [x.sire_id, x])));
+    });
+  }, [action, animal.id, animal.sex, parentesco]);
+
+  const elegido = sireId ? parentesco?.get(sireId) : undefined;
 
   if (animal.sex !== 'F') {
     return (
@@ -285,10 +311,28 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
             ))}
           </div>
           {method === 'natural' && (
+            <>
             <select value={sireId} onChange={(e) => setSireId(e.target.value)} className={inputCls + ' h-12 text-[18px]'}>
               <option value="">Sin toro</option>
-              {catalogs.bulls.map((b: any) => <option key={b.id} value={b.id}>{b.tag ?? b.id.slice(0, 6)}{b.name ? ` — ${b.name}` : ''}</option>)}
+              {/* Los que no convienen van al FINAL y con el porcentaje a la vista. No se esconden:
+                  el productor tiene ese toro en el potrero y necesita entender por qué no. */}
+              {ordenarPorParentesco(catalogs.bulls, parentesco).map((b: any) => {
+                const p = parentesco?.get(b.id);
+                const etiqueta = `${b.tag ?? b.id.slice(0, 6)}${b.name ? ` — ${b.name}` : ''}`;
+                return (
+                  <option key={b.id} value={b.id}>
+                    {etiqueta}
+                    {p ? (p.blocks ? `  ⚠ ${p.f_pct}% parentesco` : p.f_pct > 0 ? `  · ${p.f_pct}%` : '') : ''}
+                  </option>
+                );
+              })}
             </select>
+            {elegido?.blocks && (
+              <div className="rounded-lg bg-[#ef4444]/15 px-3 py-2 text-[17px] font-bold text-[#f87171]">
+                Parentesco {elegido.f_pct}% — el servicio se va a rechazar por consanguinidad.
+              </div>
+            )}
+            </>
           )}
         </div>
       )}
