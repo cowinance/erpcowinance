@@ -24,8 +24,19 @@ export class EmbryosService {
   async list() {
     const [filas, saldos] = await Promise.all([
       this.db.query<any>(
-        `SELECT id, donor_dam_id, sire_id, semen_batch_id, stage, grade, production_method, tank_id, created_date
-         FROM embryos WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_date DESC NULLS LAST`,
+        // Con las caravanas de donante y toro: en el corral, elegir un embrión por su UUID no es
+        // elegir. Lo que identifica a un embrión para quien lo va a transferir es de qué vaca y de
+        // qué toro salió.
+        `SELECT e.id, e.donor_dam_id, e.sire_id, e.semen_batch_id, e.stage, e.grade, e.production_method,
+                e.tank_id, e.created_date,
+                COALESCE(d.name, dtag.value) AS donor_name,
+                COALESCE(sa.name, stag.value) AS sire_name
+           FROM embryos e
+           LEFT JOIN animals d  ON d.id  = e.donor_dam_id AND d.deleted_at IS NULL
+           LEFT JOIN animals sa ON sa.id = e.sire_id      AND sa.deleted_at IS NULL
+           LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = e.donor_dam_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) dtag ON true
+           LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = e.sire_id      AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) stag ON true
+          WHERE e.tenant_id=$1 AND e.deleted_at IS NULL ORDER BY e.created_date DESC NULLS LAST`,
         [this.db.tenant],
       ),
       this.straws.countsByOwner('embryo_id'),

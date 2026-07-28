@@ -16,7 +16,7 @@ import { API_URL, authHeaders, apiErrorTitle } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { MangaCapture, type MangaMode } from './MangaCapture';
 
-const MODES: MangaMode[] = ['Pesaje', 'Revisión', 'Nota', 'Tratamiento', 'Vacunación', 'Movimiento', 'Reproducción'];
+const MODES: MangaMode[] = ['Pesaje', 'Revisión', 'Nota', 'Tratamiento', 'Vacunación', 'Movimiento', 'Reproducción', 'Transferencia'];
 
 interface Animal {
   id: string;
@@ -129,6 +129,7 @@ export default function MangaPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [bulls, setBulls] = useState<any[]>([]);
   const [semenBatches, setSemenBatches] = useState<any[]>([]);
+  const [embryos, setEmbryos] = useState<any[]>([]);
   const [startedAt, setStartedAt] = useState<number>(0);
   const [records, setRecords] = useState<SessionRecord[]>([]);
   const [errors, setErrors] = useState(0);
@@ -181,6 +182,12 @@ export default function MangaPage() {
       .then((r) => r.json())
       .then((d) => setSemenBatches(Array.isArray(d) ? d.filter((b: any) => (b.straws_available ?? 0) > 0) : []))
       .catch(() => setSemenBatches([]));
+    // Embriones para el modo Transferencia: se cargan al abrir la sesión porque en el corral puede
+    // no haber señal, y un día de transferencias no se puede quedar esperando una consulta.
+    fetch(`${API_URL}/genetics/embryos`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setEmbryos(Array.isArray(d) ? d.filter((e: any) => (e.straws_available ?? 0) > 0) : []))
+      .catch(() => setEmbryos([]));
   }, []);
 
   useEffect(() => {
@@ -667,7 +674,7 @@ export default function MangaPage() {
                 <MangaCapture
                   animal={animal}
                   mode={mode}
-                  catalogs={{ products, lots, bulls, semenBatches }}
+                  catalogs={{ products, lots, bulls, semenBatches, embryos }}
                   onSaved={(rec) => {
                     soundSaved();
                     setRecords((r) => [{ key: crypto.randomUUID(), tag: animal.tag, action: rec.action, detail: rec.detail, at: Date.now(), status: 'saved' }, ...r]);

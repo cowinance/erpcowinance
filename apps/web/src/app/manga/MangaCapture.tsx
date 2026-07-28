@@ -27,7 +27,7 @@ export interface MangaAnimal {
   expected_due_date?: string | null;
 }
 
-export type MangaMode = 'Pesaje' | 'Revisión' | 'Nota' | 'Tratamiento' | 'Vacunación' | 'Movimiento' | 'Reproducción';
+export type MangaMode = 'Pesaje' | 'Revisión' | 'Nota' | 'Tratamiento' | 'Vacunación' | 'Movimiento' | 'Reproducción' | 'Transferencia';
 
 interface Catalogs {
   products: any[];
@@ -35,6 +35,8 @@ interface Catalogs {
   bulls: { id: string; tag?: string; name?: string }[];
   /** Partidas de semen CON pajuelas disponibles: es de donde salen el toro y el descuento en una IA. */
   semenBatches?: { id: string; batch_code: string; sire_id: string | null; sire_tag?: string | null; sire_name_external?: string | null; straws_available: number }[];
+  /** Embriones con pajuelas disponibles, con de qué vaca y qué toro salieron. */
+  embryos?: { id: string; donor_name: string | null; sire_name: string | null; stage: string | null; grade: string | null; straws_available: number }[];
 }
 
 const NOTE_TEMPLATES = ['cojea', 'flaco', 'revisar ojo', 'revisar ubre', 'agresivo', 'sin novedad'];
@@ -85,6 +87,7 @@ export function MangaCapture({
   if (mode === 'Vacunación') return <VaccineForm animal={animal} catalogs={catalogs} busy={busy} post={post} onSaved={onSaved} onCancel={onCancel} />;
   if (mode === 'Movimiento') return <MoveForm animal={animal} catalogs={catalogs} busy={busy} post={post} onSaved={onSaved} onCancel={onCancel} />;
   if (mode === 'Reproducción') return <ReproForm animal={animal} catalogs={catalogs} busy={busy} post={post} onSaved={onSaved} onCancel={onCancel} />;
+  if (mode === 'Transferencia') return <TransferForm animal={animal} catalogs={catalogs} busy={busy} post={post} onSaved={onSaved} onCancel={onCancel} />;
   return null;
 }
 
@@ -232,6 +235,94 @@ function MoveForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
       <button onClick={save} disabled={busy || !dest} className={`${bigBtn} ${hasAlerts && !confirmed ? 'bg-[#facc15]' : 'bg-[#4ade80]'} text-black`}>
         {hasAlerts && !confirmed ? 'CONFIRMAR Y MOVER' : 'MOVER Y SIGUIENTE'}
       </button>
+      <CancelLink onCancel={onCancel} />
+    </>
+  );
+}
+
+/**
+ * Transferencia de embrión en la manga.
+ *
+ * **Por qué es un modo propio y no una acción más de Reproducción.** Un día de transferencias es un
+ * lote entero de receptoras pasando por el brete, una atrás de otra. Con el modo fijado, cada animal
+ * son dos toques; como sub-acción habría que volver a elegir «transferencia» en cada uno.
+ *
+ * **Por qué la receptora se elige acá y no se planifica.** Se sincroniza un lote pero no todas
+ * responden: la que no formó cuerpo lúteo no sirve, y eso recién se sabe palpando, con el animal
+ * encerrado. Por eso el embrión se asigna en el momento — y por eso hay un botón para dejar
+ * registrada a la que no respondió, que si no se pierde: es la mitad de la información de cómo
+ * anduvo la sincronización.
+ *
+ * **Y por qué acá NO se muestra consanguinidad.** La receptora gesta, no hereda: el apareamiento
+ * —donante × toro— ya ocurrió cuando se armó el embrión. Un aviso de parentesco entre ella y el toro
+ * sería ruido que enseña algo falso.
+ */
+function TransferForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
+  // El último embrión usado queda elegido para el animal siguiente: en una jornada se transfiere el
+  // mismo lote a muchas receptoras, y volver a buscarlo en cada una es tiempo con el animal parado.
+  const [embryoId, setEmbryoId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return window.sessionStorage.getItem('manga.ultimoEmbrion') ?? '';
+  });
+
+  const disponibles = (catalogs.embryos ?? []).filter((e: any) => (e.straws_available ?? 0) > 0);
+
+  if (animal.sex !== 'F') {
+    return (
+      <>
+        <div className="max-w-md text-center text-[18px] text-white/60">Este animal es macho: no puede ser receptora.</div>
+        <CancelLink onCancel={onCancel} />
+      </>
+    );
+  }
+
+  async function transferir() {
+    await post(`/animals/${animal.id}/services`, { method: 'embryo_transfer', embryo_id: embryoId });
+    if (typeof window !== 'undefined') window.sessionStorage.setItem('manga.ultimoEmbrion', embryoId);
+    const e = disponibles.find((x: any) => x.id === embryoId);
+    onSaved({ action: 'Transferencia', detail: e ? `${e.donor_name ?? 'donante'} × ${e.sire_name ?? 'toro'}` : 'embrión' });
+  }
+
+  async function noRespondio() {
+    // Queda en la línea de tiempo del animal. Sin esto, la receptora que no respondió no deja rastro
+    // y al final de la jornada no se puede saber cuántas del lote sirvieron.
+    await post(`/animals/${animal.id}/events`, { type: 'note', text: 'Sincronizada sin respuesta: sin cuerpo lúteo, no apta para transferencia' });
+    onSaved({ action: 'No respondió', detail: 'sin cuerpo lúteo' });
+  }
+
+  if (disponibles.length === 0) {
+    return (
+      <>
+        <div className="max-w-md text-center text-[18px] text-white/60">
+          No hay embriones con pajuelas disponibles. Cargalos desde Genética antes de salir al corral.
+        </div>
+        <CancelLink onCancel={onCancel} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="w-full max-w-md space-y-2">
+        <select value={embryoId} onChange={(e) => setEmbryoId(e.target.value)} className={inputCls + ' h-12 text-[18px]'}>
+          <option value="">Elegí el embrión</option>
+          {disponibles.map((e: any) => (
+            <option key={e.id} value={e.id}>
+              {e.donor_name ?? 'donante'} × {e.sire_name ?? 'toro'} ({e.straws_available})
+              {e.grade ? ` · ${e.grade}` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <button onClick={transferir} disabled={busy || !embryoId} className={`${bigBtn} bg-[#4ade80] text-black`}>
+        {embryoId ? 'TRANSFERIR' : 'ELEGÍ EL EMBRIÓN'}
+      </button>
+
+      <button onClick={noRespondio} disabled={busy} className={`${bigBtn} bg-white/10 text-white/80`}>
+        NO RESPONDIÓ (sin cuerpo lúteo)
+      </button>
+
       <CancelLink onCancel={onCancel} />
     </>
   );
