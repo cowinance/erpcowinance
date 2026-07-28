@@ -171,13 +171,21 @@ describe('platform — panel de administración global', () => {
   });
 
   it('el login de un usuario válido que NO es admin de plataforma da el mismo error que una contraseña mal', async () => {
-    const noAdmin = auth.login({ email: 'roble@example.com', password: 'roble-pass' });
-    const malaClave = auth.login({ email: 'dueno@cowinance.com', password: 'incorrecta' });
-    await expect(noAdmin).rejects.toMatchObject({ status: 401 });
-    await expect(malaClave).rejects.toMatchObject({ status: 401 });
+    // El `.catch` va PEGADO a la llamada, no después.
+    //
+    // Creando las dos promesas y esperando la primera, la segunda rechazaba mientras todavía no
+    // tenía manejador: Node lo cuenta como rechazo no manejado y vitest termina en error aunque los
+    // 1.800 tests pasen — un gate en rojo sin un solo test fallado, que es de lo más difícil de
+    // diagnosticar. Enganchado en el momento de crearla, no queda ninguna ventana.
+    const fallido = (email: string, password: string) => auth.login({ email, password }).catch((e) => e);
+    const [noAdmin, malaClave] = await Promise.all([
+      fallido('roble@example.com', 'roble-pass'),
+      fallido('dueno@cowinance.com', 'incorrecta'),
+    ]);
+    expect(noAdmin.status).toBe(401);
+    expect(malaClave.status).toBe(401);
     // Mismo código: el endpoint no puede servir para averiguar QUIÉN administra Cowinance.
-    const [a, b] = await Promise.all([noAdmin.catch((e) => e), malaClave.catch((e) => e)]);
-    expect(a.response.code).toBe(b.response.code);
+    expect(noAdmin.response.code).toBe(malaClave.response.code);
   });
 
   it('con PLATFORM_MFA_ENFORCED prendido, un admin sin segundo factor queda afuera', async () => {
