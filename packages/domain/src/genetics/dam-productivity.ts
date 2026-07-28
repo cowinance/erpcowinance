@@ -20,6 +20,8 @@
  * Puro, sin IO ni relojes: la fecha de referencia entra como parámetro.
  */
 
+import { impossibleCalvingIntervals } from '../reproduction/calving-interval';
+
 /** Lo que la finca sabe de una vaca: cuándo empezó a producir y qué destetó. */
 export interface DamRecord {
   readonly damId: string;
@@ -37,6 +39,14 @@ export interface DamRecord {
   readonly donatedWeanings?: readonly { readonly date: string; readonly kg: number }[];
   /** Si ya no está (vendida, muerta, descartada): hasta acá se la cuenta. */
   readonly exitDate?: string | null;
+  /**
+   * Todas sus fechas de parto, para poder detectar historiales imposibles.
+   *
+   * Una vaca con partos más cerca que una gestación tiene los kilos por año inflados, y ese número
+   * no se arregla solo: hay que corregir las fechas. Mostrarlo como si fuera producción real haría
+   * retener a la que tiene la carga mal y descartar a la buena.
+   */
+  readonly calvingDates?: readonly string[];
 }
 
 export interface DamProductivity {
@@ -56,6 +66,13 @@ export interface DamProductivity {
   readonly geneticKgPerYear: number;
   /** `true` si donó embriones: no se la juzga por lo que cría, porque no es lo que se le pide. */
   readonly isDonor: boolean;
+  /**
+   * Intervalos entre partos que son físicamente imposibles.
+   *
+   * Cuando hay alguno, `kgPerYear` está inflado y no se puede creer. Se informa en vez de
+   * esconderse — es el mismo criterio que usa el resto del módulo con los destetes descartados.
+   */
+  readonly impossibleIntervals: number;
 }
 
 /**
@@ -107,6 +124,7 @@ export function damProductivity(records: readonly DamRecord[], referenceDate: st
       const years = Math.max(1, aniosEntre(r.firstCalvingDate, hasta));
       const fechas = validos.map((w) => w.date).sort();
 
+      const imposibles = impossibleCalvingIntervals(r.calvingDates ?? []);
       const donados = (r.donatedWeanings ?? []).filter((w) => Number.isFinite(Number(w.kg)) && Number(w.kg) > 0);
       const totalDonado = donados.reduce((s, w) => s + Number(w.kg), 0);
 
@@ -122,6 +140,7 @@ export function damProductivity(records: readonly DamRecord[], referenceDate: st
         donatedCalves: donados.length,
         geneticKgPerYear: round1((total + totalDonado) / years),
         isDonor: donados.length > 0,
+        impossibleIntervals: imposibles.length,
       };
     })
     .sort((a, b) => b.kgPerYear - a.kgPerYear);
@@ -140,7 +159,9 @@ export function cullCandidates(dams: readonly DamProductivity[], pctBajoMediana 
   // A una DONANTE no se la juzga por lo que cría: su trabajo es dar embriones, y su propio vientre
   // puede estar descansando a propósito. Marcarla para descarte sería sacar del rodeo justamente a
   // la vaca cuya genética se está multiplicando.
-  const evaluables = dams.filter((d) => d.confidence !== 'baja' && !d.isDonor);
+  // Tampoco se juzga a una vaca con el historial mal cargado: sus kilos por año están inflados, así
+  // que compararla contra el rodeo —para bien o para mal— es comparar contra un número que no es.
+  const evaluables = dams.filter((d) => d.confidence !== 'baja' && !d.isDonor && d.impossibleIntervals === 0);
   if (evaluables.length < 3) return [];
 
   const ordenados = [...evaluables].map((d) => d.kgPerYear).sort((a, b) => a - b);

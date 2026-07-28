@@ -9,6 +9,7 @@ import { TaskService } from '../tasks/task.service';
 import { SemenService } from '../genetics/semen.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import { StrawsService } from '../genetics/straws.service';
+import { calvingIntervalIssue } from '@cowinance/domain';
 import { InbreedingService } from '../genetics/inbreeding.service';
 import { ServicePlanService } from './service-plan.service';
 
@@ -469,7 +470,43 @@ export class ReproService {
         });
       return { ...o, sex: sexo as string };
     });
+
+    // El id determinista se calcula ACÁ porque la guarda de intervalo lo necesita para excluirse a
+    // sí misma. Ver el porqué en el comentario de la guarda.
     const calvingId = idempotencyKey ? this.deriveId(idempotencyKey, body.dam_id) : randomUUID();
+
+    // La guarda de intervalo va DESPUÉS de validar las crías: un pedido malformado —un sexo que no
+    // se entiende— es un 400 y no tiene por qué costar una consulta al historial del rodeo. Primero
+    // se comprueba que lo que llegó tenga sentido; recién después, si es posible en esta vaca.
+    //
+    // Una vaca no puede parir dos veces separadas por menos de una gestación: habría tenido que
+    // quedar preñada antes de parir. No es una heurística, es una imposibilidad física.
+    //
+    // Se frena ACÁ y no al leer, porque un dato imposible que entra ya no se corrige solo: infla los
+    // kilos por año de esa vaca —seis partos en tres años daban «479 kg/año», casi el doble de lo
+    // real— y encima de ese número se decide una reposición al revés.
+    //
+    // Bloquea salvo `force`, como el resto de las guardas: quien carga historia vieja con fechas
+    // aproximadas tiene cómo seguir, pero tiene que decirlo.
+    if (body?.force !== true) {
+      // `id <> $3` — la guarda se EXCLUYE A SÍ MISMA. Sin esto, el reintento de un parto ya
+      // registrado (que es lo que hace el móvil cuando se corta la señal) se encontraba con su
+      // propio registro y lo rechazaba por «dos partos el mismo día». La idempotencia se rompía
+      // justo en el escenario para el que existe.
+      const previos = await this.db.query<{ d: string }>(
+        `SELECT calving_date::text AS d FROM calvings
+          WHERE dam_id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND id <> $3`,
+        [body.dam_id, this.db.tenant, calvingId],
+      );
+      const choque = calvingIntervalIssue(calvingDate, previos.map((p) => p.d));
+      if (choque)
+        throw new ConflictException({
+          code: 'calving.impossible_interval',
+          title: choque.message,
+          reasons: ['impossible_interval'],
+          details: { conflicts_with: choque.conflictsWith, days: choque.days },
+        });
+    }
     const config = await this.reproConfig();
 
     return this.db.tx(async (q) => {

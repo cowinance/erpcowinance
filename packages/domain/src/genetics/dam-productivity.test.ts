@@ -208,3 +208,52 @@ describe('transferencia de embrión: quién produjo y quién aportó los genes',
     expect(cullCandidates(dams).map((d) => d.damId)).not.toContain('ELITE');
   });
 });
+
+describe('historiales de parto imposibles', () => {
+  it('SEIS PARTOS EN TRES AÑOS SE MARCAN, en vez de dar 479 kg/año como si fuera una vaca excelente', () => {
+    // El caso exacto que destapó la auditoría. El número no chilla solo: se ve como la mejor vaca
+    // del rodeo, y encima de eso se decide una reposición al revés.
+    const inflada: DamRecord = {
+      damId: 'MAL_CARGADA',
+      firstCalvingDate: '2024-03-01',
+      calvingDates: ['2024-03-01', '2024-09-01', '2025-03-01', '2025-09-01', '2026-03-01'],
+      weanings: [200, 200, 200, 200, 200].map((kg, i) => ({ date: `202${4 + Math.floor(i / 2)}-10-01`, kg })),
+    };
+    const [d] = damProductivity([inflada], HOY);
+    expect(d.impossibleIntervals).toBe(4);
+  });
+
+  it('un historial normal no marca nada', () => {
+    const sana: DamRecord = {
+      damId: 'SANA',
+      firstCalvingDate: '2024-03-01',
+      calvingDates: ['2024-03-01', '2025-03-01', '2026-03-01'],
+      weanings: [{ date: '2024-10-01', kg: 200 }],
+    };
+    expect(damProductivity([sana], HOY)[0].impossibleIntervals).toBe(0);
+  });
+
+  it('NO SE MARCA PARA DESCARTE A UNA VACA CON LAS FECHAS MAL', () => {
+    // Sus kilos por año están inflados: compararla contra el rodeo, para bien o para mal, es
+    // compararla contra un número que no es. Primero se arreglan las fechas.
+    const rodeo: DamRecord[] = [
+      ...[200, 200, 200, 200].map((kg, i) =>
+        vaca(`V${i}`, '2020-06-01', [['2021-06-01', kg], ['2022-06-01', kg], ['2023-06-01', kg]]),
+      ),
+      {
+        damId: 'FECHAS_MAL',
+        firstCalvingDate: '2020-06-01',
+        calvingDates: ['2020-06-01', '2020-08-01'], // dos meses: imposible
+        weanings: [{ date: '2021-06-01', kg: 30 }, { date: '2022-06-01', kg: 30 }],
+      },
+    ];
+    const dams = damProductivity(rodeo, HOY);
+    expect(dams.find((d) => d.damId === 'FECHAS_MAL')!.impossibleIntervals).toBe(1);
+    expect(cullCandidates(dams).map((d) => d.damId)).not.toContain('FECHAS_MAL');
+  });
+
+  it('sin fechas de parto no inventa un problema', () => {
+    // El campo es opcional: quien no lo pase no debe recibir advertencias fantasma.
+    expect(damProductivity([vaca('V', '2023-06-01', [['2024-06-01', 200]])], HOY)[0].impossibleIntervals).toBe(0);
+  });
+});

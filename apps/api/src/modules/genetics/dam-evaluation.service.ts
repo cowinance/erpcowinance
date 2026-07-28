@@ -37,11 +37,15 @@ export class DamEvaluationService {
       exit_date: string | null;
       weanings: { date: string; kg: number }[] | null;
       donated: { date: string; kg: number }[] | null;
+      calving_dates: string[] | null;
     }>(
       `SELECT d.id AS dam_id,
               d.name AS dam_name,
               ai.value AS tag,
               min(c.calving_date)::text AS first_calving,
+              -- Todas las fechas: con ellas se detecta un historial imposible (dos partos más cerca
+              -- que una gestación), que infla los kilos por año y no se puede corregir al leer.
+              COALESCE(array_agg(DISTINCT c.calving_date::text) FILTER (WHERE c.calving_date IS NOT NULL), '{}') AS calving_dates,
               -- Salió del rodeo: hasta ahí se la cuenta.
               CASE WHEN d.status <> 'active' THEN d.status_changed_at::date::text END AS exit_date,
               -- Lo que CRIO: weanings.dam_id ya apunta a la que amamanto (en transferencia, la
@@ -88,6 +92,7 @@ export class DamEvaluationService {
       exitDate: f.exit_date,
       weanings: f.weanings ?? [],
       donatedWeanings: f.donated ?? [],
+      calvingDates: f.calving_dates ?? [],
     }));
 
     const dams = damProductivity(registros, hoy);
@@ -97,6 +102,8 @@ export class DamEvaluationService {
     return {
       as_of: hoy,
       total: conNombre.length,
+      /** Vientres cuyo historial de partos es imposible: el número que muestran no se puede creer. */
+      with_impossible_intervals: conNombre.filter((d) => d.impossibleIntervals > 0).length,
       /** Vientres por debajo del rodeo: sugerencia, no orden. La decisión sigue siendo del productor. */
       cull_candidates: conNombre.filter((d) => descarte.has(d.damId)),
       dams: conNombre,

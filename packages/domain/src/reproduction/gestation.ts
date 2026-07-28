@@ -16,7 +16,12 @@
  */
 
 const DAY_MS = 86400000;
-const GESTATION_DAYS = 283; // bovino
+/**
+ * Gestación bovina. Exportada porque es el PISO de otra regla: dos partos de la misma vaca no
+ * pueden estar más cerca que esto. Copiar el número allá dejaría dos constantes que hay que
+ * acordarse de mover juntas el día que se parametrice por especie.
+ */
+export const GESTATION_DAYS = 283; // bovino
 /** Heurística: días de gestación que se asumen ya transcurridos cuando se
  *  diagnostica una preñez sin servicio registrado (p. ej. vientre comprado
  *  ya preñado). */

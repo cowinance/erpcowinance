@@ -102,6 +102,55 @@ describe('repro — servicios/diagnósticos/partos robustos (E2)', () => {
     expect(tks.some((x: any) => /Revisión por aborto/.test(x.title))).toBe(true);
   });
 
+  it('DOS PARTOS MÁS CERCA QUE UNA GESTACIÓN SE RECHAZAN', async () => {
+    // Una vaca no puede parir dos veces separadas por menos de 283 días: habría tenido que quedar
+    // preñada antes de parir. Se frena al CARGAR porque un dato así ya no se corrige solo — infla
+    // los kilos por año de esa vaca y encima se decide la reposición al revés.
+    const a = await mkFemale(uniq('FREQ'));
+    await repro.calving({ dam_id: a, calving_date: '2025-03-01', offspring: [{ sex: 'F' }] });
+    await expect(
+      repro.calving({ dam_id: a, calving_date: '2025-09-01', offspring: [{ sex: 'F' }] }),
+    ).rejects.toMatchObject({ response: { code: 'calving.impossible_interval' } });
+  });
+
+  it('DOS PARTOS EL MISMO DÍA APUNTAN A MELLIZOS, y el mensaje lo dice', async () => {
+    // Es la causa más frecuente y la que el productor puede corregir solo: los mellizos van como dos
+    // crías del mismo parto, no como dos partos.
+    const a = await mkFemale(uniq('MELL'));
+    await repro.calving({ dam_id: a, calving_date: '2025-05-10', offspring: [{ sex: 'F' }] });
+    await expect(
+      repro.calving({ dam_id: a, calving_date: '2025-05-10', offspring: [{ sex: 'M' }] }),
+    ).rejects.toMatchObject({ response: { title: expect.stringContaining('mellizos') } });
+  });
+
+  it('un parto por año entra sin molestar', async () => {
+    // La otra mitad: si frenara un intervalo normal, el productor aprendería a forzar siempre.
+    const a = await mkFemale(uniq('OK'));
+    await repro.calving({ dam_id: a, calving_date: '2024-03-01', offspring: [{ sex: 'F' }] });
+    const r: any = await repro.calving({ dam_id: a, calving_date: '2025-03-05', offspring: [{ sex: 'F' }] });
+    expect(r.offspring).toHaveLength(1);
+  });
+
+  it('`force` deja cargar historia vieja con fechas aproximadas', async () => {
+    // Quien migra años de planillas tiene fechas redondeadas: necesita poder seguir, pero diciéndolo.
+    const a = await mkFemale(uniq('FORCE'));
+    await repro.calving({ dam_id: a, calving_date: '2025-03-01', offspring: [{ sex: 'F' }] });
+    const r: any = await repro.calving({ dam_id: a, calving_date: '2025-06-01', offspring: [{ sex: 'F' }], force: true });
+    expect(r.offspring).toHaveLength(1);
+  });
+
+  it('LA GUARDA NO ROMPE EL REINTENTO: un parto reenviado no choca contra sí mismo', async () => {
+    // El móvil reenvía con la misma clave cuando se corta la señal. Sin excluirse a sí misma, la
+    // guarda de intervalo veía el parto ya registrado y lo rechazaba por «dos partos el mismo día»
+    // — rompiendo la idempotencia justo en el escenario para el que existe.
+    const a = await mkFemale(uniq('RETRY'));
+    const key = randomUUID();
+    await repro.calving({ dam_id: a, calving_date: '2025-04-01', offspring: [{ sex: 'F' }] }, key);
+    const otra: any = await repro.calving({ dam_id: a, calving_date: '2025-04-01', offspring: [{ sex: 'F' }] }, key);
+    expect(otra.already ?? true).toBeTruthy();
+    expect(await db.query(`SELECT id FROM calvings WHERE dam_id=$1 AND deleted_at IS NULL`, [a])).toHaveLength(1);
+  });
+
   it('parto crea cría, cierra preñez y agenda tareas postparto; idempotente sin duplicar', async () => {
     const a = await mkFemale(uniq('P'));
     await openPreg(a);

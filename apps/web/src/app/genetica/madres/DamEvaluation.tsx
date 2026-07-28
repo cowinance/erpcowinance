@@ -13,11 +13,13 @@ export interface Dam {
   donatedCalves: number;
   geneticKgPerYear: number;
   isDonor: boolean;
+  impossibleIntervals: number;
 }
 
 export interface DamReport {
   as_of: string;
   total: number;
+  with_impossible_intervals?: number;
   cull_candidates: Dam[];
   dams: Dam[];
 }
@@ -75,6 +77,19 @@ export function DamEvaluation({ report }: { report: DamReport }) {
         </Card>
       )}
 
+      {(report.with_impossible_intervals ?? 0) > 0 && (
+        <Card>
+          <p className="text-body font-medium">
+            {report.with_impossible_intervals} {report.with_impossible_intervals === 1 ? 'vientre tiene' : 'vientres tienen'} partos imposibles
+          </p>
+          <p className="mt-0.5 text-label text-ink-3">
+            Dos partos más cerca que una gestación: la vaca habría tenido que quedar preñada antes de parir. Casi siempre son mellizos cargados como
+            dos partos, una fecha mal tipeada, o el parto anotado en otra vaca. Mientras las fechas estén así, sus kilos por año están inflados y no se
+            los compara con el rodeo.
+          </p>
+        </Card>
+      )}
+
       {report.cull_candidates.length > 0 && (
         <Card>
           <p className="text-body font-medium">Vientres por debajo del rodeo</p>
@@ -112,6 +127,11 @@ export function DamEvaluation({ report }: { report: DamReport }) {
                   <td className="px-3 py-2">
                     {d.dam_name}
                     {d.isDonor && <span className="ml-2 text-caption text-brand">donante</span>}
+                    {d.impossibleIntervals > 0 && (
+                      <span className="ml-2 text-caption text-danger">
+                        {d.impossibleIntervals} {d.impossibleIntervals === 1 ? 'parto imposible' : 'partos imposibles'}
+                      </span>
+                    )}
                     {descarte.has(d.damId) && <span className="ml-2 text-caption text-warning">por debajo del rodeo</span>}
                   </td>
                   <td className="tnum px-3 py-2 text-right text-ink-2">{d.calves}</td>
