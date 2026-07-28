@@ -171,6 +171,35 @@ describe('repro — consumo de pajuela en inseminación', () => {
     expect(((await semen.get(batch.id)) as any).expiry_date).toBe('2030-06-01');
   });
 
+  it('EL VEREDICTO SE DERIVA DE LA MOTILIDAD, no se guarda al lado', async () => {
+    // Era una copia del número del que sale. Mientras el umbral fue constante coincidieron siempre,
+    // así que nunca dio un resultado equivocado — pero el día que el umbral se haga configurable, el
+    // historial mostraría veredictos de la época vieja contra un estado calculado con el nuevo.
+    const batch: any = await semen.create({ batch_code: 'AI-DERIV', sire_name_external: 'Toro P', straws_available: 4 });
+    const r: any = await semen.recordQualityCheck(batch.id, { motility_pct: 62 });
+    expect(r.verdict).toBe('apta');
+
+    const historial: any[] = await semen.qualityChecks(batch.id);
+    expect(historial[0].verdict).toBe('apta');
+    expect(historial[0].post_thaw_motility_pct).toBe(62);
+
+    // La columna ya no existe: si volviera, habría dos fuentes otra vez.
+    const cols = await db.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'semen_quality_checks' AND column_name = 'verdict'`,
+    );
+    expect(cols, 'el veredicto volvió a guardarse en la base').toHaveLength(0);
+  });
+
+  it('el historial se relee con el criterio de HOY, no con el de la época', async () => {
+    // Es lo que gana derivarlo: una prueba de 22% es «dudosa» hoy, y si mañana el umbral sube pasa a
+    // «descartar» en todo el historial de una vez, sin migrar nada.
+    const batch: any = await semen.create({ batch_code: 'AI-HIST', sire_name_external: 'Toro O', straws_available: 4 });
+    await semen.recordQualityCheck(batch.id, { motility_pct: 22 });
+    const historial: any[] = await semen.qualityChecks(batch.id);
+    expect(historial[0].verdict).toBe('dudosa');
+  });
+
   it('saldo insuficiente → 403 y NO queda el evento (rollback lógico: consumo antes del insert)', async () => {
     const batch: any = await semen.create({ batch_code: 'AI-0', sire_name_external: 'Toro Y', straws_available: 0 });
     await expect(repro.service(hembraId, { method: 'ai', semen_batch_id: batch.id })).rejects.toMatchObject({ status: 403 });

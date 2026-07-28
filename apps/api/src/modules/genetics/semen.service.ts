@@ -34,7 +34,10 @@ export class SemenService {
          LEFT JOIN LATERAL (
            SELECT checked_at, post_thaw_motility_pct FROM semen_quality_checks q
             WHERE q.semen_batch_id = sb.id AND q.tenant_id = sb.tenant_id AND q.deleted_at IS NULL
-            ORDER BY q.checked_at DESC LIMIT 1) qc ON true
+            -- created_at como desempate: con dos pruebas del MISMO día, ordenar solo por fecha
+            -- deja «la última» a criterio del motor. Y el caso que eso rompe es el peligroso: una
+            -- prueba de 8% tapada por una de 62% de la misma jornada, con la partida diciendo «ok».
+            ORDER BY q.checked_at DESC, q.created_at DESC LIMIT 1) qc ON true
          WHERE sb.tenant_id=$1 AND sb.deleted_at IS NULL ORDER BY sb.batch_code`,
         [this.db.tenant],
       ),
@@ -75,30 +78,39 @@ export class SemenService {
 
     await this.get(batchId); // 404 si la partida no existe o es de otro tenant
     const checkedAt = body?.checked_at ? String(body.checked_at).slice(0, 10) : await this.db.today();
-    const verdict = motilityVerdict(pct);
 
     // La pajuela de la prueba se consume ANTES de dejar el registro: si no hay saldo, no queda una
     // prueba que dice haber descongelado algo que no existía.
     const consumidas = await this.consumeStraw(batchId, 'quality_check');
 
+    // El VEREDICTO no se guarda: se deriva de la motilidad, que es el dato medido. Guardarlo al
+    // lado del número del que sale crea dos fuentes, y el día que el umbral se haga configurable
+    // —está previsto— el historial mostraría veredictos calculados con el umbral viejo mientras la
+    // partida usa el nuevo. Misma prueba, dos respuestas, ninguna creíble.
     const row = await this.db.one<any>(
-      `INSERT INTO semen_quality_checks (tenant_id, semen_batch_id, checked_at, post_thaw_motility_pct, verdict, straws_used, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, checked_at::text, post_thaw_motility_pct::float AS post_thaw_motility_pct, verdict`,
-      [this.db.tenant, batchId, checkedAt, pct, verdict, consumidas.length, body?.notes ?? null, this.db.user],
+      `INSERT INTO semen_quality_checks (tenant_id, semen_batch_id, checked_at, post_thaw_motility_pct, straws_used, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, checked_at::text, post_thaw_motility_pct::float AS post_thaw_motility_pct`,
+      [this.db.tenant, batchId, checkedAt, pct, consumidas.length, body?.notes ?? null, this.db.user],
     );
-    return { ...row, straws_used: consumidas.length };
+    return { ...row, verdict: motilityVerdict(pct), straws_used: consumidas.length };
   }
 
-  /** El historial de pruebas de una partida: si viene bajando, la partida se está yendo. */
+  /**
+   * El historial de pruebas de una partida: si la motilidad viene bajando, la partida se está yendo.
+   *
+   * El veredicto se calcula al leer, con el umbral vigente. Así, si mañana se ajusta el umbral, TODO
+   * el historial se relee con el criterio nuevo en vez de mostrar una mezcla de épocas.
+   */
   async qualityChecks(batchId: string) {
-    return this.db.query(
+    const filas = await this.db.query<{ post_thaw_motility_pct: number }>(
       `SELECT id, checked_at::text AS checked_at, post_thaw_motility_pct::float AS post_thaw_motility_pct,
-              verdict, straws_used, notes
+              straws_used, notes
          FROM semen_quality_checks
         WHERE semen_batch_id=$1 AND tenant_id=$2 AND deleted_at IS NULL
         ORDER BY checked_at DESC`,
       [batchId, this.db.tenant],
     );
+    return filas.map((f) => ({ ...f, verdict: motilityVerdict(f.post_thaw_motility_pct) }));
   }
 
   async get(id: string) {
@@ -114,7 +126,10 @@ export class SemenService {
          LEFT JOIN LATERAL (
            SELECT checked_at, post_thaw_motility_pct FROM semen_quality_checks q
             WHERE q.semen_batch_id = sb.id AND q.tenant_id = sb.tenant_id AND q.deleted_at IS NULL
-            ORDER BY q.checked_at DESC LIMIT 1) qc ON true
+            -- created_at como desempate: con dos pruebas del MISMO día, ordenar solo por fecha
+            -- deja «la última» a criterio del motor. Y el caso que eso rompe es el peligroso: una
+            -- prueba de 8% tapada por una de 62% de la misma jornada, con la partida diciendo «ok».
+            ORDER BY q.checked_at DESC, q.created_at DESC LIMIT 1) qc ON true
         WHERE sb.id=$1 AND sb.tenant_id=$2 AND sb.deleted_at IS NULL`,
       [id, this.db.tenant],
     );

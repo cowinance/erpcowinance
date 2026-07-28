@@ -106,6 +106,45 @@ const testRun = trySh('npx vitest run --coverage --coverage.reporter=json-summar
 const testsPassed = /Tests\s+(\d+)\s+passed/.exec(testRun.out)?.[1];
 gate('tests (vitest run)', testRun.ok, testsPassed ? `${testsPassed} passed` : '');
 
+// Gate 2b: ningún backtick en un comentario SQL.
+//
+// Un backtick dentro de una consulta CIERRA la cadena de JavaScript. A veces eso da un error de
+// sintaxis y lo agarra el typecheck; otras produce JS válido —un identificador suelto— y explota
+// recién en runtime con un ReferenceError que no se parece en nada a la causa. Pasó CINCO veces en
+// una sola sesión, siempre igual: citando un nombre de columna con backticks al comentar el SQL.
+//
+// La regla es la forma exacta del error: una línea de comentario SQL que contiene un backtick. Los
+// comentarios SQL solo viven dentro de consultas, así que ahí un backtick nunca es intencional.
+{
+  const ofensores = [];
+  const revisar = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, f.name);
+      if (f.isDirectory()) {
+        if (!['node_modules', 'dist', '.next', 'coverage'].includes(f.name)) revisar(full);
+      } else if (f.name.endsWith('.ts') && !f.name.endsWith('.d.ts')) {
+        readFileSync(full, 'utf8')
+          .split('\n')
+          .forEach((linea, i) => {
+            if (/^\s*--/.test(linea) && linea.includes('`')) ofensores.push(`${full}:${i + 1}`);
+          });
+      }
+    }
+  };
+  for (const dir of ['apps/api/src', 'packages']) {
+    try {
+      revisar(dir);
+    } catch {
+      /* un directorio ausente no bloquea el gate */
+    }
+  }
+  gate(
+    'sin backticks en comentarios SQL',
+    ofensores.length === 0,
+    ofensores.length ? ofensores.slice(0, 3).join(' · ') : '',
+  );
+}
+
 // Gate 3: cero dependencias circulares (madge).
 const madge = trySh(`npx madge --extensions ts --circular --json ${LARGEST_DIR}`);
 let cycles = -1;
