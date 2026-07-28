@@ -185,7 +185,24 @@ export class InventoryService {
     if (type === 'in' && qty <= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: "'in' requiere cantidad positiva" });
     if ((type === 'out' || type === 'consumption') && qty >= 0) throw new BadRequestException({ code: 'inventory.invalid_sign', title: `'${type}' requiere cantidad negativa` });
     const unitCost = body?.unit_cost != null ? Number(body.unit_cost) : null;
+    // Un costo negativo se propaga al promedio ponderado y de ahí al valor del inventario, a los
+    // costos por centro y al mayor. Medido: 100 kg a 10 más 100 kg a −40 daban un promedio de −15 y
+    // un inventario valuado en −3.000 — stock que «vale» menos que nada.
+    if (unitCost != null && (!Number.isFinite(unitCost) || unitCost < 0))
+      throw new BadRequestException({
+        code: 'inventory.invalid_unit_cost',
+        title: 'El costo unitario no puede ser negativo.',
+      });
+
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    // Un movimiento es un hecho. Con fecha futura entra al saldo de hoy pero se reporta en un
+    // período que no llegó: el kardex deja de cuadrar con lo que hay en el galpón.
+    const hoy = await this.db.today(q);
+    if (String(occurredAt).slice(0, 10) > hoy)
+      throw new BadRequestException({
+        code: 'inventory.future_date',
+        title: 'La fecha del movimiento es futura. Se registra lo que ya ocurrió.',
+      });
     const item = await this.requireItem(q, itemId);
     await this.requireWarehouse(q, whId);
     const batchId = await this.resolveBatch(q, item, body?.batch_id);

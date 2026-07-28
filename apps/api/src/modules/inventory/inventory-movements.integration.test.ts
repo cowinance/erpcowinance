@@ -35,6 +35,37 @@ describe('inventory — movimientos y existencias', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  it('UN COSTO NEGATIVO NO ENTRA: se propaga al promedio y al valor del inventario', async () => {
+    // Medido en la auditoría: 100 kg a 10 más 100 kg a −40 daban promedio −15 y un inventario
+    // valuado en −3.000. Ese número sigue de largo hasta los costos por centro y el mayor.
+    await expect(
+      inv.recordMovement({ item_id: itemId, warehouse_id: whId, movement_type: 'in', quantity: 10, unit_cost: -5 }),
+    ).rejects.toMatchObject({ response: { code: 'inventory.invalid_unit_cost' } });
+  });
+
+  it('UN MOVIMIENTO NO PUEDE SER DEL FUTURO', async () => {
+    // Con fecha futura entra al saldo de hoy pero se reporta en un período que no llegó: el kardex
+    // deja de cuadrar con lo que hay en el galpón.
+    await expect(
+      inv.recordMovement({ item_id: itemId, warehouse_id: whId, movement_type: 'in', quantity: 10, occurred_at: '2099-01-01' }),
+    ).rejects.toMatchObject({ response: { code: 'inventory.future_date' } });
+  });
+
+  it('EL SALDO DE UN ÍTEM SIN LOTE NO SE PUEDE PARTIR EN DOS FILAS', () => {
+    // `UNIQUE (item_id, warehouse_id, batch_id)` no alcanza: en PostgreSQL los NULL son distintos
+    // entre sí, así que dos filas con el mismo ítem, el mismo depósito y sin lote no la violaban.
+    // Bajo concurrencia el saldo quedaba partido en dos filas que nadie suma.
+    //
+    // No se puede provocar acá —PGlite tiene una sola conexión—, así que se comprueba que el índice
+    // parcial que lo impide EXISTA: es lo que hace que el segundo insert falle de forma ruidosa.
+    return db
+      .query<any>(`SELECT indexdef FROM pg_indexes WHERE tablename='stock_levels' AND indexname='ux_stock_levels_sin_lote'`)
+      .then((r) => {
+        expect(r, 'falta el índice parcial que impide partir el saldo').toHaveLength(1);
+        expect(r[0].indexdef).toContain('batch_id IS NULL');
+      });
+  });
+
   it('entrada suma y pondera avg_cost; salida resta sin cambiarlo; sin negativo; ajuste ±', async () => {
     const a = await inv.recordMovement({ item_id: itemId, warehouse_id: whId, movement_type: 'in', quantity: 100, unit_cost: 2 });
     expect(a.level.quantity).toBe(100);
