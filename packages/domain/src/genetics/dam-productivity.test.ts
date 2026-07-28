@@ -149,3 +149,62 @@ describe('candidatas a descarte', () => {
     expect(cullCandidates(rodeo([200, 80]))).toEqual([]);
   });
 });
+
+describe('transferencia de embrión: quién produjo y quién aportó los genes', () => {
+  it('LA RECEPTORA SE LLEVA LOS KILOS QUE CRIÓ, AUNQUE LA CRÍA NO SEA SUYA', () => {
+    // Gestó nueve meses y le dio la leche: esos kilos los produjo ella, y además quedó ocupada todo
+    // el año. Acreditárselos a la donante le regalaría producción que no hizo.
+    const r = damProductivity(
+      [vaca('RECEPTORA', '2022-06-01', [['2023-06-01', 200], ['2024-06-01', 200], ['2025-06-01', 200]])],
+      HOY,
+    );
+    expect(r[0].calves).toBe(3);
+    expect(r[0].kgPerYear).toBeGreaterThan(0);
+  });
+
+  it('LA DONANTE SUMA LO SUYO EN UNA COLUMNA APARTE', () => {
+    // Sus genes andan en crías que gestó otra. Sumarlo a lo que crió sería mentir sobre su
+    // producción; ignorarlo borraría a una donante que puede tener media majada con su genética.
+    const donante: DamRecord = {
+      damId: 'DONANTE',
+      firstCalvingDate: '2022-06-01',
+      weanings: [{ date: '2023-06-01', kg: 180 }], // una cría propia
+      donatedWeanings: [
+        { date: '2024-06-01', kg: 220 },
+        { date: '2025-06-01', kg: 230 },
+      ],
+    };
+    const [d] = damProductivity([donante], HOY);
+    expect(d.calves, 'las donadas NO cuentan como criadas por ella').toBe(1);
+    expect(d.donatedCalves).toBe(2);
+    expect(d.isDonor).toBe(true);
+    expect(d.geneticKgPerYear, 'el aporte genético incluye las tres').toBeGreaterThan(d.kgPerYear);
+  });
+
+  it('para una finca SIN transferencia las dos columnas dan lo mismo', () => {
+    // Es lo que hace que la tabla no se complique para el 99% de las vacas.
+    const [d] = damProductivity([vaca('NORMAL', '2022-06-01', [['2023-06-01', 200], ['2024-06-01', 200]])], HOY);
+    expect(d.geneticKgPerYear).toBe(d.kgPerYear);
+    expect(d.isDonor).toBe(false);
+    expect(d.donatedCalves).toBe(0);
+  });
+
+  it('UNA DONANTE NO SE MARCA PARA DESCARTE POR CRIAR POCO', () => {
+    // Su trabajo es dar embriones, y su vientre puede estar descansando a propósito. Marcarla sería
+    // sacar del rodeo justamente a la vaca cuya genética se está multiplicando.
+    const rodeo: DamRecord[] = [
+      ...[200, 200, 200, 200].map((kg, i) =>
+        vaca(`V${i}`, '2020-06-01', [['2021-06-01', kg], ['2022-06-01', kg], ['2023-06-01', kg]]),
+      ),
+      {
+        damId: 'ELITE',
+        firstCalvingDate: '2020-06-01',
+        weanings: [{ date: '2021-06-01', kg: 40 }, { date: '2022-06-01', kg: 40 }],
+        donatedWeanings: [{ date: '2023-06-01', kg: 240 }, { date: '2024-06-01', kg: 240 }],
+      },
+    ];
+    const dams = damProductivity(rodeo, HOY);
+    expect(dams.find((d) => d.damId === 'ELITE')!.kgPerYear).toBeLessThan(100); // cría poquísimo
+    expect(cullCandidates(dams).map((d) => d.damId)).not.toContain('ELITE');
+  });
+});

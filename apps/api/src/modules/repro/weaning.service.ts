@@ -73,8 +73,11 @@ export class WeaningService {
       };
     }
 
+    // `dam_id` del destete es LA QUE CRIÓ, no la genética: el peso al destete es leche, y en una
+    // transferencia la leche la puso la receptora. Acreditárselo a la donante le regalaría kilos que
+    // no produjo y se los sacaría a la vaca que sí trabajó todo el ciclo.
     const animal = await q.one<{ id: string; dam_id: string | null; tag: string | null }>(
-      `SELECT a.id, a.dam_id, ai.value AS tag
+      `SELECT a.id, COALESCE(a.recipient_dam_id, a.dam_id) AS dam_id, ai.value AS tag
        FROM animals a
        LEFT JOIN LATERAL (
          SELECT value FROM animal_identifiers x

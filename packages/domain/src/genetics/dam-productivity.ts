@@ -25,8 +25,16 @@ export interface DamRecord {
   readonly damId: string;
   /** Primer parto (`YYYY-MM-DD`). Desde acá se cuenta: antes no era un vientre en producción. */
   readonly firstCalvingDate: string;
-  /** Los destetes que se le atribuyen, con el peso real. */
+  /** Los destetes que CRIÓ: los propios y los que gestó para otra. Es lo que produjo de verdad. */
   readonly weanings: readonly { readonly date: string; readonly kg: number }[];
+  /**
+   * Los destetes de crías que llevan SUS genes pero gestó otra vaca (ella fue donante).
+   *
+   * Van aparte porque contestan otra pregunta. Sumarlos a lo que crió le regalaría kilos que no
+   * produjo; ignorarlos borraría el aporte de una donante, que puede tener media majada con su
+   * genética y aun así destetar poco de su propio vientre.
+   */
+  readonly donatedWeanings?: readonly { readonly date: string; readonly kg: number }[];
   /** Si ya no está (vendida, muerta, descartada): hasta acá se la cuenta. */
   readonly exitDate?: string | null;
 }
@@ -42,6 +50,12 @@ export interface DamProductivity {
   readonly avgWeaningKg: number;
   readonly lastWeaningDate: string | null;
   readonly confidence: DamConfidence;
+  /** Crías con sus genes gestadas por OTRA vaca. Cero en una finca que no hace transferencia. */
+  readonly donatedCalves: number;
+  /** Kilos destetados por año de esas crías. Mide su valor como DONANTE, no su producción. */
+  readonly geneticKgPerYear: number;
+  /** `true` si donó embriones: no se la juzga por lo que cría, porque no es lo que se le pide. */
+  readonly isDonor: boolean;
 }
 
 /**
@@ -93,6 +107,9 @@ export function damProductivity(records: readonly DamRecord[], referenceDate: st
       const years = Math.max(1, aniosEntre(r.firstCalvingDate, hasta));
       const fechas = validos.map((w) => w.date).sort();
 
+      const donados = (r.donatedWeanings ?? []).filter((w) => Number.isFinite(Number(w.kg)) && Number(w.kg) > 0);
+      const totalDonado = donados.reduce((s, w) => s + Number(w.kg), 0);
+
       return {
         damId: r.damId,
         calves: validos.length,
@@ -102,6 +119,9 @@ export function damProductivity(records: readonly DamRecord[], referenceDate: st
         avgWeaningKg: validos.length ? round1(total / validos.length) : 0,
         lastWeaningDate: fechas.length ? fechas[fechas.length - 1] : null,
         confidence: damConfidenceFor(validos.length),
+        donatedCalves: donados.length,
+        geneticKgPerYear: round1((total + totalDonado) / years),
+        isDonor: donados.length > 0,
       };
     })
     .sort((a, b) => b.kgPerYear - a.kgPerYear);
@@ -117,7 +137,10 @@ export function damProductivity(records: readonly DamRecord[], referenceDate: st
  * Las de confianza baja quedan afuera: descartar una vaca por su primer destete es apurarse.
  */
 export function cullCandidates(dams: readonly DamProductivity[], pctBajoMediana = 25): DamProductivity[] {
-  const evaluables = dams.filter((d) => d.confidence !== 'baja');
+  // A una DONANTE no se la juzga por lo que cría: su trabajo es dar embriones, y su propio vientre
+  // puede estar descansando a propósito. Marcarla para descarte sería sacar del rodeo justamente a
+  // la vaca cuya genética se está multiplicando.
+  const evaluables = dams.filter((d) => d.confidence !== 'baja' && !d.isDonor);
   if (evaluables.length < 3) return [];
 
   const ordenados = [...evaluables].map((d) => d.kgPerYear).sort((a, b) => a - b);

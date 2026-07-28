@@ -79,7 +79,10 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
             )}
             {animal.genealogy?.dam_id && (
               <>
-                {rfid && ' · '}Madre{' '}
+                {/* «Madre genética» solo cuando hay receptora: en el 99% de los animales decir
+                    «genética» sería ruido, y en una transferencia decir «madre» a secas sería
+                    ambiguo justo donde hay dos. */}
+                {rfid && ' · '}{animal.genealogy?.recipient_dam_id ? 'Madre genética' : 'Madre'}{' '}
                 <Link href={`/animales/${animal.genealogy.dam_id}`} className="font-mono text-brand hover:underline">
                   {animal.genealogy.dam_tag ?? '—'}
                 </Link>
@@ -91,6 +94,15 @@ export default async function AnimalPage({ params }: { params: Promise<{ id: str
                 <Link href={`/animales/${animal.genealogy.sire_id}`} className="font-mono text-brand hover:underline">
                   {animal.genealogy.sire_tag ?? '—'}
                 </Link>
+              </>
+            )}
+            {animal.genealogy?.recipient_dam_id && (
+              <>
+                {' '}· Vientre{' '}
+                <Link href={`/animales/${animal.genealogy.recipient_dam_id}`} className="font-mono text-brand hover:underline">
+                  {animal.genealogy.recipient_tag ?? '—'}
+                </Link>
+                <span className="ml-1 rounded border border-subtle px-1 text-caption text-ink-3">transferencia</span>
               </>
             )}
             {(animal.offspring ?? []).length > 0 && (

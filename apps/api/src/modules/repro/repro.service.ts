@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
-import { addFarmDays, computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError, computeReproStatus, DEFAULT_REPRO_CONFIG } from '@cowinance/domain';
+import { Sex, addFarmDays, computeExpectedDueDateFromService, computeExpectedDueDateFromDiagnosis, newbornCategoryCode, validateProtocolSteps, InvalidProtocolStepsError, computeReproStatus, DEFAULT_REPRO_CONFIG } from '@cowinance/domain';
 import type { ReproConfig, ReproFacts } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { insertAnimalEvent, requireAnimal } from '../../common/events';
@@ -395,7 +395,21 @@ export class ReproService {
       throw new BadRequestException({ code: 'calving.missing_fields', title: 'dam_id es obligatorio' });
     const dam = await this.requireFemale(body.dam_id);
     const calvingDate = (body.calving_date ? String(body.calving_date).slice(0, 10) : await this.db.today());
-    const offspring: any[] = Array.isArray(body.offspring) && body.offspring.length ? body.offspring : [{ sex: 'F', vitality: 'live' }];
+    const crudas: any[] = Array.isArray(body.offspring) && body.offspring.length ? body.offspring : [{ sex: 'F', vitality: 'live' }];
+    // El sexo de la cría se INTERPRETA igual que en el alta y en la planilla: quien anota un parto
+    // en el corral escribe `H` de hembra, no `F` de female. Sin esto, ese `H` llegaba crudo al
+    // INSERT y reventaba contra el CHECK de la base — un 500 en el registro de un parto, que es de
+    // las cosas que más se cargan. Ahora, o se entiende, o es un 400 que dice qué se esperaba.
+    const offspring = crudas.map((o, i) => {
+      if (o?.sex === undefined || o?.sex === null || String(o.sex).trim() === '') return { ...o, sex: 'F' };
+      const sexo = Sex.parse(o.sex);
+      if (!sexo)
+        throw new BadRequestException({
+          code: 'calving.invalid_sex',
+          title: `Sexo inválido en la cría ${i + 1}: se esperaba H o M (hembra/macho); también se aceptan F/M`,
+        });
+      return { ...o, sex: sexo as string };
+    });
     const calvingId = idempotencyKey ? this.deriveId(idempotencyKey, body.dam_id) : randomUUID();
     const config = await this.reproConfig();
 
@@ -408,9 +422,29 @@ export class ReproService {
          WHERE animal_id = $1 AND tenant_id = $2 AND status = 'open' AND deleted_at IS NULL RETURNING id, breeding_event_id`,
         [body.dam_id, this.db.tenant, calvingDate],
       );
-      const sire = pregnancy?.breeding_event_id
-        ? await q.one<any>(`SELECT sire_id FROM breeding_events WHERE id = $1`, [pregnancy.breeding_event_id])
+      // De qué servicio viene esta preñez: define el padre, el método y —si fue transferencia— quién
+      // es la madre GENÉTICA del ternero, que no es la que está pariendo.
+      const evento = pregnancy?.breeding_event_id
+        ? await q.one<any>(
+            `SELECT be.sire_id, be.type, e.donor_dam_id
+               FROM breeding_events be
+               LEFT JOIN embryos e ON e.id = be.embryo_id AND e.deleted_at IS NULL
+              WHERE be.id = $1`,
+            [pregnancy.breeding_event_id],
+          )
         : null;
+
+      // TRANSFERENCIA: la que pare es la receptora. Gestó y va a amamantar, pero no aportó un solo
+      // gen — el embrión ya estaba formado. Poner a la receptora como madre haría que la genealogía
+      // mienta, y todo lo que se derive de ella hereda la mentira: el parentesco de esta cría, la
+      // consanguinidad de SUS futuras crías, la evaluación genética.
+      //
+      // Si el embrión no tiene donante cargada se deja a la receptora como madre: reemplazar un dato
+      // equivocado por ninguno es peor: al menos así queda de quién rastrear.
+      const esTransferencia = evento?.type === 'embryo_transfer' && evento?.donor_dam_id;
+      const madreGenetica = esTransferencia ? evento.donor_dam_id : body.dam_id;
+      const receptora = esTransferencia ? body.dam_id : null;
+      const metodo = evento?.type === 'embryo_transfer' ? 'et' : evento?.type === 'service_ai' ? 'ai' : 'natural';
 
       const calving = await q.one<any>(
         `INSERT INTO calvings (id, tenant_id, pregnancy_id, dam_id, calving_date, ease, offspring_count, notes, created_by)
@@ -426,13 +460,13 @@ export class ReproService {
         if (o.vitality !== 'stillborn') {
           const cat = await q.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [newbornCategoryCode(o.sex)]);
           const calf = await q.one<any>(
-            `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, sire_id, breeding_method_origin, current_lot_id, current_paddock_id, status, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,'born',$7,$8,$9,$10,$11,'active',$12) RETURNING id`,
-            [this.db.tenant, damRow.farm_id, species.id, cat?.id ?? null, o.sex ?? 'F', calvingDate, body.dam_id, sire?.sire_id ?? null, 'natural', damRow.current_lot_id, damRow.current_paddock_id, this.db.user],
+            `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, recipient_dam_id, sire_id, breeding_method_origin, current_lot_id, current_paddock_id, status, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,'born',$7,$8,$9,$10,$11,$12,'active',$13) RETURNING id`,
+            [this.db.tenant, damRow.farm_id, species.id, cat?.id ?? null, o.sex ?? 'F', calvingDate, madreGenetica, receptora, evento?.sire_id ?? null, metodo, damRow.current_lot_id, damRow.current_paddock_id, this.db.user],
           );
           calfId = calf.id;
           if (o.tag) await q.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`, [this.db.tenant, calfId, String(o.tag)]);
-          await q.query(`INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source) VALUES ($1,$2,'birth',$3,$4,now(),'manual')`, [this.db.tenant, calfId, JSON.stringify({ dam_tag: dam.tag, birth_weight_kg: o.birth_weight_kg ?? null }), calvingDate]);
+          await q.query(`INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source) VALUES ($1,$2,'birth',$3,$4,now(),'manual')`, [this.db.tenant, calfId, JSON.stringify({ dam_tag: dam.tag, birth_weight_kg: o.birth_weight_kg ?? null, method: metodo, ...(receptora ? { recipient_dam_id: receptora, recipient_tag: dam.tag } : {}) }), calvingDate]);
         }
         await q.query(
           `INSERT INTO calving_offspring (tenant_id, calving_id, animal_id, birth_weight_kg, vitality, created_by) VALUES ($1,$2,$3,$4,$5,$6)`,

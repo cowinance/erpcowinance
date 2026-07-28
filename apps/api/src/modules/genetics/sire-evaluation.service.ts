@@ -98,7 +98,9 @@ export class SireEvaluationService {
            SELECT value FROM animal_identifiers x
             WHERE x.animal_id = a.sire_id AND x.type = 'visual' AND x.deleted_at IS NULL
             ORDER BY x.created_at DESC LIMIT 1) si ON true
-         LEFT JOIN animals dam ON dam.id = a.dam_id AND dam.deleted_at IS NULL
+         -- La edad de LA QUE CRIÓ, no la de la genética: el ajuste corrige la leche que dio, y en
+         -- una transferencia la leche la puso la receptora.
+         LEFT JOIN animals dam ON dam.id = COALESCE(a.recipient_dam_id, a.dam_id) AND dam.deleted_at IS NULL
          LEFT JOIN LATERAL (
            SELECT birth_weight_kg FROM calving_offspring c
             WHERE c.animal_id = a.id AND c.deleted_at IS NULL LIMIT 1) co ON true

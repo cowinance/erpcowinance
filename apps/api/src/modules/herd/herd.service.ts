@@ -278,12 +278,18 @@ export class HerdService {
     ]);
 
     const genealogy = await this.db.one<any>(
-      `SELECT dam.id AS dam_id, dtag.value AS dam_tag, sire.id AS sire_id, stag.value AS sire_tag
+      // La receptora viaja al lado de los padres: en una transferencia, quién gestó al animal es
+      // parte de su historia y hay que poder rastrearlo con el animal adelante. No es un progenitor
+      // —no aportó genes— y por eso va en su propio campo, no mezclada con la madre.
+      `SELECT dam.id AS dam_id, dtag.value AS dam_tag, sire.id AS sire_id, stag.value AS sire_tag,
+              rec.id AS recipient_dam_id, rtag.value AS recipient_tag, a.breeding_method_origin
        FROM animals a
        LEFT JOIN animals dam ON dam.id = a.dam_id
        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = dam.id AND x.type='visual' ORDER BY x.created_at DESC LIMIT 1) dtag ON true
        LEFT JOIN animals sire ON sire.id = a.sire_id
        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = sire.id AND x.type='visual' ORDER BY x.created_at DESC LIMIT 1) stag ON true
+       LEFT JOIN animals rec ON rec.id = a.recipient_dam_id
+       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = rec.id AND x.type='visual' ORDER BY x.created_at DESC LIMIT 1) rtag ON true
        WHERE a.id = $1`,
       [id],
     );

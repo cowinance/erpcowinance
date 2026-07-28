@@ -10,6 +10,9 @@ export interface Dam {
   avgWeaningKg: number;
   lastWeaningDate: string | null;
   confidence: 'baja' | 'media' | 'alta';
+  donatedCalves: number;
+  geneticKgPerYear: number;
+  isDonor: boolean;
 }
 
 export interface DamReport {
@@ -37,6 +40,10 @@ export function DamEvaluation({ report }: { report: DamReport }) {
     );
 
   const descarte = new Set(report.cull_candidates.map((d) => d.damId));
+  // La columna genética SOLO aparece si la finca hace transferencia. Para las demás sería una
+  // columna que repite exactamente la de al lado, y una tabla con dos números idénticos hace dudar
+  // de los dos.
+  const hayDonantes = report.dams.some((d) => d.isDonor);
   const mejorPorCria = [...report.dams].sort((a, b) => b.avgWeaningKg - a.avgWeaningKg)[0];
   const mejorPorAnio = report.dams[0];
   // Cuando la mejor por cría no es la mejor por año, la tabla está diciendo algo que el ojo no ve.
@@ -94,6 +101,7 @@ export function DamEvaluation({ report }: { report: DamReport }) {
                 <th scope="col" className="px-3 py-2 text-right font-medium">Años</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Promedio por cría</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Kg por año</th>
+                {hayDonantes && <th scope="col" className="px-3 py-2 text-right font-medium">Kg genéticos/año</th>}
                 <th scope="col" className="px-3 py-2 text-left font-medium">Último destete</th>
                 <th scope="col" className="px-3 py-2 text-left font-medium">Confianza</th>
               </tr>
@@ -103,12 +111,19 @@ export function DamEvaluation({ report }: { report: DamReport }) {
                 <tr key={d.damId} className="border-b border-subtle last:border-0">
                   <td className="px-3 py-2">
                     {d.dam_name}
+                    {d.isDonor && <span className="ml-2 text-caption text-brand">donante</span>}
                     {descarte.has(d.damId) && <span className="ml-2 text-caption text-warning">por debajo del rodeo</span>}
                   </td>
                   <td className="tnum px-3 py-2 text-right text-ink-2">{d.calves}</td>
                   <td className="tnum px-3 py-2 text-right text-ink-2">{d.years}</td>
                   <td className="tnum px-3 py-2 text-right text-ink-2">{d.avgWeaningKg || '—'}</td>
                   <td className="tnum px-3 py-2 text-right font-medium">{d.kgPerYear}</td>
+                  {hayDonantes && (
+                    <td className="tnum px-3 py-2 text-right text-ink-2">
+                      {d.geneticKgPerYear}
+                      {d.donatedCalves > 0 && <span className="ml-1 text-caption text-ink-3">({d.donatedCalves} donada{d.donatedCalves > 1 ? 's' : ''})</span>}
+                    </td>
+                  )}
                   <td className="px-3 py-2 text-ink-2">{d.lastWeaningDate ?? '—'}</td>
                   <td className="px-3 py-2 text-ink-3">{d.confidence}</td>
                 </tr>
@@ -116,6 +131,12 @@ export function DamEvaluation({ report }: { report: DamReport }) {
             </tbody>
           </table>
         </div>
+        {hayDonantes && (
+          <p className="mt-2 text-caption text-ink-3">
+            «Kg por año» es lo que la vaca CRIÓ —gestó y amamantó—, que es lo que decide un descarte. «Kg genéticos» suma además las crías con sus
+            genes que gestó otra vaca. A una donante no se la marca por criar poco: su trabajo es dar embriones.
+          </p>
+        )}
         <p className="mt-2 text-caption text-ink-3">
           «Confianza baja» es una vaca con un solo destete: no alcanza para decidir. Una vaca deja una cría por año, así que los umbrales no son los de
           un toro.
