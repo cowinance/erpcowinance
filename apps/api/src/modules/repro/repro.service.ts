@@ -9,6 +9,7 @@ import { TaskService } from '../tasks/task.service';
 import { SemenService } from '../genetics/semen.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import { StrawsService } from '../genetics/straws.service';
+import { InbreedingService } from '../genetics/inbreeding.service';
 import { ServicePlanService } from './service-plan.service';
 
 @Injectable()
@@ -21,6 +22,7 @@ export class ReproService {
     private readonly embryos: EmbryosService,
     private readonly straws: StrawsService,
     private readonly plans: ServicePlanService,
+    private readonly inbreeding: InbreedingService,
   ) {}
 
   /**
@@ -33,6 +35,8 @@ export class ReproService {
   private async serviceGuards(animalId: string, sireId: string | null, force: boolean): Promise<string[]> {
     const t = this.db.tenant;
     const warnings: string[] = [];
+    /** El detalle de cada guarda, para que el bloqueo explique y no solo prohíba. */
+    const detalles: Record<string, unknown> = {};
     const wd = await this.db.one<{ id: string }>(
       `SELECT id FROM treatments WHERE tenant_id=$1 AND animal_id=$2 AND deleted_at IS NULL
          AND (meat_withdrawal_until >= CURRENT_DATE OR milk_withdrawal_until >= now()) LIMIT 1`,
@@ -46,22 +50,44 @@ export class ReproService {
     );
     if (sc) warnings.push('open_severe_case');
     if (sireId) {
-      // Consanguinidad: mismo padre/madre, o padre/hijo directo entre toro y vaca.
-      const rel = await this.db.one<{ n: number }>(
-        `SELECT count(*)::int AS n
-         FROM animals dam, animals sire
-         WHERE dam.id=$2 AND sire.id=$3 AND dam.tenant_id=$1
-           AND ( sire.id = dam.sire_id                                  -- toro = padre de la vaca
-              OR dam.id = sire.dam_id                                   -- vaca = madre del toro
-              OR (dam.sire_id IS NOT NULL AND dam.sire_id = sire.sire_id) -- mismo padre
-              OR (dam.dam_id  IS NOT NULL AND dam.dam_id  = sire.dam_id)  -- misma madre
-              OR (sire.dam_id IS NOT NULL AND sire.dam_id = dam.id) )`,
-        [t, animalId, sireId],
+      // El padre tiene que ser MACHO. No es una guarda de riesgo sino de referencia equivocada, así
+      // que `force` no la saltea: forzar existe para asumir un riesgo, no para guardar un imposible.
+      //
+      // La genealogía ya lo validaba al importar (`sex_incompatible`) y esta puerta no: dos caminos
+      // hacia el mismo dato con reglas distintas, y la que no valida es por donde entra la basura.
+      // Con un `sire_id` femenino, el ternero hereda esa paternidad al parir y después la evaluación
+      // de toros rankea a una vaca.
+      const padre = await this.db.one<{ sex: string }>(
+        `SELECT sex FROM animals WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+        [sireId, t],
       );
-      if ((rel?.n ?? 0) > 0) warnings.push('consanguinity');
+      if (!padre)
+        throw new BadRequestException({ code: 'service.sire_not_found', title: 'El padre indicado no existe' });
+      if (padre.sex !== 'M')
+        throw new BadRequestException({
+          code: 'service.sire_not_male',
+          title: 'El padre de un servicio tiene que ser un macho',
+        });
+
+      // Consanguinidad por COEFICIENTE de Wright sobre seis generaciones, no por las cinco
+      // relaciones de una generación que se miraban antes.
+      //
+      // Aquel chequeo dejaba pasar **abuelo × nieta**, que es el caso que más aparece: un toro se
+      // queda tres o cuatro años en el rodeo, sus hijas entran a servicio —eso sí se detectaba— y
+      // después entran las hijas de sus hijas, y ahí no decía nada. Es cuando la consanguinidad
+      // empieza a cobrarse, y el daño queda en el hato.
+      //
+      // El cambio NO es regresivo: las cinco relaciones que bloqueaban dan todas F ≥ 12,5%, así que
+      // nada de lo que antes se frenaba pasa ahora. Solo se agrega lo que faltaba.
+      const consang = await this.inbreeding.forMating(sireId, animalId);
+      if (consang.blocks) warnings.push('consanguinity');
+      // El detalle viaja aparte del código: quien bloquea necesita saber CUÁNTO y por qué, no solo
+      // que hubo parentesco. `12,5% — medios hermanos o abuelo/nieta` es accionable; «consanguinity»
+      // obliga a adivinar.
+      detalles.consanguinity = consang;
     }
     if (warnings.length && !force)
-      throw new ConflictException({ code: 'service.blocked', title: 'Servicio bloqueado', reasons: warnings });
+      throw new ConflictException({ code: 'service.blocked', title: 'Servicio bloqueado', reasons: warnings, details: detalles });
     return warnings;
   }
 

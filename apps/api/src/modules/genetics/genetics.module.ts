@@ -11,6 +11,8 @@ import { EvaluationsService } from './evaluations.service';
 import { CryoStorageService } from './cryo-storage.service';
 import { StrawsService } from './straws.service';
 import { SireEvaluationController } from './sire-evaluation.controller';
+import { InbreedingService } from './inbreeding.service';
+import { InbreedingController } from './inbreeding.controller';
 import { SireEvaluationService } from './sire-evaluation.service';
 import { NitrogenService } from './nitrogen.service';
 import { InventoryModule } from '../inventory/inventory.module';
@@ -25,8 +27,8 @@ import { InventoryModule } from '../inventory/inventory.module';
  */
 @Module({
   imports: [InventoryModule],
-  controllers: [GeneticsController, EmbryosController, EvaluationsController, CryoStorageController, StrawsController, NitrogenController, SireEvaluationController],
-  providers: [SemenService, EmbryosService, EvaluationsService, CryoStorageService, StrawsService, NitrogenService, SireEvaluationService],
-  exports: [SemenService, EmbryosService, CryoStorageService, StrawsService, NitrogenService, SireEvaluationService],
+  controllers: [GeneticsController, EmbryosController, EvaluationsController, CryoStorageController, StrawsController, NitrogenController, SireEvaluationController, InbreedingController],
+  providers: [SemenService, EmbryosService, EvaluationsService, CryoStorageService, StrawsService, NitrogenService, SireEvaluationService, InbreedingService],
+  exports: [SemenService, EmbryosService, CryoStorageService, StrawsService, NitrogenService, SireEvaluationService, InbreedingService],
 })
 export class GeneticsModule {}

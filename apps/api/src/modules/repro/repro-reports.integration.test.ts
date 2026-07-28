@@ -11,6 +11,7 @@ import { StrawsService } from '../genetics/straws.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import type { WeaningService } from './weaning.service';
 import type { TaskService } from '../tasks/task.service';
+import { InbreedingService } from '../genetics/inbreeding.service';
 
 /**
  * Reproducción E5 — reportes: KPIs de período (servicios, concepción, partos vivos/muertos, abortos,
@@ -46,7 +47,7 @@ describe('repro — reportes reproductivos (E5)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
     reports = new ReproReportsService(db, repro);
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;

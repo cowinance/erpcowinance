@@ -65,3 +65,12 @@ export type { AdjustedWeaning, AnimalSex, ContemporaryMember, DamAgeAdjustment, 
 
 export { computeGeneticCost } from './genetic-cost';
 export type { GeneticCost, GeneticCostInput } from './genetic-cost';
+
+export {
+  matingInbreeding,
+  animalInbreeding,
+  inbreedingLevel,
+  describeInbreeding,
+  INBREEDING_BLOCK_THRESHOLD,
+} from './inbreeding';
+export type { Pedigree, PedigreeNode, InbreedingLevel } from './inbreeding';

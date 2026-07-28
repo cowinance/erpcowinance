@@ -10,6 +10,7 @@ import { StrawsService } from '../genetics/straws.service';
 import { EmbryosService } from '../genetics/embryos.service';
 import type { WeaningService } from './weaning.service';
 import type { TaskService } from '../tasks/task.service';
+import { InbreedingService } from '../genetics/inbreeding.service';
 
 /**
  * Reproducción E6 — integración Lotes/Sanidad/Genética. Guardas del servicio: retiro sanitario activo
@@ -43,7 +44,7 @@ describe('repro — integración lotes/sanidad/genética (E6)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
@@ -77,6 +78,52 @@ describe('repro — integración lotes/sanidad/genética (E6)', () => {
     await expect(repro.service(daughter, { method: 'natural', sire_id: bull })).rejects.toMatchObject({ response: { code: 'service.blocked', reasons: ['consanguinity'] } });
     const forced: any = await repro.service(daughter, { method: 'natural', sire_id: bull, force: true });
     expect(forced.warnings).toContain('consanguinity');
+  });
+
+  it('CONSANGUINIDAD: EL ABUELO CON SU NIETA BLOQUEA — el caso que el chequeo viejo no veía', async () => {
+    // El motivo del cambio. El chequeo anterior miraba UNA generación (mismo padre, misma madre,
+    // padre/hija), así que un toro que se queda tres años en el rodeo pasaba limpio cuando entraban
+    // a servicio las hijas de sus hijas. Es cuando la consanguinidad empieza a cobrarse.
+    const abuelo = await mkAnimal(toro, 'M', lot);
+    const hijo = await mkAnimal(toro, 'M', lot, abuelo);
+    const nieta = await mkAnimal(vaca, 'F', lot, hijo); // sire_id = hijo → abuelo es su abuelo
+
+    await expect(repro.service(nieta, { method: 'natural', sire_id: abuelo })).rejects.toMatchObject({
+      response: { code: 'service.blocked', reasons: ['consanguinity'] },
+    });
+  });
+
+  it('el bloqueo dice CUÁNTO parentesco hay, no solo que lo hay', async () => {
+    // Un aviso binario obliga a adivinar: padre/hija (25%) y primos lejanos (3%) decían lo mismo, y
+    // uno hay que impedirlo mientras el otro es normal en cualquier rodeo cerrado.
+    const bull = await mkAnimal(toro, 'M', lot);
+    const daughter = await mkAnimal(vaca, 'F', lot, bull);
+    await expect(repro.service(daughter, { method: 'natural', sire_id: bull })).rejects.toMatchObject({
+      response: { details: { consanguinity: { f: 0.25, level: 'high' } } },
+    });
+  });
+
+  it('un toro sin parentesco NO se bloquea', async () => {
+    // La otra mitad: si bloqueara de más, el productor aprendería a apretar «forzar» siempre y el
+    // aviso dejaría de servir para algo.
+    const ajeno = await mkAnimal(toro, 'M', lot);
+    const vaquilla = await mkAnimal(vaca, 'F', lot);
+    const ok: any = await repro.service(vaquilla, { method: 'natural', sire_id: ajeno });
+    expect(ok.warnings ?? []).not.toContain('consanguinity');
+  });
+
+  it('EL PADRE DE UN SERVICIO TIENE QUE SER MACHO, y `force` no lo saltea', async () => {
+    // No es una guarda de riesgo sino de referencia equivocada: forzar existe para asumir un riesgo,
+    // no para guardar un imposible. Con un `sire_id` femenino el ternero hereda esa paternidad al
+    // parir, y después la evaluación de toros rankea a una vaca.
+    const otraVaca = await mkAnimal(vaca, 'F', lot);
+    const vaquilla = await mkAnimal(vaca, 'F', lot);
+    await expect(repro.service(vaquilla, { method: 'natural', sire_id: otraVaca })).rejects.toMatchObject({
+      response: { code: 'service.sire_not_male' },
+    });
+    await expect(repro.service(vaquilla, { method: 'natural', sire_id: otraVaca, force: true })).rejects.toMatchObject({
+      response: { code: 'service.sire_not_male' },
+    });
   });
 
   it('estado reproductivo agregado por lote', async () => {
