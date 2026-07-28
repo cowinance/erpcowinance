@@ -92,7 +92,10 @@ export class ReproReportsService {
         `SELECT count(DISTINCT c.id)::int AS n,
                 count(*) FILTER (WHERE o.vitality='live')::int AS live,
                 count(*) FILTER (WHERE o.vitality IN ('stillborn','died_soon'))::int AS dead
-         FROM calvings c LEFT JOIN calving_offspring o ON o.calving_id = c.id
+         -- o.deleted_at IS NULL va en el JOIN y no en el WHERE: en el WHERE convertiría el LEFT en
+         -- INNER y perdería los partos sin crías cargadas. Sin él, una cría borrada seguía contando
+         -- como viva o muerta.
+         FROM calvings c LEFT JOIN calving_offspring o ON o.calving_id = c.id AND o.deleted_at IS NULL
          WHERE c.tenant_id=$1 AND c.deleted_at IS NULL AND c.calving_date BETWEEN $2 AND $3`,
         [t, from, to],
       ),
@@ -143,9 +146,21 @@ export class ReproReportsService {
     const [from, to] = await this.range(fromRaw, toRaw);
     return this.db.query(
       `SELECT be.sire_id, ai.value AS tag, s.name AS sire_name,
-              count(*)::int AS services,
-              count(*) FILTER (WHERE p.id IS NOT NULL)::int AS conceptions,
-              round(count(*) FILTER (WHERE p.id IS NOT NULL)::numeric / NULLIF(count(*),0) * 100, 1)::float AS conception_rate_pct
+              -- DISTINCT en los tres: nada impide en el esquema que un mismo servicio termine con
+              -- más de una preñez ligada (no hay UNIQUE sobre pregnancies.breeding_event_id), y sin
+              -- DISTINCT ese servicio contaría dos veces como servicio Y como concepción, empujando
+              -- la fertilidad del toro hacia el 100%.
+              --
+              -- Pasa cuando el toro anda suelto con el rodeo y los servicios no se anotan uno por
+              -- uno: la vaca se diagnostica preñada otra vez y el sistema la ata al último servicio
+              -- registrado, que es el mismo de antes.
+              --
+              -- El reporte de costo de Genética usa esta misma definición a propósito. Si acá se
+              -- contara distinto, dos pantallas mostrarían fertilidades diferentes del mismo toro y
+              -- ninguna de las dos sería creíble.
+              count(DISTINCT be.id)::int AS services,
+              count(DISTINCT p.id)::int AS conceptions,
+              round(count(DISTINCT p.id)::numeric / NULLIF(count(DISTINCT be.id),0) * 100, 1)::float AS conception_rate_pct
        FROM breeding_events be
        LEFT JOIN animals s ON s.id = be.sire_id
        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = be.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true

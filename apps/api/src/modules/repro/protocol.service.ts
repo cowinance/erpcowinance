@@ -222,6 +222,18 @@ export class ProtocolService {
 
     let eventsCreated = 0;
     let skippedNotEligible = 0;
+    /**
+     * Los que fallaron, con su motivo.
+     *
+     * El `catch` de abajo existe para que un animal problemático no tumbe la jornada entera —está
+     * bien—, pero antes los descartaba EN SILENCIO: si 30 de 40 vientres fallaban por falta de saldo
+     * de semen, la respuesta decía «10 servicios creados» y nada más. El operario cerraba la manga
+     * convencido de que la IATF estaba hecha.
+     *
+     * Es el mismo criterio que el resto del módulo aplica con los destetes descartados y las reses
+     * sin peso vivo: lo que no se pudo hacer se informa, no se esconde.
+     */
+    const fallidos: { animal_id: string; reason: string }[] = [];
     for (const { animal_id, eligibility } of animals) {
       const opKey = `protocol:${assignmentId}:${stepIndex}`;
       if (kind === 'insemination' && eligibility === 'not_eligible') {
@@ -265,9 +277,14 @@ export class ProtocolService {
             eventsCreated++;
           }
         }
-      } catch (e) {
+      } catch (e: any) {
         if (process.env.REPRO_DEBUG) throw e;
-        // un animal no apto (p. ej. macho por error, o sin saldo de semen) no aborta el resto.
+        // Un animal no apto (p. ej. macho por error, o sin saldo de semen) no aborta el resto — pero
+        // queda anotado con su motivo, para que la jornada se pueda terminar a mano.
+        fallidos.push({
+          animal_id,
+          reason: e?.response?.title ?? e?.response?.reasons?.join(', ') ?? e?.message ?? 'error desconocido',
+        });
       }
     }
 
@@ -289,6 +306,8 @@ export class ProtocolService {
       animals: animals.length,
       events_created: eventsCreated,
       skipped_not_eligible: skippedNotEligible,
+      /** Los que no se pudieron registrar y por qué. Vacío cuando salió todo bien. */
+      failed: fallidos,
       completed_steps: completed,
     };
   }

@@ -132,6 +132,26 @@ export class ReproService {
   }
 
   /**
+   * Un hecho no puede estar en el futuro.
+   *
+   * Todos estos eventos —celo, servicio, diagnóstico, parto, aborto— registran algo que YA PASÓ. Una
+   * fecha futura es siempre un error de tipeo, y de los caros: un `2036` en lugar de `2026` mete un
+   * parto en un período que no existe, descoloca los intervalos entre partos y aparece en los
+   * reportes como un hecho más.
+   *
+   * Se compara contra el día de la FINCA y no contra el del servidor: cargar a las 21:00 en
+   * Venezuela no puede volverse «mañana» porque en Greenwich ya cambió el día.
+   */
+  private async rechazarFuturo(fecha: string, que: string): Promise<void> {
+    const hoy = await this.db.today();
+    if (String(fecha).slice(0, 10) > hoy)
+      throw new BadRequestException({
+        code: 'repro.future_date',
+        title: `La fecha ${que} (${String(fecha).slice(0, 10)}) es futura. Se registra lo que ya ocurrió.`,
+      });
+  }
+
+  /**
    * El padre efectivo de un servicio.
    *
    * Lo explícito manda —el técnico puede corregir—, y si no vino se deriva de lo que se usó: la
@@ -195,6 +215,7 @@ export class ReproService {
   async heat(animalId: string, body: any, idempotencyKey?: string) {
     const animal = await this.requireFemale(animalId);
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    await this.rechazarFuturo(occurredAt, 'del celo');
     const id = idempotencyKey ? this.deriveId(idempotencyKey, animalId) : randomUUID();
     const payload = { intensity: body?.intensity ?? null, behavior: body?.behavior ?? null, notes: body?.notes ?? null };
     const existing = await this.db.one<any>(`SELECT id, occurred_at FROM breeding_events WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
@@ -216,6 +237,7 @@ export class ReproService {
     if (!method)
       throw new BadRequestException({ code: 'service.invalid_method', title: "method debe ser 'natural', 'ai' o 'embryo_transfer'" });
     const occurredAt = body?.occurred_at ?? new Date().toISOString();
+    await this.rechazarFuturo(occurredAt, 'del servicio');
     const id = idempotencyKey ? this.deriveId(idempotencyKey, animalId) : randomUUID();
     const existing = await this.db.one<any>(`SELECT id, type, occurred_at FROM breeding_events WHERE id = $1 AND tenant_id = $2`, [id, this.db.tenant]);
     if (existing) return { ...existing, tag: animal.tag, already: true };
@@ -350,6 +372,7 @@ export class ReproService {
       throw new BadRequestException({ code: 'diagnosis.invalid_result', title: "result debe ser 'pregnant', 'empty' o 'doubtful'" });
     const animal = await this.requireFemale(body.animal_id);
     const diagnosisDate = (body.diagnosis_date ? String(body.diagnosis_date).slice(0, 10) : await this.db.today());
+    await this.rechazarFuturo(diagnosisDate, 'del diagnóstico');
 
     if (body.result === 'doubtful') {
       // Dudosa: no crea/cierra preñez; deja traza y agenda un RECONTROL (tarea) a los 14 días.
@@ -432,6 +455,7 @@ export class ReproService {
     if (!body?.animal_id) throw new BadRequestException({ code: 'abortion.missing_fields', title: 'animal_id es obligatorio' });
     const animal = await this.requireFemale(body.animal_id);
     const occurredAt = (body.occurred_at ? String(body.occurred_at).slice(0, 10) : await this.db.today());
+    await this.rechazarFuturo(occurredAt, 'del aborto');
     return this.db.tx(async (q) => {
       const open = await q.one<any>(
         `UPDATE pregnancies SET status = 'aborted', closed_at = $3, loss_cause = $4, loss_gestational_days = $5, updated_at = now()
@@ -455,6 +479,7 @@ export class ReproService {
       throw new BadRequestException({ code: 'calving.missing_fields', title: 'dam_id es obligatorio' });
     const dam = await this.requireFemale(body.dam_id);
     const calvingDate = (body.calving_date ? String(body.calving_date).slice(0, 10) : await this.db.today());
+    await this.rechazarFuturo(calvingDate, 'del parto');
     const crudas: any[] = Array.isArray(body.offspring) && body.offspring.length ? body.offspring : [{ sex: 'F', vitality: 'live' }];
     // El sexo de la cría se INTERPRETA igual que en el alta y en la planilla: quien anota un parto
     // en el corral escribe `H` de hembra, no `F` de female. Sin esto, ese `H` llegaba crudo al

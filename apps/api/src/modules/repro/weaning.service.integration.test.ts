@@ -61,6 +61,57 @@ describe('WeaningService · integración', () => {
   const changesetsFor = async (wid: string) =>
     db.query<any>(`SELECT origin_ref FROM sync_changesets WHERE source = 'server' AND origin_ref = $1`, [`weaning:${wid}`]);
 
+  it('UN ANIMAL SE DESTETA UNA SOLA VEZ', async () => {
+    // La idempotencia por id cubre el reintento del MISMO registro; esto cubre lo otro: dos cargas
+    // distintas del mismo destete, que pasa cuando lo anotan dos personas o se recarga una planilla.
+    // El daño va directo a los números: en la auditoría, tres destetes de un animal dieron una tasa
+    // de destete del 300% y le duplicaron los kilos a la madre.
+    const a = await animal(uniq('UNO'));
+    await db.tx((q) => weaning.recordWeaning(q, { animalId: a, weightKg: 180, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' }));
+    await expect(
+      db.tx((q) => weaning.recordWeaning(q, { animalId: a, weightKg: 190, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' })),
+    ).rejects.toMatchObject({ response: { code: 'weaning.already_weaned' } });
+    expect(await weanRows(a)).toHaveLength(1);
+  });
+
+  it('EL PESO TIENE QUE SER UN PESO', async () => {
+    // Un negativo entraba y contaminaba el promedio del período y los kilos destetados de la madre.
+    // Un cero no distingue «pesó cero» de «no se pesó», y esas dos cosas sí se distinguen: para no
+    // pesarlo, se omite el campo.
+    const a = await animal(uniq('PESO'));
+    for (const kg of [-50, 0]) {
+      await expect(
+        db.tx((q) => weaning.recordWeaning(q, { animalId: a, weightKg: kg, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' })),
+      ).rejects.toMatchObject({ response: { code: 'weaning.invalid_weight' } });
+    }
+    expect(await weanRows(a)).toHaveLength(0);
+  });
+
+  it('sin peso sigue siendo válido: no pesarlo es distinto de pesar cero', async () => {
+    const a = await animal(uniq('SINPESO'));
+    const r = await db.tx((q) => weaning.recordWeaning(q, { animalId: a, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' }));
+    expect(r.recorded).toBe(true);
+  });
+
+  it('NO SE DESTETA ANTES DE NACER NI EN EL FUTURO', async () => {
+    // La evaluación de toros ya descartaba estos casos al leer —los cuenta como «datos
+    // imposibles»—, pero descartar al leer no arregla el dato: queda ahí, contando en el hato.
+    const a = await animal(uniq('FECHA'));
+    await db.query(`UPDATE animals SET birth_date = '2025-06-01' WHERE id = $1`, [a]);
+
+    await expect(
+      db.tx((q) => weaning.recordWeaning(q, { animalId: a, weaningDate: '2025-01-10', weightKg: 190, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' })),
+    ).rejects.toMatchObject({ response: { code: 'weaning.before_birth' } });
+
+    await expect(
+      db.tx((q) => weaning.recordWeaning(q, { animalId: a, weaningDate: '2099-01-10', weightKg: 190, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' })),
+    ).rejects.toMatchObject({ response: { code: 'weaning.future_date' } });
+
+    // Y el válido entra: la guarda no puede frenar un destete normal.
+    const ok = await db.tx((q) => weaning.recordWeaning(q, { animalId: a, weaningDate: '2026-01-10', weightKg: 190, weaningId: randomUUID(), actorUserId: userId, origin: 'rest' }));
+    expect(ok.recorded).toBe(true);
+  });
+
   it('destete con peso: una fila weanings, un pesaje con id=weaningId, un timeline; sin changeset server-origin', async () => {
     const tag = uniq('T');
     const a = await animal(tag);

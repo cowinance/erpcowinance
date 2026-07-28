@@ -124,7 +124,7 @@ describe('transferencia de embrión — quién aporta los genes y quién el vien
   it('EL DESTETE SE LE ACREDITA A LA RECEPTORA: la leche la puso ella', async () => {
     // El peso al destete es leche. Acreditárselo a la donante le regalaría kilos que no produjo y se
     // los sacaría a la vaca que trabajó el ciclo entero.
-    await repro.weaning({ animal_id: cria, weaning_date: '2026-11-01', weight_kg: 210 });
+    await repro.weaning({ animal_id: cria, weaning_date: '2026-06-01', weight_kg: 210 });
     const [w] = await db.query<any>(`SELECT dam_id FROM weanings WHERE animal_id=$1 AND deleted_at IS NULL`, [cria]);
     expect(w.dam_id).toBe(receptora);
   }, 120_000);

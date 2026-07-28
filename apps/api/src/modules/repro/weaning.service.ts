@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService, Q } from '../../db/db.service';
 
 /**
@@ -76,8 +76,8 @@ export class WeaningService {
     // `dam_id` del destete es LA QUE CRIÓ, no la genética: el peso al destete es leche, y en una
     // transferencia la leche la puso la receptora. Acreditárselo a la donante le regalaría kilos que
     // no produjo y se los sacaría a la vaca que sí trabajó todo el ciclo.
-    const animal = await q.one<{ id: string; dam_id: string | null; tag: string | null }>(
-      `SELECT a.id, COALESCE(a.recipient_dam_id, a.dam_id) AS dam_id, ai.value AS tag
+    const animal = await q.one<{ id: string; dam_id: string | null; tag: string | null; birth_date: string | null }>(
+      `SELECT a.id, COALESCE(a.recipient_dam_id, a.dam_id) AS dam_id, a.birth_date::text AS birth_date, ai.value AS tag
        FROM animals a
        LEFT JOIN LATERAL (
          SELECT value FROM animal_identifiers x
@@ -90,6 +90,53 @@ export class WeaningService {
 
     const weaningDate = (input.weaningDate ? String(input.weaningDate).slice(0, 10) : await this.db.today(q));
     const weightKg = input.weightKg ?? null;
+
+    // UN SOLO DESTETE POR ANIMAL. Se desteta una vez en la vida.
+    //
+    // La idempotencia de arriba cubre el reintento del MISMO registro; esto cubre lo otro: dos
+    // cargas distintas del mismo destete, que es lo que pasa cuando lo anotan dos personas o cuando
+    // se vuelve a cargar una planilla. El daño es directo sobre los números que se miran: en la
+    // auditoría, tres destetes de un animal dieron una tasa de destete del 300% y le duplicaron los
+    // kilos a la madre en la evaluación de vientres.
+    const yaDestetado = await q.one<{ id: string; weaning_date: string }>(
+      `SELECT id, weaning_date::text AS weaning_date FROM weanings
+        WHERE animal_id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND id <> $3`,
+      [input.animalId, t, input.weaningId],
+    );
+    if (yaDestetado)
+      throw new ConflictException({
+        code: 'weaning.already_weaned',
+        title: `Este animal ya fue destetado el ${yaDestetado.weaning_date}. Un animal se desteta una sola vez.`,
+      });
+
+    // El peso tiene que ser un peso. Un negativo entraba y contaminaba el promedio del período y los
+    // kilos destetados de la madre; un cero no distingue «pesó cero» de «no se pesó», que sí se
+    // distinguen: para no pesarlo, se omite el campo.
+    if (weightKg != null && !(Number(weightKg) > 0))
+      throw new BadRequestException({
+        code: 'weaning.invalid_weight',
+        title: 'El peso al destete tiene que ser mayor que cero. Si no lo pesaste, dejá el campo vacío.',
+      });
+
+    // No se desteta antes de nacer. La evaluación de toros ya descartaba estos casos al leer
+    // —los cuenta como «datos imposibles»—, pero descartar al leer no arregla el dato: queda ahí,
+    // contando en el hato y en la tasa de destete.
+    // `birth_date::text` en la consulta y no `String(...)` acá: PGlite devuelve las columnas `date`
+    // como objetos Date, y `String(new Date(...)).slice(0,10)` da «Sun Jun 01» — comparado como
+    // texto contra «2026-01-10» rechazaba destetes perfectamente válidos.
+    if (animal.birth_date && weaningDate <= animal.birth_date.slice(0, 10))
+      throw new BadRequestException({
+        code: 'weaning.before_birth',
+        title: 'La fecha de destete es anterior o igual a la de nacimiento.',
+      });
+
+    // Y no se desteta en el futuro: es un hecho, no un plan.
+    const hoy = await this.db.today(q);
+    if (weaningDate > hoy)
+      throw new BadRequestException({
+        code: 'weaning.future_date',
+        title: `La fecha de destete (${weaningDate}) es futura. Un destete se registra cuando ocurrió.`,
+      });
 
     // (1) hecho: fila weanings con id determinista = weaningId.
     await q.query(

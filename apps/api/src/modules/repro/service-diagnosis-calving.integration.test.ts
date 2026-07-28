@@ -213,6 +213,20 @@ describe('repro — servicios/diagnósticos/partos robustos (E2)', () => {
     ).rejects.toMatchObject({ response: { code: 'calving.offspring_not_found' } });
   });
 
+  it('UN HECHO NO PUEDE ESTAR EN EL FUTURO', async () => {
+    // Celo, servicio, diagnóstico, parto y aborto registran algo que YA PASÓ. Una fecha futura es
+    // siempre un tipeo, y de los caros: un 2036 en lugar de 2026 mete un parto en un período que no
+    // existe, descoloca los intervalos y aparece en los reportes como un hecho más.
+    const a = await mkFemale(uniq('FUT'));
+    const futuro = '2099-01-01';
+
+    await expect(repro.heat(a, { occurred_at: futuro })).rejects.toMatchObject({ response: { code: 'repro.future_date' } });
+    await expect(repro.service(a, { method: 'natural', occurred_at: futuro })).rejects.toMatchObject({ response: { code: 'repro.future_date' } });
+    await expect(repro.diagnose({ animal_id: a, result: 'pregnant', diagnosis_date: futuro })).rejects.toMatchObject({ response: { code: 'repro.future_date' } });
+    await expect(repro.calving({ dam_id: a, calving_date: futuro, offspring: [{ sex: 'F' }] })).rejects.toMatchObject({ response: { code: 'repro.future_date' } });
+    await expect(repro.abortion({ animal_id: a, occurred_at: futuro })).rejects.toMatchObject({ response: { code: 'repro.future_date' } });
+  });
+
   it('parto crea cría, cierra preñez y agenda tareas postparto; idempotente sin duplicar', async () => {
     const a = await mkFemale(uniq('P'));
     await openPreg(a);

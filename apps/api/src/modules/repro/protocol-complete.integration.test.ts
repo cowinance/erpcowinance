@@ -76,7 +76,7 @@ describe('repro — protocolos completos (E4)', () => {
   it('asigna a un lote, snapshotea vientres y genera una tarea por paso', async () => {
     const a1 = await mkVaca(lot);
     const a2 = await mkVaca(lot);
-    const res: any = await protocols.assignProtocol({ protocol_id: protoId, lot_id: lot, start_date: '2027-05-01' });
+    const res: any = await protocols.assignProtocol({ protocol_id: protoId, lot_id: lot, start_date: '2026-05-01' });
     expect(res.target_type).toBe('lot');
     expect(res.animals).toBe(2);
     expect(res.tasks_created).toBe(4);
@@ -85,14 +85,14 @@ describe('repro — protocolos completos (E4)', () => {
   });
 
   it('dedup: reasignar el mismo protocolo al lote excluye los ya asignados → 409 si todos están', async () => {
-    await expect(protocols.assignProtocol({ protocol_id: protoId, lot_id: lot, start_date: '2027-05-15' }))
+    await expect(protocols.assignProtocol({ protocol_id: protoId, lot_id: lot, start_date: '2026-05-15' }))
       .rejects.toMatchObject({ response: { code: 'assignment.all_in_protocol' } });
   });
 
   it('completar paso hormonal registra sincronización por animal (idempotente)', async () => {
     const l2 = (await db.query<{ id: string }>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [t, farmId, uniq('L2')]))[0].id;
     const a = await mkVaca(l2);
-    const asg: any = await protocols.assignProtocol({ protocol_id: protoId, lot_id: l2, start_date: '2027-05-01' });
+    const asg: any = await protocols.assignProtocol({ protocol_id: protoId, lot_id: l2, start_date: '2026-05-01' });
     const r1: any = await protocols.completeStep(asg.assignment.id, 0, {}); // hormonal
     expect(r1.kind).toBe('hormonal');
     expect(r1.events_created).toBe(1);
@@ -105,8 +105,8 @@ describe('repro — protocolos completos (E4)', () => {
   it('completar paso de inseminación registra un servicio IATF por animal', async () => {
     const l3 = (await db.query<{ id: string }>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [t, farmId, uniq('L3')]))[0].id;
     const a = await mkVaca(l3);
-    const asg: any = await protocols.assignProtocol({ protocol_id: protoId, lot_id: l3, start_date: '2027-05-01' });
-    const r: any = await protocols.completeStep(asg.assignment.id, 2, { occurred_at: '2027-05-11' }); // insemination
+    const asg: any = await protocols.assignProtocol({ protocol_id: protoId, lot_id: l3, start_date: '2026-05-01' });
+    const r: any = await protocols.completeStep(asg.assignment.id, 2, { occurred_at: '2026-05-11' }); // insemination
     expect(r.kind).toBe('insemination');
     expect(await bevents(a, 'service_ai')).toBe(1);
     // progreso refleja los pasos completados
@@ -119,7 +119,7 @@ describe('repro — protocolos completos (E4)', () => {
     const l4 = (await db.query<{ id: string }>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [t, farmId, uniq('L4')]))[0].id;
     const a1 = await mkVaca(l4);
     await mkVaca(l4); // no seleccionada
-    const res: any = await protocols.assignProtocol({ protocol_id: protoId, animal_ids: [a1], start_date: '2027-05-01' });
+    const res: any = await protocols.assignProtocol({ protocol_id: protoId, animal_ids: [a1], start_date: '2026-05-01' });
     expect(res.target_type).toBe('selection');
     expect(res.animals).toBe(1);
   });
