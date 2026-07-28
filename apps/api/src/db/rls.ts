@@ -193,6 +193,9 @@ export const RLS_TABLES = [
   'subscription_usage',
   'notification_preferences',
   'trace_events',
+  // O-3: el registro de qué filas creó el hato de ejemplo. Aislada como todas — el borrado se
+  // apoya en ella, y una fuga acá dejaría a un tenant borrando filas anotadas por otro.
+  'onboarding_sample_rows',
 ];
 
 /**

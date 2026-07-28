@@ -478,7 +478,40 @@ software esté completo.
 
    Verificado bajando la plantilla e importándola tal cual: 3 válidas, 3 creadas, 0 errores.
 
-   Falta de este punto: **O-3** datos de ejemplo opcionales (cargar y borrar un hato de muestra).
+   **O-3 · Datos de ejemplo opcionales — HECHO (27 jul 2026). Con esto el punto 1 queda CERRADO.**
+   Una finca recién creada está vacía, y una app vacía no muestra para qué sirve: todos los KPIs en
+   cero, ninguna agenda, ningún gráfico. El productor tenía que cargar su hato entero antes de poder
+   juzgar si esto le convenía. Ahora puede cargar un hato de muestra (9 animales, 2 lotes, dos
+   pesajes por animal para que haya GDP) y mirar primero.
+
+   **Lo delicado no es crearlo, es sacarlo.** Un animal inventado que sobrevive al borrado entra en
+   el conteo del hato, en los KPIs, en los reportes y en la contabilidad — y se descubre tarde,
+   cuando ya hay meses de datos reales encima. Por eso:
+
+   - se **anota** lo que se crea (`onboarding_sample_rows`, migración 0028) y se borra exactamente
+     eso. El borrado NO adivina por nombre, ni por fecha, ni por prefijo de caravana: si no está
+     anotado, no se toca. La garantía es estructural, no heurística — y hay un test que crea un
+     animal del productor llamado `EJ-999` y verifica que sobrevive;
+   - se crea con los servicios **reales** (`HerdService`, `LotsService`), no con SQL a mano: el
+     ejemplo es un hato de verdad, que es lo que el productor está mirando para decidir;
+   - un lote de ejemplo con un animal del productor adentro **se conserva** — es preferible
+     devolverle un lote de más que dejarle un animal sin grupo;
+   - el aviso mientras están cargados es permanente y dice cuántos son: lo peor que puede pasar es
+     que el productor se olvide de que están y empiece a trabajar encima.
+
+   El test central compara la finca antes y después: animales, lotes, pesajes, eventos e
+   identificadores tienen que volver al número exacto que tenían.
+
+   **Bug encontrado y arreglado de paso:** `db.defaultFarm()` se llamaba DENTRO de la transacción de
+   `persistNewAnimal` con la caché fría → consulta suelta con la tx abierta → deadlock de la
+   conexión única de PGlite. Estaba "resuelto" con una línea de precalentamiento y un comentario en
+   UN test; cualquier código que creara un animal como primera operación tras arrancar se colgaba.
+   Ahora `defaultFarm(q)` acepta el handle, igual que `timeZone(q)`. Se quitó el precalentamiento y
+   ese test sigue pasando.
+
+   Limitación deliberada: el borrado es un `deleted_at` sin op de sincronización, igual que el resto
+   de los borrados de la app. Un teléfono ya sincronizado seguiría mostrando el ejemplo hasta
+   resincronizar de cero; se acepta porque los datos de ejemplo son de la primera sesión en la web.
 2. **Verificar los planes de facturación end-to-end** con un proveedor de pagos.
 3. **Beta con un socio de diseño** (`docs/product/design-partner-strategy.md`) sobre datos reales:
    es lo único que revela si el modelo de datos aguanta una finca de verdad.

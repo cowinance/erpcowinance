@@ -17,6 +17,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { MediaModule } from './modules/media/media.module';
 import { ImportModule } from './modules/import/import.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
@@ -49,6 +50,6 @@ import { PlatformModule } from './modules/platform/platform.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule, WeatherModule, TaxModule, PlatformModule],
+  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule, WeatherModule, TaxModule, PlatformModule, OnboardingModule],
 })
 export class AppModule {}

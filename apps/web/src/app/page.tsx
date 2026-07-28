@@ -8,6 +8,7 @@ import { EVENT_LABELS, relativeTime } from '@/lib/format';
 import { Plus, Zap, CheckSquare, Stethoscope, Syringe, Heart, Baby, ArrowLeftRight, AlertTriangle, Scale, Scissors, StickyNote, Tag } from 'lucide-react';
 import { AgendaAttention } from '@/components/AgendaAttention';
 import { focusFor, orderActionsByRole, orderPriorityByRole } from '@/lib/role-focus';
+import { SampleData } from '@/components/SampleData';
 
 /** Acciones rápidas del Inicio (Home E3): actuar, no solo mirar. Rutas existentes + anchors de captura. */
 const QUICK_ACTIONS = [
@@ -106,7 +107,14 @@ export default async function Dashboard() {
       />
 
       {neverPopulated ? (
-        <FarmSetup setup={setup} greetingName={me?.name} farmName={farms?.[0]?.name} />
+        <>
+          <FarmSetup setup={setup} greetingName={me?.name} farmName={farms?.[0]?.name} />
+          {/* El ofrecimiento va DEBAJO de los primeros pasos: cargar el hato propio es lo que se
+              quiere que haga; los datos de ejemplo son para mirar, no el camino principal. */}
+          <div className="mt-5">
+            <SampleData hasAnimals={false} />
+          </div>
+        </>
       ) : noActiveButHasHistory ? (
         <EmptyState
           title="No tenés animales activos"
@@ -116,6 +124,10 @@ export default async function Dashboard() {
         />
       ) : (
         <>
+          {/* El aviso de datos de ejemplo va PRIMERO: si el productor se olvida de que están,
+              cada número que mire debajo es mentira. */}
+          <SampleData hasAnimals />
+
           {/* Primeros pasos: sigue estando hasta que la finca esté armada. El panel viejo se iba
               al cargar el primer animal, justo cuando empezaba a hacer falta. */}
           <FarmSetup setup={setup} />

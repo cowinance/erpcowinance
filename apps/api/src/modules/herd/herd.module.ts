@@ -12,6 +12,6 @@ import { AnimalSyncHandler } from './sync/animal-sync.handler';
   imports: [BillingModule],
   controllers: [HerdController],
   providers: [HerdService, LotsService, AnimalWriteService, AnimalStatusService, WeighingSyncHandler, AnimalSyncHandler],
-  exports: [AnimalWriteService, AnimalStatusService], // AnimalWriteService: ImportModule (P2 3.5). AnimalStatusService: Commerce ventas (C-3).
+  exports: [AnimalWriteService, AnimalStatusService, HerdService, LotsService], // AnimalWriteService: ImportModule (P2 3.5). AnimalStatusService: Commerce ventas (C-3). Herd/Lots: OnboardingModule (O-3) crea el hato de ejemplo con los servicios REALES.
 })
 export class HerdModule {}
