@@ -151,6 +151,68 @@ describe('repro — servicios/diagnósticos/partos robustos (E2)', () => {
     expect(await db.query(`SELECT id FROM calvings WHERE dam_id=$1 AND deleted_at IS NULL`, [a])).toHaveLength(1);
   });
 
+  it('UNA CRÍA YA REGISTRADA SE VINCULA, NO SE DUPLICA', async () => {
+    // Pasa de verdad: el ternero se carga en la manga apenas nace y el parto se anota después, en la
+    // oficina. Antes `animal_id` se ignoraba en silencio y la segunda carga creaba un animal NUEVO:
+    // dos terneros donde había uno, los dos contando en el hato, en los KPIs y en los kilos
+    // destetados de la madre. Se descubrió auditando, con 18 duplicados de golpe.
+    const madre = await mkFemale(uniq('VINC'));
+    const [{ id: cria }] = await db.query<any>(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status) 
+       SELECT $1, farm_id, species_id, 'M', 'active' FROM animals WHERE id=$2 RETURNING id`,
+      [db.tenant, madre],
+    );
+    const antes = (await db.query<any>(`SELECT id FROM animals WHERE tenant_id=$1 AND deleted_at IS NULL`, [db.tenant])).length;
+
+    const r: any = await repro.calving({ dam_id: madre, calving_date: '2026-05-10', offspring: [{ animal_id: cria }] });
+    const despues = (await db.query<any>(`SELECT id FROM animals WHERE tenant_id=$1 AND deleted_at IS NULL`, [db.tenant])).length;
+
+    expect(despues, 'se creó un animal nuevo en vez de vincular el que había').toBe(antes);
+    expect(r.offspring[0].animal_id).toBe(cria);
+    // El sexo sale del ANIMAL, no del payload: quien anota el parto no siempre lo manda, y por
+    // defecto es hembra — reportar eso haría que la respuesta mienta.
+    expect(r.offspring[0].sex).toBe('M');
+
+    const [a] = await db.query<any>(`SELECT dam_id, birth_date::text AS birth_date FROM animals WHERE id=$1`, [cria]);
+    expect(a.dam_id, 'el parto sabe de quién es hija y tiene que completarlo').toBe(madre);
+    expect(a.birth_date).toBe('2026-05-10');
+  });
+
+  it('la misma cría no se puede registrar en dos partos', async () => {
+    const madre = await mkFemale(uniq('DOS'));
+    const [{ id: cria }] = await db.query<any>(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status)
+       SELECT $1, farm_id, species_id, 'F', 'active' FROM animals WHERE id=$2 RETURNING id`,
+      [db.tenant, madre],
+    );
+    await repro.calving({ dam_id: madre, calving_date: '2025-01-10', offspring: [{ animal_id: cria }] });
+    await expect(
+      repro.calving({ dam_id: madre, calving_date: '2026-01-10', offspring: [{ animal_id: cria }] }),
+    ).rejects.toMatchObject({ response: { code: 'calving.offspring_already_linked' } });
+  });
+
+  it('NO SE LE PISA LA MADRE A UNA CRÍA QUE YA TIENE OTRA', async () => {
+    // O el parto es de otra vaca o la genealogía estaba mal: las dos cosas las resuelve una persona,
+    // no un UPDATE silencioso.
+    const madreReal = await mkFemale(uniq('REAL'));
+    const otra = await mkFemale(uniq('OTRA'));
+    const [{ id: cria }] = await db.query<any>(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, dam_id)
+       SELECT $1, farm_id, species_id, 'F', 'active', $3 FROM animals WHERE id=$2 RETURNING id`,
+      [db.tenant, madreReal, madreReal],
+    );
+    await expect(
+      repro.calving({ dam_id: otra, calving_date: '2026-06-01', offspring: [{ animal_id: cria }] }),
+    ).rejects.toMatchObject({ response: { code: 'calving.offspring_other_dam' } });
+  });
+
+  it('una cría inexistente se rechaza en vez de ignorarse', async () => {
+    const madre = await mkFemale(uniq('FANT'));
+    await expect(
+      repro.calving({ dam_id: madre, calving_date: '2026-06-01', offspring: [{ animal_id: randomUUID() }] }),
+    ).rejects.toMatchObject({ response: { code: 'calving.offspring_not_found' } });
+  });
+
   it('parto crea cría, cierra preñez y agenda tareas postparto; idempotente sin duplicar', async () => {
     const a = await mkFemale(uniq('P'));
     await openPreg(a);

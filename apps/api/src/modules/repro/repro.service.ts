@@ -553,7 +553,59 @@ export class ReproService {
       const calves: { animal_id: string | null; sex: string; vitality: string; tag: string | null }[] = [];
       for (const o of offspring) {
         let calfId: string | null = null;
-        if (o.vitality !== 'stillborn') {
+
+        // La cría YA REGISTRADA se vincula, no se duplica.
+        //
+        // Pasa de verdad: el ternero se carga en la manga apenas nace —o entra por la planilla— y el
+        // parto se anota después, en la oficina. Antes `animal_id` se ignoraba en silencio y la
+        // segunda carga creaba un animal NUEVO: dos terneros donde había uno, los dos contando en el
+        // hato, en los KPIs y en los kilos destetados de la madre. Se descubrió auditando, con 18
+        // duplicados de golpe.
+        if (o.animal_id) {
+          const existente = await q.one<{ id: string; dam_id: string | null; sex: string }>(
+            `SELECT id, dam_id, sex FROM animals WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+            [o.animal_id, this.db.tenant],
+          );
+          if (!existente)
+            throw new BadRequestException({ code: 'calving.offspring_not_found', title: 'La cría indicada no existe' });
+
+          const yaVinculada = await q.one<{ calving_id: string }>(
+            `SELECT calving_id FROM calving_offspring WHERE animal_id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+            [o.animal_id, this.db.tenant],
+          );
+          if (yaVinculada)
+            throw new ConflictException({
+              code: 'calving.offspring_already_linked',
+              title: 'Esa cría ya está registrada en otro parto',
+            });
+
+          // Si la cría ya tiene OTRA madre cargada, no se la pisa: o el parto es de otra vaca o la
+          // genealogía estaba mal, y las dos cosas las tiene que resolver una persona.
+          if (existente.dam_id && existente.dam_id !== madreGenetica)
+            throw new ConflictException({
+              code: 'calving.offspring_other_dam',
+              title: 'Esa cría ya tiene otra madre registrada',
+            });
+
+          // Se completa lo que falte, sin tocar lo que ya estaba: el parto sabe de quién es hija y
+          // cuándo nació, y esos datos suelen faltar cuando la cría se cargó a las apuradas.
+          await q.query(
+            `UPDATE animals
+                SET dam_id = COALESCE(dam_id, $3),
+                    recipient_dam_id = COALESCE(recipient_dam_id, $4),
+                    sire_id = COALESCE(sire_id, $5),
+                    birth_date = COALESCE(birth_date, $6::date),
+                    breeding_method_origin = COALESCE(breeding_method_origin, $7),
+                    updated_at = now()
+              WHERE id=$1 AND tenant_id=$2`,
+            [o.animal_id, this.db.tenant, madreGenetica, receptora, evento?.sire_id ?? null, calvingDate, metodo],
+          );
+          calfId = o.animal_id;
+          // El sexo de la respuesta sale del ANIMAL, no del payload: para una cría que ya existe,
+          // el dato bueno es el suyo. Reportar el que vino haría que la respuesta mienta cuando el
+          // que anota el parto no manda el sexo (por defecto, hembra).
+          o.sex = existente.sex;
+        } else if (o.vitality !== 'stillborn') {
           const cat = await q.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [newbornCategoryCode(o.sex)]);
           const calf = await q.one<any>(
             `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, recipient_dam_id, sire_id, breeding_method_origin, current_lot_id, current_paddock_id, status, created_by)
