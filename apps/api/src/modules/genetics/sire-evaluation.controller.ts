@@ -25,9 +25,20 @@ export class SireEvaluationController {
     return this.evaluation.costBySire({ year: Number.isFinite(y) ? y : undefined });
   }
 
+  /**
+   * El toro a lo largo de su CARRERA: los índices de todas sus temporadas, combinados.
+   *
+   * Una temporada de 8 terneros nunca pasa de confianza «baja»; tres temporadas juntas ya son
+   * «media». Es la diferencia entre no poder decidir una compra y poder.
+   */
+  @Get('sire-career')
+  career() {
+    return this.evaluation.careerBySire();
+  }
+
   /** Rendimiento en el gancho por toro: el último escalón de la cadena, donde se cobra. */
   @Get('carcass-by-sire')
-  carcass() {
-    return this.evaluation.carcassBySire();
+  carcass(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.evaluation.carcassBySire({ from, to });
   }
 }

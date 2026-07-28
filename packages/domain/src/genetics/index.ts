@@ -74,3 +74,6 @@ export {
   INBREEDING_BLOCK_THRESHOLD,
 } from './inbreeding';
 export type { Pedigree, PedigreeNode, InbreedingLevel } from './inbreeding';
+
+export { sireCareers } from './sire-career';
+export type { ContemporaryGroupResult, SireCareer } from './sire-career';

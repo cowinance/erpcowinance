@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { adjustWeaningWeight, computeDressingPct, computeGeneticCost, confidenceFor, sireIndexes, type AnimalSex, type ContemporaryMember } from '@cowinance/domain';
+import { adjustWeaningWeight, computeDressingPct, computeGeneticCost, confidenceFor, sireCareers, sireIndexes, type AnimalSex, type ContemporaryGroupResult, type ContemporaryMember } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 
 /**
@@ -18,6 +18,9 @@ import { DbService } from '../../db/db.service';
  * reproductivo. Motivo: un servicio puede no haber preñado, una preñez puede perderse, y lo que
  * hay que evaluar es el ternero que efectivamente nació. Ir por el evento contaría intenciones.
  */
+/** Una fila de la evaluación: el índice del toro dentro del grupo, con su nombre para mostrar. */
+type SireRow = ReturnType<typeof sireIndexes>[number] & { sire_name: string };
+
 @Injectable()
 export class SireEvaluationService {
   constructor(private readonly db: DbService) {}
@@ -31,6 +34,49 @@ export class SireEvaluationService {
    * siguiente cuando haya volumen para sostenerlo.
    */
   async bySire(params: { year?: number } = {}) {
+    const anios = await this.availableYears();
+    const anio = params.year ?? anios[0];
+    // Sin ninguna parición cargada no hay nada que evaluar. El tipo del arreglo va explícito: un
+    // `[]` pelado se infiere como `never[]` y contagia el tipo del retorno entero.
+    if (anio == null)
+      return { year: null, available_years: [], group_size: 0, incomplete: 0, discarded: 0, sires: [] as SireRow[] };
+    const { grupo, descartadas } = await this.grupoContemporaneo(anio);
+    return { ...this.evaluarGrupo(grupo), year: anio, available_years: anios, discarded: descartadas };
+  }
+
+  /**
+   * Los años con destetes cargados. Consulta propia y barata a propósito.
+   *
+   * Antes salían de traer TODOS los destetes de la historia y sacarles los años en memoria — con
+   * tres joins laterales por fila, para mostrar una sola temporada. A la décima parición eso son
+   * miles de filas para dibujar cientos. Acá solo se leen años.
+   */
+  async availableYears(): Promise<number[]> {
+    const filas = await this.db.query<{ anio: number }>(
+      `SELECT DISTINCT EXTRACT(YEAR FROM a.birth_date::date)::int AS anio
+         FROM animals a
+         JOIN weanings w ON w.animal_id = a.id AND w.deleted_at IS NULL AND w.weaning_weight_kg IS NOT NULL
+        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.sire_id IS NOT NULL
+          AND a.birth_date IS NOT NULL AND w.weaning_date IS NOT NULL
+          -- Las MISMAS condiciones que usa el grupo contemporáneo para descartar un destete
+          -- imposible. Si acá se contara más ancho, un año cuyo único destete está mal cargado
+          -- entraría a la lista, el año por defecto caería sobre él y la pantalla saldría vacía
+          -- sin explicar por qué.
+          AND w.weaning_date::date > a.birth_date::date
+          AND w.weaning_weight_kg > 0
+        ORDER BY anio DESC`,
+      [this.db.tenant],
+    );
+    return filas.map((f) => f.anio);
+  }
+
+  /**
+   * Los destetes de UNA parición, con todo lo que el ajuste necesita.
+   *
+   * El año va en el SQL y no se filtra después: es la diferencia entre leer una temporada y leer
+   * toda la historia de la finca para descartar el 90%.
+   */
+  private async grupoContemporaneo(anio: number): Promise<{ grupo: any[]; descartadas: number }> {
     const t = this.db.tenant;
 
     const crias = await this.db.query<any>(
@@ -57,19 +103,19 @@ export class SireEvaluationService {
            SELECT birth_weight_kg FROM calving_offspring c
             WHERE c.animal_id = a.id AND c.deleted_at IS NULL LIMIT 1) co ON true
         WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.sire_id IS NOT NULL
-          AND a.birth_date IS NOT NULL AND w.weaning_date IS NOT NULL`,
-      [t],
+          AND a.birth_date IS NOT NULL AND w.weaning_date IS NOT NULL
+          AND EXTRACT(YEAR FROM a.birth_date::date)::int = $2`,
+      [t, anio],
     );
 
     // Un destete con edad no positiva es un dato mal cargado (fecha anterior al nacimiento). Se
     // descarta y se CUENTA, en vez de dejarlo romper el promedio en silencio.
-    const utilizables = crias.filter((c) => Number(c.edad_destete_dias) > 0 && Number(c.weaning_kg) > 0);
-    const descartadas = crias.length - utilizables.length;
+    const grupo = crias.filter((c) => Number(c.edad_destete_dias) > 0 && Number(c.weaning_kg) > 0);
+    return { grupo, descartadas: crias.length - grupo.length };
+  }
 
-    const anios = [...new Set(utilizables.map((c) => c.anio))].sort((a, b) => b - a);
-    const anio = params.year ?? anios[0];
-    const grupo = utilizables.filter((c) => c.anio === anio);
-
+  /** Ajusta los pesos del grupo y saca el índice de cada toro dentro de él. */
+  private evaluarGrupo(grupo: any[]) {
     const nombres = new Map<string, string>();
     let incompletas = 0;
     const miembros: ContemporaryMember[] = [];
@@ -87,15 +133,40 @@ export class SireEvaluationService {
     }
 
     return {
-      // El año evaluado y los disponibles: sin esto, el usuario no sabe QUÉ está mirando.
-      year: anio ?? null,
-      available_years: anios,
       group_size: grupo.length,
       /** Terneros a los que les faltó peso de nacimiento o edad de madre: el índice los incluye pero son menos comparables. */
       incomplete: incompletas,
-      /** Destetes con datos imposibles, descartados. Se informa en vez de esconderse. */
-      discarded: descartadas,
       sires: sireIndexes(miembros).map((s) => ({ ...s, sire_name: nombres.get(s.sireId) ?? 'Sin identificar' })),
+    };
+  }
+
+  /**
+   * El toro a lo largo de su CARRERA, no de una temporada (mejora 2).
+   *
+   * Un toro usado tres años quedaba con tres índices sueltos que nadie sumaba: con 8 terneros por
+   * año la confianza es «baja» las tres veces, y con los 24 juntos es «media» — que ya es otra
+   * decisión de compra.
+   *
+   * Se evalúa CADA temporada por separado y recién después se combinan los índices, nunca los
+   * kilos: los pesos de años distintos no son comparables (un año seco baja a todos), y esa es la
+   * razón de ser del grupo contemporáneo. Los índices sí, porque ya vienen normalizados contra sus
+   * propios contemporáneos.
+   */
+  async careerBySire() {
+    const anios = await this.availableYears();
+    const nombres = new Map<string, string>();
+    const grupos: ContemporaryGroupResult[] = [];
+
+    for (const anio of anios) {
+      const { grupo } = await this.grupoContemporaneo(anio);
+      const evaluado = this.evaluarGrupo(grupo);
+      for (const s of evaluado.sires) nombres.set(s.sireId, s.sire_name);
+      grupos.push({ year: anio, indexes: evaluado.sires });
+    }
+
+    return {
+      years: anios,
+      sires: sireCareers(grupos).map((s) => ({ ...s, sire_name: nombres.get(s.sireId) ?? 'Sin identificar' })),
     };
   }
 
@@ -122,8 +193,13 @@ export class SireEvaluationService {
 
     const economia = await this.db.query<any>(
       `SELECT be.sire_id,
-              count(*)::int AS servicios,
-              count(*) FILTER (WHERE p.id IS NOT NULL)::int AS concepciones,
+              -- DISTINCT en los dos: nada impide en el esquema que un mismo servicio termine con
+              -- más de una preñez ligada (no hay UNIQUE sobre pregnancies.breeding_event_id), y
+              -- sin DISTINCT ese servicio contaría dos veces como servicio Y como concepción —
+              -- empujando la fertilidad del toro hacia el 100%. El número compite con el reporte
+              -- por toro de Reproducción: si difieren, ninguno de los dos es creíble.
+              count(DISTINCT be.id)::int AS servicios,
+              count(DISTINCT p.id)::int AS concepciones,
               (SELECT sb.unit_cost::float FROM semen_batches sb
                 WHERE sb.sire_id = be.sire_id AND sb.tenant_id = be.tenant_id AND sb.deleted_at IS NULL
                   AND sb.unit_cost IS NOT NULL
@@ -175,8 +251,21 @@ export class SireEvaluationService {
    * Sin peso vivo registrado no hay rendimiento posible: esas reses se cuentan aparte en vez de
    * asumir un peso típico, que sesgaría al toro cuyos animales se pesaron menos.
    */
-  async carcassBySire() {
+  async carcassBySire(params: { from?: string; to?: string } = {}) {
     const t = this.db.tenant;
+    // Sin filtro leía SIEMPRE toda la historia de faena, mientras la evaluación al destete miraba
+    // una temporada: dos pantallas del mismo módulo hablando de períodos distintos sin decirlo.
+    // Los parámetros son opcionales — sin ellos el comportamiento es el de antes.
+    const rango: string[] = [];
+    const args: unknown[] = [t];
+    if (params.from) {
+      args.push(params.from);
+      rango.push(`AND cr.slaughter_date >= $${args.length}::date`);
+    }
+    if (params.to) {
+      args.push(params.to);
+      rango.push(`AND cr.slaughter_date <= $${args.length}::date`);
+    }
     const reses = await this.db.query<any>(
       `SELECT cr.id, cr.hot_carcass_weight_kg::float AS res_kg, cr.slaughter_date,
               a.sire_id, COALESCE(sa.name, si.value, 'Sin identificar') AS sire_name,
@@ -194,8 +283,9 @@ export class SireEvaluationService {
            SELECT weight_kg FROM weighings ww
             WHERE ww.animal_id = a.id AND ww.deleted_at IS NULL AND ww.weighed_at::date <= cr.slaughter_date
             ORDER BY ww.weighed_at DESC LIMIT 1) w ON true
-        WHERE cr.tenant_id = $1 AND cr.deleted_at IS NULL AND cr.hot_carcass_weight_kg IS NOT NULL`,
-      [t],
+        WHERE cr.tenant_id = $1 AND cr.deleted_at IS NULL AND cr.hot_carcass_weight_kg IS NOT NULL
+          ${rango.join(' ')}`,
+      args,
     );
 
     interface AcumToro {
@@ -232,6 +322,10 @@ export class SireEvaluationService {
           n: v.resKg.length,
           avg_carcass_kg: media(v.resKg),
           avg_dressing_pct: media(v.rindes),
+          /** Sobre cuántas reses se promedió el RENDIMIENTO: no son todas, solo las que tienen peso
+           *  vivo con el que derivarlo. Sin este número, `n` al lado del porcentaje se lee como si
+           *  fuera su muestra. */
+          dressing_n: v.rindes.length,
           /** Reses sin peso vivo con el que derivar el rendimiento. Se informan, no se rellenan. */
           without_live_weight: v.sinPesoVivo,
           confidence: confidenceFor(v.rindes.length),

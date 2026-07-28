@@ -146,14 +146,19 @@ describe('genética — evaluación de toros por la progenie', () => {
   it('descarta un destete con fecha anterior al nacimiento, y lo cuenta', async () => {
     // Dato imposible: sin este filtro, una edad negativa daría una ganancia diaria negativa y
     // arrastraría el promedio del grupo sin que nadie lo note.
+    //
+    // La cría mala va en la MISMA parición que el grupo (300 días, como el resto del fixture): los
+    // descartes se cuentan por año evaluado, igual que el resto de la respuesta. Contarlos sobre
+    // toda la historia —como se hacía antes— ponía un número de otro período al lado de un grupo de
+    // uno solo, y el productor no tenía cómo saber a cuál pertenecía.
     const malo = (
       await db.query<any>(
         `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, birth_date, sire_id, dam_id)
-         VALUES ($1,$2,$3,'M','active', CURRENT_DATE - 100, $4, $5) RETURNING id`,
+         VALUES ($1,$2,$3,'M','active', CURRENT_DATE - 300, $4, $5) RETURNING id`,
         [db.tenant, farmId, speciesId, toroA, madre],
       )
     )[0].id;
-    await db.query(`INSERT INTO weanings (tenant_id, animal_id, weaning_date, weaning_weight_kg) VALUES ($1,$2, CURRENT_DATE - 200, 190)`, [db.tenant, malo]);
+    await db.query(`INSERT INTO weanings (tenant_id, animal_id, weaning_date, weaning_weight_kg) VALUES ($1,$2, CURRENT_DATE - 400, 190)`, [db.tenant, malo]);
     const r = await svc.bySire();
     expect(r.discarded).toBeGreaterThan(0);
   });
@@ -168,6 +173,89 @@ describe('genética — evaluación de toros por la progenie', () => {
     expect(despues.available_years.length).toBeGreaterThan(1);
     // Con 300 kg ese ternero habría disparado el índice de A si se hubiera colado.
     expect(despues.sires.find((s) => s.sireId === toroA)!.index).toBeLessThan(130);
+  });
+
+  describe('la carrera del toro, no una temporada', () => {
+    /** Cría con año de nacimiento explícito, para armar pariciones distintas. */
+    const criaDeAnio = async (anio: number, sire: string, sexo: string, destetaKg: number, i: number) => {
+      const [{ id }] = await db.query<any>(
+        `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, birth_date, sire_id)
+         VALUES ($1,$2,$3,$4,'active', $5::date, $6) RETURNING id`,
+        [db.tenant, farmId, speciesId, sexo, `${anio}-03-1${i}`, sire],
+      );
+      await db.query(
+        `INSERT INTO weanings (tenant_id, animal_id, weaning_date, weaning_weight_kg) VALUES ($1,$2,$3::date,$4)`,
+        [db.tenant, id, `${anio}-10-1${i}`, destetaKg],
+      );
+      return id;
+    };
+
+    let toroX: string;
+    let toroY: string;
+
+    beforeAll(async () => {
+      [{ id: toroX }] = await db.query<any>(
+        `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status) VALUES ($1,$2,$3,'M','active') RETURNING id`,
+        [db.tenant, farmId, speciesId],
+      );
+      [{ id: toroY }] = await db.query<any>(
+        `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status) VALUES ($1,$2,$3,'M','active') RETURNING id`,
+        [db.tenant, farmId, speciesId],
+      );
+      // Tres pariciones VIEJAS a propósito: si fueran las más recientes se volverían el «año por
+      // defecto» de `bySire()` y le cambiarían el grupo a todos los demás tests del archivo.
+      // X siempre 8 kg por encima, Y por debajo. En 2016 TODOS suman 40 kg: es el «año bueno» que
+      // sirve para comprobar que no le mejora el índice a nadie.
+      for (const [anio, base] of [
+        [2014, 180],
+        [2015, 175],
+        [2016, 215],
+      ] as const)
+        for (const [toro, delta] of [
+          [toroX, 8],
+          [toroY, -8],
+        ] as const)
+          for (let i = 0; i < 6; i++) await criaDeAnio(anio, toro, i % 2 ? 'F' : 'M', base + delta + i, i);
+    }, 120_000);
+
+    it('LA CONFIANZA SUBE AL SUMAR TEMPORADAS — el motivo de la vista', async () => {
+      // Con 6 terneros por parición la confianza es «baja» y no alcanza para decidir una compra.
+      // Los mismos animales, sumadas las tres temporadas, dan «media».
+      const unaTemporada: any = await svc.bySire({ year: 2016 });
+      const a1 = unaTemporada.sires.find((x: any) => x.sireId === toroX);
+      expect(a1.n).toBe(6);
+      expect(a1.confidence).toBe('baja');
+
+      const carrera: any = await svc.careerBySire();
+      const a2 = carrera.sires.find((x: any) => x.sireId === toroX);
+      expect(a2.n).toBe(18);
+      expect(a2.confidence).toBe('media');
+    }, 120_000);
+
+    it('UN AÑO BUENO NO LE MEJORA EL ÍNDICE A NADIE', async () => {
+      // Es la razón de combinar ÍNDICES y no kilos: en 2016 todos los terneros pesaron 40 kg más,
+      // y el índice del toro no se mueve porque sus contemporáneos subieron con él. Promediar kilos
+      // entre años le atribuiría a la genética lo que fue la lluvia.
+      const carrera: any = await svc.careerBySire();
+      const a = carrera.sires.find((x: any) => x.sireId === toroX);
+      const indices = a.by_year.map((y: any) => y.index);
+      expect(new Set(indices).size, 'el año bueno movió el índice').toBe(1);
+    }, 120_000);
+
+    it('guarda el detalle por temporada, de la más reciente a la más vieja', async () => {
+      const carrera: any = await svc.careerBySire();
+      const a = carrera.sires.find((x: any) => x.sireId === toroX);
+      expect(a.by_year.map((y: any) => y.year)).toEqual([2016, 2015, 2014]);
+      expect(a.index).toBeGreaterThan(100); // A es el bueno
+    }, 120_000);
+
+    it('la evaluación de UNA temporada NO trae las otras', async () => {
+      // El año va en el SQL: antes se leía toda la historia de la finca para descartar el 90%.
+      const r: any = await svc.bySire({ year: 2015 });
+      expect(r.year).toBe(2015);
+      expect(r.group_size).toBe(12); // solo las 12 crías de esa parición
+      expect(r.available_years).toEqual(expect.arrayContaining([2014, 2015, 2016]));
+    }, 120_000);
   });
 
   describe('rendimiento en el gancho', () => {
@@ -295,6 +383,38 @@ describe('genética — evaluación de toros por la progenie', () => {
       await partida(toroA, 90, 5);
       const r = await svc.costBySire();
       expect(r.sires.find((s) => s.sireId === toroA)!.straw_cost).toBe(90);
+    });
+
+    it('UN SERVICIO CON DOS PREÑECES LIGADAS NO CUENTA DOBLE', async () => {
+      // El esquema no lo impide: `pregnancies.breeding_event_id` no tiene UNIQUE. Sin `DISTINCT`,
+      // ese servicio contaría dos veces como servicio Y como concepción, empujando la fertilidad
+      // del toro hacia el 100% — y el número compite con el reporte por toro de Reproducción, así
+      // que si difieren ninguno de los dos es creíble.
+      const [{ id: solo }] = await db.query<any>(
+        `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status) VALUES ($1,$2,$3,'M','active') RETURNING id`,
+        [db.tenant, farmId, speciesId],
+      );
+      const [{ id: evento }] = await db.query<any>(
+        `INSERT INTO breeding_events (tenant_id, animal_id, type, occurred_at, sire_id)
+         VALUES ($1,$2,'service_ai', now() - interval '300 days', $3) RETURNING id`,
+        [db.tenant, madre, solo],
+      );
+      // Dos preñeces colgando del MISMO servicio.
+      for (const _ of [1, 2])
+        await db.query(
+          `INSERT INTO pregnancies (tenant_id, animal_id, breeding_event_id, diagnosis_date, status)
+           VALUES ($1,$2,$3, CURRENT_DATE - 150, 'calved')`,
+          [db.tenant, madre, evento],
+        );
+
+      // El toro necesita un destete para aparecer en el desempeño: sin eso la aserción sería vacía
+      // y el test no protegería nada.
+      await cria({ sire: solo, sex: 'M', nacidoHaceDias: 300, destetadoADias: 90, destetaKg: 200, naceKg: 36 });
+
+      const r: any = await svc.costBySire();
+      const fila = r.sires.find((x: any) => x.sireId === solo);
+      expect(fila, 'el toro tiene que estar en la evaluación para que esto pruebe algo').toBeTruthy();
+      expect(fila.services, 'un solo servicio contado dos veces').toBe(1);
     });
 
     it('la tasa de concepción coincide con la del reporte por toro de Reproducción', async () => {
