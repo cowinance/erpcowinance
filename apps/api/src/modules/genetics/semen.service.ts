@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService, Q } from '../../db/db.service';
 import { StrawsService } from './straws.service';
+import { batchUsability, motilityVerdict } from '@cowinance/domain';
 
 const ADJUST_REASONS = ['acquisition', 'insemination', 'adjustment', 'loss'];
 
@@ -24,27 +25,102 @@ export class SemenService {
     const [filas, saldos] = await Promise.all([
       this.db.query<any>(
         `SELECT sb.id, sb.batch_code, sb.sire_id, a_tag.value AS sire_tag, sb.sire_name_external, sb.breed_id,
-                sb.supplier_id, sb.tank_id, sb.canister AS legacy_location, sb.acquired_date, sb.unit_cost::float AS unit_cost
+                sb.supplier_id, sb.tank_id, sb.canister AS legacy_location, sb.acquired_date, sb.unit_cost::float AS unit_cost,
+                sb.expiry_date::text AS expiry_date,
+                qc.checked_at::text AS last_check_at, qc.post_thaw_motility_pct::float AS last_motility_pct
          FROM semen_batches sb
          LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = sb.sire_id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) a_tag ON true
+         -- La ÚLTIMA prueba de cada partida: es la que decide si se puede usar hoy.
+         LEFT JOIN LATERAL (
+           SELECT checked_at, post_thaw_motility_pct FROM semen_quality_checks q
+            WHERE q.semen_batch_id = sb.id AND q.tenant_id = sb.tenant_id AND q.deleted_at IS NULL
+            ORDER BY q.checked_at DESC LIMIT 1) qc ON true
          WHERE sb.tenant_id=$1 AND sb.deleted_at IS NULL ORDER BY sb.batch_code`,
         [this.db.tenant],
       ),
       this.straws.countsByOwner('semen_batch_id'),
     ]);
-    return filas.map((f) => ({ ...f, ...this.saldo(saldos.get(f.id)) }));
+    const hoy = await this.db.today();
+    return filas.map((f) => ({ ...f, ...this.saldo(saldos.get(f.id)), ...this.estado(f, hoy) }));
+  }
+
+  /**
+   * Si la partida se puede usar hoy, según el permiso y la última prueba.
+   *
+   * La REGLA vive en el dominio (`batchUsability`): acá solo se le pasan los datos. Va en el listado
+   * y no en un endpoint aparte porque el momento de decidir es cuando se elige la partida —en la
+   * manga, con el animal encerrado—, y una segunda consulta ahí es tiempo perdido.
+   */
+  private estado(f: { expiry_date?: string | null; last_check_at?: string | null; last_motility_pct?: number | null }, hoy: string) {
+    const u = batchUsability({
+      today: hoy,
+      expiryDate: f.expiry_date ?? null,
+      lastCheck: f.last_check_at != null && f.last_motility_pct != null
+        ? { checkedAt: f.last_check_at, motilityPct: f.last_motility_pct }
+        : null,
+    });
+    return { usability: u };
+  }
+
+  /**
+   * Registra una prueba de calidad. CONSUME una pajuela: para mirarla hay que descongelarla.
+   *
+   * Descontarla no es un detalle contable — si no se descontara, el saldo diría que hay una pajuela
+   * más de las que hay, y el productor planificaría una inseminación que no puede hacer.
+   */
+  async recordQualityCheck(batchId: string, body: { motility_pct?: unknown; checked_at?: string; notes?: string }) {
+    const pct = Number(body?.motility_pct);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100)
+      throw new BadRequestException({ code: 'genetics.invalid_motility', title: 'La motilidad tiene que ser un porcentaje entre 0 y 100' });
+
+    await this.get(batchId); // 404 si la partida no existe o es de otro tenant
+    const checkedAt = body?.checked_at ? String(body.checked_at).slice(0, 10) : await this.db.today();
+    const verdict = motilityVerdict(pct);
+
+    // La pajuela de la prueba se consume ANTES de dejar el registro: si no hay saldo, no queda una
+    // prueba que dice haber descongelado algo que no existía.
+    const consumidas = await this.consumeStraw(batchId, 'quality_check');
+
+    const row = await this.db.one<any>(
+      `INSERT INTO semen_quality_checks (tenant_id, semen_batch_id, checked_at, post_thaw_motility_pct, verdict, straws_used, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, checked_at::text, post_thaw_motility_pct::float AS post_thaw_motility_pct, verdict`,
+      [this.db.tenant, batchId, checkedAt, pct, verdict, consumidas.length, body?.notes ?? null, this.db.user],
+    );
+    return { ...row, straws_used: consumidas.length };
+  }
+
+  /** El historial de pruebas de una partida: si viene bajando, la partida se está yendo. */
+  async qualityChecks(batchId: string) {
+    return this.db.query(
+      `SELECT id, checked_at::text AS checked_at, post_thaw_motility_pct::float AS post_thaw_motility_pct,
+              verdict, straws_used, notes
+         FROM semen_quality_checks
+        WHERE semen_batch_id=$1 AND tenant_id=$2 AND deleted_at IS NULL
+        ORDER BY checked_at DESC`,
+      [batchId, this.db.tenant],
+    );
   }
 
   async get(id: string) {
     const b = await this.db.one<any>(
-      `SELECT id, batch_code, sire_id, sire_name_external, breed_id, supplier_id, tank_id,
-              canister AS legacy_location, acquired_date, unit_cost::float AS unit_cost
-       FROM semen_batches WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+      // El vencimiento y la última prueba van acá y no solo en el listado: la GUARDA del servicio
+      // consulta por id, y sin estos campos el estado salía siempre «ok» — una partida probada y
+      // descartada se inseminaba igual, que es justo lo que la prueba existe para impedir.
+      `SELECT sb.id, sb.batch_code, sb.sire_id, sb.sire_name_external, sb.breed_id, sb.supplier_id, sb.tank_id,
+              sb.canister AS legacy_location, sb.acquired_date, sb.unit_cost::float AS unit_cost,
+              sb.expiry_date::text AS expiry_date,
+              qc.checked_at::text AS last_check_at, qc.post_thaw_motility_pct::float AS last_motility_pct
+         FROM semen_batches sb
+         LEFT JOIN LATERAL (
+           SELECT checked_at, post_thaw_motility_pct FROM semen_quality_checks q
+            WHERE q.semen_batch_id = sb.id AND q.tenant_id = sb.tenant_id AND q.deleted_at IS NULL
+            ORDER BY q.checked_at DESC LIMIT 1) qc ON true
+        WHERE sb.id=$1 AND sb.tenant_id=$2 AND sb.deleted_at IS NULL`,
       [id, this.db.tenant],
     );
     if (!b) throw new NotFoundException({ code: 'genetics.batch_not_found', title: 'Partida de semen no encontrada' });
     const saldos = await this.straws.countsByOwner('semen_batch_id');
-    return { ...b, ...this.saldo(saldos.get(id)) };
+    return { ...b, ...this.saldo(saldos.get(id)), ...this.estado(b, await this.db.today()) };
   }
 
   /**

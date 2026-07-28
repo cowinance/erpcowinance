@@ -196,6 +196,9 @@ export const RLS_TABLES = [
   // O-3: el registro de qué filas creó el hato de ejemplo. Aislada como todas — el borrado se
   // apoya en ella, y una fuga acá dejaría a un tenant borrando filas anotadas por otro.
   'onboarding_sample_rows',
+  // Pruebas de calidad de semen: el resultado decide si una partida se puede usar, así que un
+  // tenant no puede ver ni tocar las del otro.
+  'semen_quality_checks',
 ];
 
 /**

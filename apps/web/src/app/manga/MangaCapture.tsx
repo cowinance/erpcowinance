@@ -34,7 +34,16 @@ interface Catalogs {
   lots: { id: string; name: string }[];
   bulls: { id: string; tag?: string; name?: string }[];
   /** Partidas de semen CON pajuelas disponibles: es de donde salen el toro y el descuento en una IA. */
-  semenBatches?: { id: string; batch_code: string; sire_id: string | null; sire_tag?: string | null; sire_name_external?: string | null; straws_available: number }[];
+  semenBatches?: {
+    id: string;
+    batch_code: string;
+    sire_id: string | null;
+    sire_tag?: string | null;
+    sire_name_external?: string | null;
+    straws_available: number;
+    /** Estado derivado: permiso vencido o prueba de calidad con mal resultado. */
+    usability?: { level: 'ok' | 'warning' | 'blocked'; blocks: boolean; reasons: string[] };
+  }[];
   /** Embriones con pajuelas disponibles, con de qué vaca y qué toro salieron. */
   embryos?: { id: string; donor_name: string | null; sire_name: string | null; stage: string | null; grade: string | null; straws_available: number }[];
 }
@@ -369,7 +378,8 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
 
   const elegido = sireId ? parentesco?.get(sireId) : undefined;
   // El toro de la partida elegida: la consanguinidad de una IA es la del toro que hay en la pajuela.
-  const toroDeLaPartida = (catalogs.semenBatches ?? []).find((b: any) => b.id === batchId)?.sire_id;
+  const partidaElegida = (catalogs.semenBatches ?? []).find((b: any) => b.id === batchId);
+  const toroDeLaPartida = partidaElegida?.sire_id;
   const elegidaBloquea = toroDeLaPartida ? parentesco?.get(toroDeLaPartida) : undefined;
 
   if (animal.sex !== 'F') {
@@ -432,6 +442,7 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
                 return (
                   <option key={b.id} value={b.id}>
                     {b.batch_code} — {toro} ({b.straws_available})
+                    {b.usability?.blocks ? '  ⛔ no usar' : b.usability?.level === 'warning' ? '  ⚠' : ''}
                     {p ? (p.blocks ? `  ⚠ ${p.f_pct}% parentesco` : p.f_pct > 0 ? `  · ${p.f_pct}%` : '') : ''}
                   </option>
                 );
@@ -442,6 +453,13 @@ function ReproForm({ animal, catalogs, busy, post, onSaved, onCancel }: any) {
                 Parentesco {elegidaBloquea.f_pct}% — el servicio se va a rechazar por consanguinidad.
               </div>
             )}
+            {/* El motivo COMPLETO al elegirla: en el corral, un ⛔ en la lista dice que algo pasa
+                pero no qué, y sin el porqué el técnico no puede decidir si vale la pena forzarlo. */}
+            {partidaElegida?.usability?.reasons?.map((r: string) => (
+              <div key={r} className={`rounded-lg px-3 py-2 text-[16px] font-bold ${partidaElegida.usability!.blocks ? 'bg-[#ef4444]/15 text-[#f87171]' : 'bg-[#f59e0b]/15 text-[#fbbf24]'}`}>
+                {r}
+              </div>
+            ))}
             </>
           )}
           {method === 'natural' && (

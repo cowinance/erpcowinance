@@ -15,6 +15,8 @@ interface Batch {
   sire_tag: string | null;
   sire_name_external: string | null;
   straws_available: number;
+  /** Estado derivado: permiso vencido o prueba de calidad con mal resultado. */
+  usability?: { level: 'ok' | 'warning' | 'blocked'; blocks: boolean; reasons: string[]; verdict: string | null };
   /** Desglose de GT-2: cuántas de las disponibles están realmente ubicadas en un termo. */
   straws_located: number;
   straws_unlocated: number;
@@ -110,6 +112,16 @@ export function SemenManager({ batches, animals }: { batches: Batch[]; animals: 
                       ubicadas
                     </a>
                   )}
+                  {/* El motivo completo, no un ícono: «no usar» sin el porqué obliga a abrir la
+                      partida para enterarse de si fue el permiso o la prueba de motilidad. */}
+                  {(b.usability?.reasons ?? []).map((r) => (
+                    <span
+                      key={r}
+                      className={`ml-2 rounded-md px-1.5 py-0.5 text-caption ${b.usability!.blocks ? 'bg-danger/10 text-danger' : 'bg-warning/10 text-warning'}`}
+                    >
+                      {r}
+                    </span>
+                  ))}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" size="sm" disabled={busy || b.straws_available <= 0} onClick={() => call('POST', `/genetics/semen/${b.id}/adjust`, { delta: -1, reason: 'loss' })} aria-label={`Restar pajuela ${b.batch_code}`}>

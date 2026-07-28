@@ -32,11 +32,21 @@ export class ReproService {
    * salvo `force=true`, en cuyo caso devuelve las advertencias que se saltearon. No re-implementa
    * sanidad: consulta directamente las tablas (treatments/clinical_cases), sin acoplar módulos.
    */
-  private async serviceGuards(animalId: string, sireId: string | null, force: boolean): Promise<string[]> {
+  private async serviceGuards(
+    animalId: string,
+    sireId: string | null,
+    force: boolean,
+    /**
+     * Guardas que el llamador ya evaluó (la calidad de la partida de semen, que solo él sabe cuál
+     * es). Entran acá para que TODAS las razones se decidan y se informen en un solo lugar: dos
+     * bloqueos distintos con dos formatos de respuesta obligarían a la pantalla a entender dos.
+     */
+    extras: { extraWarnings?: string[]; extraDetails?: Record<string, unknown> } = {},
+  ): Promise<string[]> {
     const t = this.db.tenant;
-    const warnings: string[] = [];
+    const warnings: string[] = [...(extras.extraWarnings ?? [])];
     /** El detalle de cada guarda, para que el bloqueo explique y no solo prohíba. */
-    const detalles: Record<string, unknown> = {};
+    const detalles: Record<string, unknown> = { ...(extras.extraDetails ?? {}) };
     const wd = await this.db.one<{ id: string }>(
       `SELECT id FROM treatments WHERE tenant_id=$1 AND animal_id=$2 AND deleted_at IS NULL
          AND (meat_withdrawal_until >= CURRENT_DATE OR milk_withdrawal_until >= now()) LIMIT 1`,
@@ -221,6 +231,19 @@ export class ReproService {
     // una vaca con semen de su propio padre y el sistema no decía nada.
     const sireId = await this.resolveSire(body?.sire_id ?? null, semenBatchId, embryoId);
 
+    // Calidad de la partida: si se probó y dio mal, no se insemina sin decirlo explícitamente.
+    //
+    // Es el momento donde el dato salva plata. Sin esta guarda, una partida que ya se sabe muerta
+    // —porque el termo se quedó sin nitrógeno— se usa en cincuenta vacas y el problema aparece a los
+    // sesenta días, con todos los diagnósticos vacíos y la temporada perdida.
+    const warningsPartida: string[] = [];
+    const detallesPartida: Record<string, unknown> = {};
+    if (semenBatchId) {
+      const partida: any = await this.semen.get(semenBatchId);
+      if (partida?.usability?.blocks) warningsPartida.push('semen_quality');
+      if (partida?.usability) detallesPartida.semen_quality = partida.usability;
+    }
+
     // Guardas (E6): retiro sanitario activo / caso clínico grave / consanguinidad. Bloquea salvo force.
     //
     // En una TRANSFERENCIA de embrión no se evalúa consanguinidad contra la receptora: ella gesta,
@@ -231,6 +254,7 @@ export class ReproService {
       animalId,
       method === 'embryo_transfer' ? null : sireId,
       body?.force === true,
+      { extraWarnings: warningsPartida, extraDetails: detallesPartida },
     );
 
     // Consumo de pajuela/embrión (G-2): solo en AI con partida o en transferencia con embrión. Se

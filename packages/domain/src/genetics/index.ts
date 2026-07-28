@@ -80,3 +80,6 @@ export type { ContemporaryGroupResult, SireCareer } from './sire-career';
 
 export { damProductivity, damConfidenceFor, cullCandidates } from './dam-productivity';
 export type { DamRecord, DamProductivity, DamConfidence } from './dam-productivity';
+
+export { motilityVerdict, batchUsability, MIN_POST_THAW_MOTILITY_PCT, MOTILITY_DISCARD_PCT } from './straw-quality';
+export type { QualityVerdict, QualityCheck, BatchUsability, UsabilityLevel } from './straw-quality';

@@ -106,6 +106,50 @@ describe('repro — consumo de pajuela en inseminación', () => {
     expect(((await semen.get(batch.id)) as any).straws_available).toBe(3);
   });
 
+  it('UNA PARTIDA PROBADA Y DESCARTADA NO SE PUEDE USAR', async () => {
+    // El caso que la prueba de calidad existe para evitar: el termo se quedó sin nitrógeno, la
+    // partida se probó y dio 8% de motilidad, y aun así se usa en cincuenta vacas. El problema
+    // aparece a los sesenta días, con todos los diagnósticos vacíos y la temporada perdida.
+    const batch: any = await semen.create({ batch_code: 'AI-MALA', sire_name_external: 'Toro W', straws_available: 5 });
+    await semen.recordQualityCheck(batch.id, { motility_pct: 8, notes: 'termo bajo en junio' });
+
+    await expect(repro.service(hembraId, { method: 'ai', semen_batch_id: batch.id })).rejects.toMatchObject({
+      response: { code: 'service.blocked', reasons: ['semen_quality'] },
+    });
+  });
+
+  it('una partida probada y APTA se usa normal', async () => {
+    // La otra mitad: si bloqueara de más, el productor aprendería a forzar siempre y la guarda
+    // dejaría de servir para algo.
+    const batch: any = await semen.create({ batch_code: 'AI-BUENA', sire_name_external: 'Toro V', straws_available: 5 });
+    await semen.recordQualityCheck(batch.id, { motility_pct: 62 });
+    const ev: any = await repro.service(hembraId, { method: 'ai', semen_batch_id: batch.id });
+    expect(ev.type).toBe('service_ai');
+  });
+
+  it('LA PRUEBA CONSUME LA PAJUELA QUE SE DESCONGELÓ', async () => {
+    // Para mirarla hay que descongelarla. Si no se descontara, el saldo diría que hay una pajuela
+    // más de las que hay y el productor planificaría una inseminación que no puede hacer.
+    const batch: any = await semen.create({ batch_code: 'AI-QC', sire_name_external: 'Toro U', straws_available: 4 });
+    await semen.recordQualityCheck(batch.id, { motility_pct: 55 });
+    expect(((await semen.get(batch.id)) as any).straws_available).toBe(3);
+  });
+
+  it('una partida SIN probar no molesta a nadie', async () => {
+    // Lo normal: la mayoría del semen nunca se prueba y anda perfecto. Avisar por no haberlo probado
+    // convertiría el aviso en ruido de fondo.
+    const batch: any = await semen.create({ batch_code: 'AI-SINQC', sire_name_external: 'Toro T', straws_available: 3 });
+    const b: any = await semen.get(batch.id);
+    expect(b.usability.level).toBe('ok');
+    expect(b.usability.blocks).toBe(false);
+  });
+
+  it('rechaza una motilidad que no es un porcentaje', async () => {
+    const batch: any = await semen.create({ batch_code: 'AI-BAD', sire_name_external: 'Toro S', straws_available: 2 });
+    await expect(semen.recordQualityCheck(batch.id, { motility_pct: 140 })).rejects.toMatchObject({ status: 400 });
+    await expect(semen.recordQualityCheck(batch.id, { motility_pct: 'muy buena' })).rejects.toMatchObject({ status: 400 });
+  });
+
   it('saldo insuficiente → 403 y NO queda el evento (rollback lógico: consumo antes del insert)', async () => {
     const batch: any = await semen.create({ batch_code: 'AI-0', sire_name_external: 'Toro Y', straws_available: 0 });
     await expect(repro.service(hembraId, { method: 'ai', semen_batch_id: batch.id })).rejects.toMatchObject({ status: 403 });
