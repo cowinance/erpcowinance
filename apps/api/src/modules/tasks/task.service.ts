@@ -74,7 +74,15 @@ export interface TaskBoardFilters {
   priority?: string;
   assignedTo?: string; // uuid | 'me' | 'unassigned'
   type?: string; // módulo (health|breeding|feeding|maintenance|crop|general)
-  bucket?: string; // overdue|today|next7|month|nodate|later|done|canceled
+  /**
+   * overdue|today|next7|month|nodate|later|done|canceled. Acepta VARIOS.
+   *
+   * Acepta varios porque el Inicio necesita exactamente dos —vencidas y de hoy— y sin esto pedía
+   * TODAS las abiertas y descartaba el resto en memoria: 37 filas traídas para usar 1 en el demo,
+   * cada una con sus joins de responsable y de entidad relacionada. Y crecía con las tareas
+   * abiertas de la finca, no con el trabajo del día.
+   */
+  bucket?: string | string[];
   relatedType?: string;
   relatedId?: string;
   q?: string;
@@ -568,8 +576,9 @@ export class TaskService {
         ELSE 'later' END`;
 
     if (filters.bucket) {
-      args.push(filters.bucket);
-      where.push(`(${bucketExpr}) = $${args.length}`);
+      // `= ANY($n)` sirve para uno y para varios, así que no hay dos caminos que mantener.
+      args.push(Array.isArray(filters.bucket) ? filters.bucket : [filters.bucket]);
+      where.push(`(${bucketExpr}) = ANY($${args.length}::text[])`);
     }
     const limit = Math.min(Math.max(filters.limit ?? 500, 1), 1000);
     args.push(limit);

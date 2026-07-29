@@ -357,6 +357,52 @@ describe('DashboardHomeService · home agregado (E1)', () => {
       expect(r.updated, 'la segunda evaluación seguida no tiene nada que actualizar').toBe(0);
     }, 60_000);
 
+    it('PIDE SOLO LAS TAREAS QUE MUESTRA, no todas las abiertas', async () => {
+      // El Inicio pedía `board({status:'open'})` —hasta 500 filas, con los joins de responsable y de
+      // entidad relacionada— y descartaba en memoria todo lo que no fuera vencido o de hoy. Medido
+      // en el demo: 37 filas traídas para usar 1, y 17.777 bytes contra 425. Peor que el desperdicio
+      // es de qué depende: crecía con las tareas abiertas de la finca, no con el trabajo del día.
+      const espia = tasks as any;
+      const real = espia.board.bind(espia);
+      const pedidos: any[] = [];
+      espia.board = async (f: any) => {
+        pedidos.push(f);
+        return real(f);
+      };
+      try {
+        await home.home();
+        expect(pedidos).toHaveLength(1);
+        expect(pedidos[0].bucket, 'tiene que acotar por bucket en la consulta, no después').toEqual(['overdue', 'today']);
+      } finally {
+        espia.board = real;
+      }
+    }, 60_000);
+
+    it('y las tareas de hoy SIGUEN llegando a la agenda', async () => {
+      // La otra mitad: acotar la consulta no puede haberse llevado puesto lo que la pantalla muestra.
+      // Sin esto, el ahorro se mediría en bytes y se pagaría en tareas que el productor no ve.
+      const hoy = await db.today();
+      await db.tx((q) => tasks.createTask(q, { title: 'llega a la agenda', dueDate: hoy, farmId }, ctx()));
+      const h: any = await home.home();
+      expect(h.agenda.some((a: any) => a.title === 'llega a la agenda' && a.related_type === 'task')).toBe(true);
+    }, 60_000);
+
+    it('dice CUÁNDO se armó la foto', async () => {
+      // El Inicio se renderiza en el servidor y queda quieto: una pantalla abierta desde la mañana
+      // muestra los números de la mañana sin nada que lo diga, y sobre una agenda del día eso engaña
+      // —«tareas vencidas 0» a las tres de la tarde puede ser el 0 de las siete.
+      //
+      // Va el INSTANTE y no un texto ya armado: cuánto hace que fue solo lo puede seguir contando el
+      // cliente, que es el que tiene la pantalla abierta. Un «hace un momento» calculado acá quedaría
+      // congelado para siempre, que es la misma mentira con mejor letra.
+      const antes = Date.now();
+      const h: any = await home.home();
+      const t = Date.parse(h.generated_at);
+      expect(Number.isFinite(t)).toBe(true);
+      expect(t).toBeGreaterThanOrEqual(antes - 1000);
+      expect(t).toBeLessThanOrEqual(Date.now() + 1000);
+    }, 60_000);
+
     it('NO consulta la vista de GDP: es lo que lo volvía cuadrático', async () => {
       // Se mira el código porque el costo no se ve en un test con datos de demo — se vio con el hato
       // inflado a 3.000, donde el Inicio pasaba de 49 ms a 7.156.

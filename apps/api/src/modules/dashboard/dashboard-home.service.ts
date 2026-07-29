@@ -62,7 +62,10 @@ export class DashboardHomeService {
       this.alerts.agendaAndKpis(),
       this.health.kpis(),
       this.repro.kpis(),
-      this.tasks.board({ status: 'open' }),
+      // Solo los DOS buckets que el Inicio muestra. Pedir todas las abiertas traía 37 filas para
+      // usar 1 —con sus joins— y escalaba con las tareas abiertas de la finca en vez de con el
+      // trabajo del día. La agenda de hoy es «lo vencido y lo de hoy»; el resto vive en Tareas.
+      this.tasks.board({ status: 'open', bucket: ['overdue', 'today'] }),
       this.noRecentWeighing(),
       this.recentActivity(),
       this.farmSetup(),
@@ -168,7 +171,8 @@ export class DashboardHomeService {
       (agenda ?? []).filter((a: any) => a.related_type === 'task' && a.related_id).map((a: any) => a.related_id),
     );
     const taskAgenda = ((openTasks as any[]) ?? [])
-      .filter((t) => (t.bucket === 'overdue' || t.bucket === 'today') && !alreadyInAgenda.has(t.id))
+      // El bucket ya lo filtró la consulta; acá solo queda la deduplicación contra el motor.
+      .filter((t) => !alreadyInAgenda.has(t.id))
       .map((t) => ({
         code: 'task',
         category: 'task',
@@ -235,6 +239,17 @@ export class DashboardHomeService {
        * se pudo mirar» — que es justo la diferencia que importa en sanidad.
        */
       degraded,
+      /**
+       * Cuándo se armó esta foto.
+       *
+       * El Inicio se renderiza en el servidor y queda quieto: una pantalla abierta desde la mañana
+       * sigue mostrando los números de la mañana, y no hay nada que lo diga. Sobre una agenda del día
+       * eso es engañoso — «Tareas vencidas 0» a las tres de la tarde puede ser de las siete.
+       *
+       * Va el instante y no un texto: cuánto hace que fue lo calcula el cliente, que es el único que
+       * puede seguir contando mientras la pantalla está abierta.
+       */
+      generated_at: new Date().toISOString(),
     };
   }
 
