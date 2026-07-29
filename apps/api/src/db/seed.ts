@@ -1,5 +1,6 @@
 import type { TxHandle } from './driver';
 import { hashPassword } from '../common/passwords';
+import { polygonAreaHa } from '@cowinance/domain';
 
 /** Lo único que el seed necesita de la base: correr consultas. Así sirve tanto sobre PGlite (dev)
  *  como sobre PostgreSQL real, sin acoplarse a un driver concreto. */
@@ -204,11 +205,24 @@ export async function seedDemo(db: Queryable) {
   ];
   const paddocks: string[] = [];
   for (const [name, area, pasture, boundary] of paddockDefs) {
+    /*
+     * La superficie sale del DIBUJO, no del número de la tabla de arriba.
+     *
+     * Los dos venían del seed por separado y no coincidían: «Loma Sur» declaraba 140 ha y su
+     * polígono medía 80, así que la carga animal del mapa salía 43% corrida y los kg/ha del
+     * rendimiento con ella. Peor: desde que la superficie de un potrero dibujado es DERIVADA, ese
+     * estado ya no se puede crear por la API — el seed estaba fabricando datos que el producto
+     * rechaza.
+     *
+     * El número de `paddockDefs` queda como referencia de cuánto se pretendía que midiera cada uno;
+     * el que vale es el que se mide sobre lo dibujado, igual que en la app.
+     */
     const [{ id }] = await q(
       `INSERT INTO paddocks (tenant_id, farm_id, name, boundary, area_ha, pasture_type, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [org, farm, name, boundary, area, pasture, userId],
+      [org, farm, name, boundary, polygonAreaHa(JSON.parse(boundary)), pasture, userId],
     );
     paddocks.push(id);
+    void area;
   }
 
   const lotDefs: [string, string, string][] = [

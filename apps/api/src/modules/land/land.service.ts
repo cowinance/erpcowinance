@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { InvalidLotError, InvalidPolygonError, polygonAreaHa, toPolygonGeoJSON, validateLotInput } from '@cowinance/domain';
+import { InvalidLotError, InvalidPolygonError, polygonAreaHa, toPolygonGeoJSON, validateDeclaredAreaHa, validateLotInput } from '@cowinance/domain';
 import { DbService, type Q } from '../../db/db.service';
 import { MovementService, type MovementIntent } from './movement.service';
 
@@ -43,8 +43,10 @@ export class LandService {
    * conserva el `area_ha` provisto (potrero sin mapear todavía).
    */
   private geometry(body: any): { boundary: string | null; areaHa: number | null } {
-    if (body?.boundary == null) return { boundary: null, areaHa: body?.area_ha != null ? Number(body.area_ha) : null };
     try {
+      // Sin dibujo, la superficie es la que se declara — y ahora se valida: se aceptaba `-50`, que
+      // daba carga animal negativa, y un texto se guardaba como `null` sin avisar que estaba mal.
+      if (body?.boundary == null) return { boundary: null, areaHa: validateDeclaredAreaHa(body?.area_ha) };
       const geo = toPolygonGeoJSON(body.boundary);
       return { boundary: JSON.stringify(geo), areaHa: polygonAreaHa(geo) };
     } catch (e) {
@@ -91,7 +93,32 @@ export class LandService {
       args.push(areaHa);
       sets.push(`area_ha=$${args.length}`);
     } else if (body?.area_ha !== undefined) {
-      args.push(body.area_ha != null ? Number(body.area_ha) : null);
+      /*
+       * Con un dibujo cargado, la superficie NO se escribe a mano: se mide.
+       *
+       * El alta ya lo hacía —mandar `area_ha` junto con un polígono no tenía efecto, ganaba lo
+       * medido— pero la edición dejaba pisarlo después, y las dos versiones convivían sin que nada
+       * las comparara: 500 ha declaradas sobre un polígono de 9. De ese número salen la carga del
+       * mapa y los kg/ha del rendimiento, así que la que mandaba era la escrita a mano.
+       *
+       * No es una política nueva: es la que ya había, aplicada también a esta puerta. Y el mensaje
+       * dice cómo salir — corregir el dibujo, o borrarlo si la superficie viene de otro lado.
+       */
+      const conDibujo = await this.db.one<{ id: string }>(
+        `SELECT id FROM paddocks WHERE id=$1 AND tenant_id=$2 AND boundary IS NOT NULL AND deleted_at IS NULL`,
+        [id, t],
+      );
+      if (conDibujo)
+        throw new ConflictException({
+          code: 'paddock.area_is_derived',
+          title: 'La superficie de este potrero sale de su dibujo en el mapa. Corregí el dibujo, o borralo si la superficie viene de otro lado.',
+        });
+      try {
+        args.push(validateDeclaredAreaHa(body.area_ha));
+      } catch (e) {
+        if (e instanceof InvalidPolygonError) throw new BadRequestException({ code: 'paddock.invalid_area', title: e.reason });
+        throw e;
+      }
       sets.push(`area_ha=$${args.length}`);
     }
     if (sets.length === 0) throw new BadRequestException({ code: 'paddock.no_changes', title: 'Nada para actualizar' });

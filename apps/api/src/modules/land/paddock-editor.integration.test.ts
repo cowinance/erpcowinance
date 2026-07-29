@@ -56,6 +56,43 @@ describe('LandService — editor de potreros', () => {
     expect(renamed.area_ha).toBe(36); // sin tocar la forma, el área queda
   });
 
+  it('LA SUPERFICIE DE UN POTRERO DIBUJADO NO SE ESCRIBE A MANO', async () => {
+    // El alta ya lo hacía —mandar `area_ha` con un polígono no tenía efecto, ganaba lo medido— pero
+    // la edición dejaba pisarlo después, y las dos versiones convivían sin que nada las comparara:
+    // 500 ha declaradas sobre un polígono de 9. De ese número salen la carga del mapa y los kg/ha
+    // del rendimiento, así que la que mandaba era la escrita a mano.
+    const p: any = await land.createPaddock({ name: 'DER dibujado', boundary: square(100), area_ha: 999 });
+    expect(p.area_ha, 'al crear, el dibujo ya le ganaba al número mandado').toBe(9);
+
+    await expect(land.updatePaddock(p.id, { area_ha: 500 })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'paddock.area_is_derived' },
+    });
+    const sigue: any = await land.updatePaddock(p.id, { name: 'DER dibujado bis' });
+    expect(sigue.area_ha, 'y la superficie quedó intacta').toBe(9);
+  });
+
+  it('un potrero SIN dibujar sí declara su superficie, y se puede corregir', async () => {
+    // La otra mitad: no todo potrero está mapeado, y el que no lo está tiene que poder decir cuánto
+    // mide. La regla es «no contradigas al dibujo», no «no declares».
+    const p: any = await land.createPaddock({ name: 'DEC sin dibujo', area_ha: 45.5 });
+    expect(p.area_ha).toBe(45.5);
+    const corregido: any = await land.updatePaddock(p.id, { area_ha: 60 });
+    expect(corregido.area_ha).toBe(60);
+  });
+
+  it('una superficie que no puede serlo se rechaza, y un dibujo fuera de escala no rompe', async () => {
+    // La negativa daba carga animal negativa; el texto se guardaba como `null` sin avisar. Y el
+    // polígono gigante contestaba 500 crudo: el área derivada iba directo a una columna
+    // `numeric(14,3)` sin que nadie la mirara.
+    await expect(land.createPaddock({ name: 'MAL neg', area_ha: -50 })).rejects.toMatchObject({ status: 400 });
+    await expect(land.createPaddock({ name: 'MAL cero', area_ha: 0 })).rejects.toMatchObject({ status: 400 });
+    await expect(land.createPaddock({ name: 'MAL txt', area_ha: 'muchas' })).rejects.toMatchObject({ status: 400 });
+    await expect(
+      land.createPaddock({ name: 'MAL escala', boundary: [[0, 0], [1e9, 0], [1e9, 1e9], [0, 1e9]] }),
+    ).rejects.toMatchObject({ status: 400, response: { code: 'paddock.invalid_boundary' } });
+  });
+
   it('rechaza una geometría inválida (< 3 vértices)', async () => {
     await expect(land.createPaddock({ name: 'Malo', boundary: { type: 'Polygon', coordinates: [[[0, 0], [1, 1]]] } })).rejects.toMatchObject({ status: 400 });
   });

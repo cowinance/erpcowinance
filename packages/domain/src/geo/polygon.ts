@@ -49,6 +49,37 @@ export function normalizePolygonRing(input: unknown): Ring {
   return pts;
 }
 
+/**
+ * Techo de superficie de UN potrero, en hectáreas.
+ *
+ * No es una preferencia: un potrero de un millón de hectáreas son 10.000 km², más que la superficie
+ * agrícola de países enteros y varias veces la estancia más grande del mundo. Si el cálculo da algo
+ * así, lo que está mal no es el potrero — son las coordenadas, que vienen en otra escala (metros
+ * proyectados donde se esperan unidades de mapa, o al revés).
+ *
+ * Hace falta porque el área DERIVADA iba directo a la base sin que nadie la mirara, y la columna es
+ * `numeric(14,3)`: un polígono con coordenadas grandes devolvía 9×10¹⁴ ha y el endpoint se caía con
+ * un 500 crudo. Un error de carga tiene que contestar qué está mal, no romperse.
+ */
+export const MAX_PADDOCK_HA = 1_000_000;
+
+/**
+ * Valida una superficie declarada a mano (potrero todavía sin dibujar).
+ *
+ * `null` es válido: significa «no la sé todavía», que es distinto de cero. Lo que no se acepta es un
+ * número que no puede ser una superficie — negativo, cero o no numérico. Se aceptaba `-50`, y de ahí
+ * salía una carga animal negativa; y un texto se guardaba como `null` en silencio, perdiendo el dato
+ * sin decir que estaba mal escrito.
+ */
+export function validateDeclaredAreaHa(value: unknown): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new InvalidPolygonError('La superficie tiene que ser un número en hectáreas');
+  if (n <= 0) throw new InvalidPolygonError('La superficie tiene que ser mayor que cero');
+  if (n > MAX_PADDOCK_HA) throw new InvalidPolygonError(`Una superficie de ${n} ha no es de un potrero: revisá la unidad`);
+  return n;
+}
+
 /** Superficie del polígono en hectáreas (shoelace, con la escala del canvas). */
 export function polygonAreaHa(input: unknown): number {
   const ring = normalizePolygonRing(input);
@@ -60,7 +91,13 @@ export function polygonAreaHa(input: unknown): number {
   }
   const areaUnits = Math.abs(acc) / 2;
   const areaM2 = areaUnits * METERS_PER_UNIT * METERS_PER_UNIT;
-  return Math.round((areaM2 / 10000) * 100) / 100;
+  const ha = Math.round((areaM2 / 10000) * 100) / 100;
+  // El resultado se comprueba ACÁ y no en quien lo guarda: es el único lugar que sabe que el número
+  // salió de una geometría, y por lo tanto el único que puede decir que el problema es la escala de
+  // las coordenadas y no la superficie que alguien tipeó.
+  if (!Number.isFinite(ha) || ha > MAX_PADDOCK_HA)
+    throw new InvalidPolygonError('El dibujo da una superficie imposible para un potrero: revisá las coordenadas, parecen estar en otra escala');
+  return ha;
 }
 
 /** Construye el GeoJSON que se persiste en `boundary` (anillo abierto, como el resto del sistema). */
