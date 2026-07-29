@@ -97,8 +97,48 @@ export async function bootstrapCatalogs(db: Queryable) {
   );
   await q(`INSERT INTO species (code, name, gestation_days) VALUES ('ovine','Ovino',150), ('equine','Equino',340), ('caprine','Caprino',150)`);
 
+  /*
+   * Razas bovinas del catálogo base.
+   *
+   * Estaba armado con razas ARGENTINAS —Angus, Hereford, Brangus, Braford, Holando— y esto lo carga
+   * `bootstrapCatalogs`, así que lo recibía TODA finca, no solo el demo. La app se usa en Venezuela:
+   * un productor de allá importaba su planilla y el sistema le rechazaba fila por fila las razas de
+   * su propio rodeo. Se descubrió auditando la importación, cuando Brahman, Nelore y Gyr —las tres
+   * más comunes del país— resultaron inexistentes.
+   *
+   * Se AGREGAN sin sacar las que estaban: un catálogo de más no molesta a nadie, y borrar razas de
+   * un catálogo que ya está desplegado rompería los animales que las tengan puestas.
+   *
+   * El `purpose` importa: en Venezuela el DOBLE PROPÓSITO es la forma dominante de producir —el
+   * mismo animal da leche y carne— y por eso varias van como `dual` y no forzadas a una u otra.
+   */
   await q(
     `INSERT INTO breeds (species_id, code, name, purpose) VALUES
+     -- Desarrolladas en Venezuela. La Carora nació en Carora, estado Lara, cruzando Pardo Suizo con
+     -- Criollo Limonero para tener una lechera que aguante el trópico; es de las principales del
+     -- país. El Limonero es la criolla del Zulia, y la madre de la Carora.
+     ($1,'carora','Carora','dairy'),
+     ($1,'criollo_limonero','Criollo Limonero','dairy'),
+     -- Cebuínas: la base del rodeo de carne en el trópico, porque resisten calor y garrapata.
+     ($1,'brahman','Brahman','beef'),
+     ($1,'nelore','Nelore','beef'),
+     ($1,'gyr','Gyr','dual'),
+     ($1,'guzerat','Guzerat','dual'),
+     ($1,'indubrasil','Indubrasil','beef'),
+     ($1,'sardo_negro','Sardo Negro','beef'),
+     -- Cruces de doble propósito, que es como produce la mayoría.
+     ($1,'girolando','Girolando','dual'),
+     ($1,'mestizo','Mestizo','dual'),
+     -- Europeas de leche. «Holstein» y no «Holando Argentino»: es el nombre que se usa allá.
+     ($1,'holstein','Holstein','dairy'),
+     ($1,'pardo_suizo','Pardo Suizo','dual'),
+     ($1,'jersey','Jersey','dairy'),
+     -- Carne, adaptadas al trópico.
+     ($1,'senepol','Senepol','beef'),
+     ($1,'romosinuano','Romosinuano','beef'),
+     ($1,'simmental','Simmental','dual'),
+     -- Las que ya estaban. Se conservan: hay fincas del Cono Sur y borrarlas dejaría animales
+     -- apuntando a una raza que ya no existe.
      ($1,'angus','Angus','beef'), ($1,'hereford','Hereford','beef'),
      ($1,'brangus','Brangus','beef'), ($1,'braford','Braford','beef'),
      ($1,'holando','Holando Argentino','dairy')`,
