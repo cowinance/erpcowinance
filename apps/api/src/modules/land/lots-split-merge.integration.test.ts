@@ -41,6 +41,8 @@ describe('Lotes — dividir / fusionar / mover todo', () => {
     }
     return ids;
   };
+  const animalesDe = async (lot: string) =>
+    (await db.query<{ id: string }>(`SELECT id FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`, [lot, db.tenant])).map((r) => r.id);
   const head = async (lot: string) => (await lotsSvc.getLot(lot) as any).head;
 
   beforeAll(async () => {
@@ -211,6 +213,38 @@ describe('Lotes — dividir / fusionar / mover todo', () => {
     const [cerrado] = await db.query<{ exit_date: string }>(
       `SELECT exit_date::text AS exit_date FROM grazing_records WHERE tenant_id=$1 AND lot_id=$2 AND exit_date IS NOT NULL`, [db.tenant, lot]);
     expect(cerrado.exit_date).toBe(await db.today());
+  });
+
+  it('DOS LOTES NO PUEDEN LLAMARSE IGUAL, entren por donde entren', async () => {
+    // Los lotes se crean por DOS puertas —el alta y la división— y el nombre lo pone el productor en
+    // las dos. Con la guarda solo en el alta, dividir un lote y ponerle un nombre que ya existía
+    // pasaba sin queja, que es la forma más fácil de terminar con dos «Recría 2026»: en el corral el
+    // lote se nombra en voz alta, y dos renglones idénticos en un selector de destino no se
+    // distinguen.
+    const a = await mkLot('NOM uno');
+    await addAnimals(a, 3);
+
+    await expect(lotsSvc.createLot({ name: 'NOM uno' })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'lot.duplicate_name' },
+    });
+    // Sin mayúsculas ni espacios de sobra: así es como se repite un nombre por error.
+    await expect(lotsSvc.createLot({ name: '  nom uno ' })).rejects.toMatchObject({ status: 409 });
+
+    const ids = await animalesDe(a);
+    await expect(land.splitLot(a, { name: 'NOM uno', animal_ids: ids.slice(0, 1) }, randomUUID())).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'lot.duplicate_name' },
+    });
+    // Y la división rechazada no dejó rastro: ni lote nuevo ni animal movido.
+    expect(await head(a), 'el lote de origen quedó intacto').toBe(3);
+  });
+
+  it('renombrar un lote no choca CONSIGO MISMO', async () => {
+    // La otra mitad: la guarda no puede impedir editar el resto de un lote sin cambiarle el nombre.
+    const a = await mkLot('NOM propio');
+    const r: any = await lotsSvc.updateLot(a, { name: 'NOM propio', purpose: 'weaning' });
+    expect(r.purpose).toBe('weaning');
   });
 
   it('ARCHIVAR CON ANIMALES ADENTRO SE BLOQUEA POR LAS DOS PUERTAS', async () => {

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvalidLotError, Sex, computeFeedlotMetrics, validateLotInput } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { assertUniqueName } from '../../common/unique-name';
 
 /**
  * Lotes y rodeos (B1): alta, listado, detalle, métricas, alertas operativas, edición, archivado e
@@ -51,6 +52,7 @@ export class LotsService {
 
   async createLot(body: any) {
     const input = this.validateLot(() => validateLotInput(body));
+    await assertUniqueName(this.db, 'lots', input.name);
     const t = this.db.tenant;
     const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
     if (!farm) throw new BadRequestException({ code: 'lot.no_farm', title: 'No hay finca para asociar el lote' });
@@ -250,6 +252,7 @@ export class LotsService {
       // Reusa la regla única para nombre/propósito (usa el nombre actual si sólo cambia el propósito).
       const current = await this.db.one<any>(`SELECT name FROM lots WHERE id=$1 AND tenant_id=$2`, [id, t]);
       const input = this.validateLot(() => validateLotInput({ name: body?.name ?? current!.name, purpose: body?.purpose }));
+      await assertUniqueName(this.db, 'lots', input.name, id);
       args.push(input.name);
       sets.push(`name=$${args.length}`);
       args.push(input.purpose);

@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { InvalidLotError, InvalidPolygonError, polygonAreaHa, toPolygonGeoJSON, validateDeclaredAreaHa, validateLotInput } from '@cowinance/domain';
 import { DbService, type Q } from '../../db/db.service';
 import { MovementService, type MovementIntent } from './movement.service';
+import { assertUniqueName } from '../../common/unique-name';
 
 @Injectable()
 export class LandService {
@@ -55,30 +56,11 @@ export class LandService {
     }
   }
 
-  /**
-   * Dos potreros no pueden llamarse igual.
-   *
-   * En una finca el potrero se nombra en voz alta —«llevá el rodeo al Norte»— así que dos «Potrero
-   * Norte» en la lista no se distinguen, y todos los selectores de destino los muestran idénticos:
-   * mover un lote al equivocado no deja ninguna señal.
-   *
-   * Se compara sin mayúsculas ni espacios de sobra, que es como se repite un nombre por error.
-   * `excepto` sirve para editar un potrero sin que choque consigo mismo.
-   */
-  private async assertNombreLibre(name: string, excepto?: string) {
-    const repetido = await this.db.one<{ id: string }>(
-      `SELECT id FROM paddocks
-        WHERE tenant_id=$1 AND deleted_at IS NULL AND lower(trim(name)) = lower(trim($2)) AND ($3::uuid IS NULL OR id <> $3)`,
-      [this.db.tenant, name, excepto ?? null],
-    );
-    if (repetido) throw new ConflictException({ code: 'paddock.duplicate_name', title: `Ya hay un potrero llamado «${name}»` });
-  }
-
   async createPaddock(body: any) {
     const name = String(body?.name ?? '').trim();
     if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name es obligatorio' });
     const t = this.db.tenant;
-    await this.assertNombreLibre(name);
+    await assertUniqueName(this.db, 'paddocks', name);
     const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
     if (!farm) throw new BadRequestException({ code: 'paddock.no_farm', title: 'No hay finca para el potrero' });
     const { boundary, areaHa } = this.geometry(body);
@@ -99,7 +81,7 @@ export class LandService {
     if (body?.name != null) {
       const name = String(body.name).trim();
       if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name no puede quedar vacío' });
-      await this.assertNombreLibre(name, id);
+      await assertUniqueName(this.db, 'paddocks', name, id);
       args.push(name);
       sets.push(`name=$${args.length}`);
     }
@@ -442,6 +424,10 @@ export class LandService {
           title: `${detalle}. Actualizá la lista y volvé a intentar.`,
         });
       }
+
+      // La división es la SEGUNDA puerta que crea un lote, y el nombre lo pone el productor igual que
+      // en el alta: sin esto, dividir «Rodeo Cría 1» en otro «Rodeo Cría 1» pasaba sin queja.
+      await assertUniqueName(this.db, 'lots', input.name, null, q);
 
       const newLot = await q.one<{ id: string; name: string }>(
         `INSERT INTO lots (tenant_id, farm_id, name, purpose, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id, name`,
