@@ -225,6 +225,29 @@ describe('DashboardHomeService · home agregado (E1)', () => {
       expect(fn).not.toContain('count(');
     });
 
+    it('LA AGENDA VIENE ACOTADA, y dice cuánto no está mostrando', async () => {
+      // La agenda no tenía tope: con 65 animales del demo eran 62 ítems y 19 de los 24,6 KB de la
+      // respuesta — casi un ítem por animal, así que escala con el hato. En una finca de miles son
+      // cientos de KB en la pantalla que más se abre, sobre la conexión de un campo.
+      //
+      // El tope solo es aceptable si se DICE: recortar en silencio haría que el productor leyera la
+      // lista, la viera terminar y creyera que ya vio todo lo del día. Por eso `agenda_total` no es
+      // decoración — es lo que vuelve honesto al recorte, y por eso se prueba junto al tope.
+      const h: any = await home.home();
+      expect(h.agenda.length).toBeLessThanOrEqual(20);
+      expect(h.agenda_total).toBeGreaterThanOrEqual(h.agenda.length);
+      expect(h.agenda_overflow_tasks).toBeLessThanOrEqual(h.agenda_total - h.agenda.length);
+    }, 60_000);
+
+    it('lo que se recorta son los MENOS urgentes: primero ordena, después corta', async () => {
+      // Cortar antes de ordenar daría veinte ítems cualesquiera —los primeros que devolvió la base—
+      // y dejaría afuera un parto de mañana para mostrar una vacuna del mes que viene. El orden es
+      // el que ya tenía la agenda: fecha de vencimiento y, a igual fecha, severidad.
+      const h: any = await home.home();
+      const fechas = h.agenda.map((a: any) => a.due_at ?? '9999-12-31');
+      expect(fechas).toEqual([...fechas].sort());
+    }, 60_000);
+
     it('NO consulta la vista de GDP: es lo que lo volvía cuadrático', async () => {
       // Se mira el código porque el costo no se ve en un test con datos de demo — se vio con el hato
       // inflado a 3.000, donde el Inicio pasaba de 49 ms a 7.156.

@@ -140,6 +140,23 @@ export class DashboardHomeService {
       return (SEV_A[a.severity] ?? 2) - (SEV_A[b.severity] ?? 2);
     });
 
+    /**
+     * Cuántos ítems de agenda viajan al cliente.
+     *
+     * La agenda NO tenía tope, ni acá ni en la pantalla: con 65 animales ya eran 62 ítems y 19 de
+     * los 24,6 KB de la respuesta — casi un ítem por animal. Escala con el hato, así que en una
+     * finca de miles son cientos de KB en la pantalla que más se abre, sobre la conexión de un
+     * campo, y la UI los dibuja todos.
+     *
+     * Veinte es lo que se mira de una sentada. Los que quedan afuera no se pierden: están en
+     * Alertas y en Tareas, y la pantalla dice cuántos son y dónde. Recortar sin decirlo sería peor
+     * que no recortar — el productor creería que ya vio todo.
+     *
+     * Se recorta DESPUÉS de ordenar, así que lo que queda es lo más urgente y no lo primero que
+     * salió de la base.
+     */
+    const AGENDA_VISIBLE = 20;
+
     return {
       role: this.db.role ?? null,
       // Qué le falta a la finca para estar en marcha. Va SIEMPRE, no solo con el hato vacío: el
@@ -148,7 +165,11 @@ export class DashboardHomeService {
       kpis,
       priority,
       farm_status,
-      agenda: combinedAgenda,
+      agenda: combinedAgenda.slice(0, AGENDA_VISIBLE),
+      /** Total real de la agenda: lo que la pantalla necesita para decir cuánto NO está mostrando. */
+      agenda_total: combinedAgenda.length,
+      /** De los que no entran, cuántos son tareas — para mandar a cada uno a su pantalla. */
+      agenda_overflow_tasks: combinedAgenda.slice(AGENDA_VISIBLE).filter((a) => a.related_type === 'task').length,
       recent_activity: recent,
       by_category: base.by_category,
       weight_series: base.weight_series,

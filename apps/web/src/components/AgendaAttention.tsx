@@ -43,11 +43,21 @@ function urgency(item: AgendaItem, today: string): 'overdue' | 'today' | 'upcomi
  * agrupada por urgencia. Paridad con la sección «Hoy» del móvil, misma fuente. Los ítems
  * de animal enlazan a su ficha; los de tarea son informativos. Server-render (solo Links).
  */
-export function AgendaAttention({ items }: { items: AgendaItem[] }) {
+export function AgendaAttention({ items, total, overflowTasks = 0 }: { items: AgendaItem[]; total?: number; overflowTasks?: number }) {
   if (!items.length) return <p className="py-6 text-center text-body text-ink-3">Todo en orden — sin pendientes hoy.</p>;
 
   const today = farmToday();
   const grouped = GROUPS.map((g) => ({ ...g, list: items.filter((i) => urgency(i, today) === g.key) })).filter((g) => g.list.length);
+
+  // El servidor acota la agenda; acá se DICE que la acotó.
+  //
+  // Recortar en silencio sería peor que no recortar: el productor leería la lista, la vería
+  // terminar, y creería que ya vio todo lo del día. El pie dice cuántos quedan y adónde ir.
+  //
+  // Y manda a DOS lados, no a uno: la agenda mezcla alertas de sanidad y reproducción con tareas,
+  // que viven en pantallas distintas. Un solo enlace tendría que mentir sobre la mitad.
+  const oculto = Math.max(0, (total ?? items.length) - items.length);
+  const ocultoAlertas = Math.max(0, oculto - overflowTasks);
 
   return (
     <div className="space-y-3">
@@ -88,6 +98,24 @@ export function AgendaAttention({ items }: { items: AgendaItem[] }) {
           </div>
         </div>
       ))}
+
+      {oculto > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-2 text-caption text-ink-3">
+          <span>
+            Mostrando {items.length} de {total} · quedan {oculto}
+          </span>
+          {ocultoAlertas > 0 ? (
+            <Link href="/alertas" className="font-medium text-brand hover:underline">
+              Ver alertas
+            </Link>
+          ) : null}
+          {overflowTasks > 0 ? (
+            <Link href="/tareas" className="font-medium text-brand hover:underline">
+              Ver tareas
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

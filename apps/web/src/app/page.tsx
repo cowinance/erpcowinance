@@ -81,9 +81,24 @@ export default async function Dashboard() {
   }
 
   const k = home.kpis;
-  const hour = new Date().getHours();
+
+  // El saludo y la fecha, en la hora de la FINCA.
+  //
+  // Esto es un Server Component: `new Date().getHours()` daba la hora de la máquina que renderiza
+  // —UTC en producción—, no la del productor. A las 00:30 de un lunes en Venezuela la pantalla
+  // decía «domingo 26» y saludaba como si fuera de tarde. Es la misma corrección que ya se había
+  // hecho en los reportes de reproducción; el Inicio era la última pantalla que faltaba.
+  //
+  // La zona sale de la organización, que `me` ya trae: es la de la finca y no la del dispositivo,
+  // porque el día de trabajo pertenece a la finca — un veterinario que carga desde otra provincia
+  // tiene que ver el día de la finca, no el suyo.
+  const tz = me?.organization?.timezone ?? undefined;
+  const ahora = new Date();
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(ahora));
   const greeting = hour < 12 ? 'Buen día' : hour < 19 ? 'Buenas tardes' : 'Buenas noches';
-  const rawDate = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  // `es` y no `es-AR`: la app se registra con país y no todos los productores son argentinos. El
+  // formato largo en castellano es el mismo; lo que cambiaba era pretender una localidad ajena.
+  const rawDate = ahora.toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
   const today = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
   const neverPopulated = (k.total_animals ?? 0) === 0;
   const noActiveButHasHistory = !neverPopulated && (k.active_animals ?? 0) === 0;
@@ -236,7 +251,7 @@ export default async function Dashboard() {
             {/* Atención hoy — agenda combinada de /dashboard/home */}
             <Card>
               <CardTitle>Atención hoy</CardTitle>
-              <AgendaAttention items={home.agenda ?? []} />
+              <AgendaAttention items={home.agenda ?? []} total={home.agenda_total} overflowTasks={home.agenda_overflow_tasks} />
             </Card>
 
             <Card>
