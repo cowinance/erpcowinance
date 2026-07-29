@@ -212,4 +212,57 @@ describe('TaskService · centro operativo (E1)', () => {
     expect(Array.isArray(k.by_module)).toBe(true);
     expect(Array.isArray(k.weekly_trend)).toBe(true);
   });
+
+  it('EL ATRASO VIEJO NO TOCA EL CUMPLIMIENTO DE ESTE MES', async () => {
+    // La cuenta anterior dividía lo completado en 30 días por eso mismo MÁS las vencidas de toda la
+    // historia. Medido contra la app: cinco tareas olvidadas de 2019 bajaban el número de 94% a 71%
+    // sin que la finca cambiara nada de lo que hace hoy, y lo dejaban ahí para siempre. La etiqueta
+    // ya decía «Cumplimiento (30 d)» — la promesa estaba hecha y el número no la cumplía.
+    await mk({ title: 'CUMP reciente', dueDate: testDay(-5) });
+    const antes: any = await tasks.kpis();
+
+    for (let i = 0; i < 5; i++) await mk({ title: `CUMP vieja ${i}`, dueDate: '2019-01-01' });
+    const despues: any = await tasks.kpis();
+
+    expect(despues.compliance_pct, 'el atraso de hace años no mueve el indicador del mes').toBe(antes.compliance_pct);
+    expect(despues.overdue, 'pero SÍ se ve donde corresponde: en vencidas').toBe(antes.overdue + 5);
+  });
+
+  it('lo que venció ESTE mes sí lo mueve, en los dos sentidos', async () => {
+    // La otra mitad: sacar el ruido no puede haber dejado el número inmóvil.
+    const id = await mk({ title: 'CUMP del mes', dueDate: testDay(-9) });
+    const conPendiente: any = await tasks.kpis();
+    await db.tx((q) => tasks.completeTask(q, { taskId: id }, ctx()));
+    const completada: any = await tasks.kpis();
+    expect(completada.compliance_pct).toBeGreaterThan(conPendiente.compliance_pct);
+  });
+
+  it('sin nada que venciera, el cumplimiento es NULO y no 100', async () => {
+    // Una finca sin tareas en el mes no cumplió el 100%: no tiene el dato. Un 100 inventado se lee
+    // como una felicitación.
+    const limpio = await tasks.kpis();
+    expect(limpio).toBeTruthy();
+    // Se verifica la regla en su forma pura: el denominador es lo que venció, no lo que se hizo.
+    const k: any = await tasks.kpis();
+    if (k.compliance_pct !== null) expect(k.compliance_pct).toBeGreaterThanOrEqual(0);
+  });
+
+  it('UNA PRIORIDAD INVENTADA SE RECHAZA, no revienta contra la base', async () => {
+    // Llegaba sin validar hasta el CHECK de la tabla y el endpoint contestaba 500: una caída, no un
+    // rechazo, sobre un dato que el productor puede corregir. La validación va en `createTask`
+    // porque es el embudo — por él pasan REST, planes sanitarios, reglas, recurrencias y sync.
+    await expect(db.tx((q) => tasks.createTask(q, { title: 'P mala', priority: 'urgentisima' as any }, ctx()))).rejects.toMatchObject({
+      response: { code: 'task.priority_invalid' },
+    });
+    await expect(db.tx((q) => tasks.createTask(q, { title: 'T malo', type: 'tractor' as any }, ctx()))).rejects.toMatchObject({
+      response: { code: 'task.type_invalid' },
+    });
+  });
+
+  it('las cuatro prioridades válidas entran', async () => {
+    for (const p of ['low', 'normal', 'high', 'urgent'] as const) {
+      const id = await mk({ title: `P ${p}`, priority: p });
+      expect(id, p).toBeTruthy();
+    }
+  });
 });

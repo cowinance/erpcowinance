@@ -28,6 +28,22 @@ export type TaskOrigin = 'rest' | 'health' | 'sync' | 'repro';
 export type TaskType = 'health' | 'breeding' | 'feeding' | 'maintenance' | 'crop' | 'general';
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
+/**
+ * Los valores que la BASE acepta para tipo y prioridad, escritos una vez.
+ *
+ * Estaban en el `CHECK` de la tabla y en un `Set` suelto dentro de `setPriority`, pero NO en el
+ * alta: `createTask` tomaba `input.priority` y lo mandaba al `INSERT` sin mirarlo. Una prioridad
+ * inventada llegaba al `CHECK` y el endpoint contestaba 500 — una caída, no un rechazo, sobre un
+ * dato que el productor puede corregir.
+ *
+ * Van acá porque `createTask` es el EMBUDO: por él pasan el alta REST, los planes sanitarios, las
+ * reglas automáticas, las recurrencias y el sync. Validar en el controlador —como se hacía con el
+ * tipo— deja abiertas las otras cuatro puertas: una recurrencia con un tipo inventado revienta
+ * recién al materializarse, lejos de quien la creó.
+ */
+export const TASK_TYPES: readonly TaskType[] = ['health', 'breeding', 'feeding', 'maintenance', 'crop', 'general'];
+export const TASK_PRIORITIES: readonly TaskPriority[] = ['low', 'normal', 'high', 'urgent'];
+
 export interface TaskContext {
   origin: TaskOrigin;
   /** true SOLO para mutaciones server-authored (REST/web/Sanidad). El sync llama con false. */
@@ -118,6 +134,13 @@ export class TaskService {
     const taskId = input.taskId ?? randomUUID();
     const type = input.type ?? 'general';
     const priority = input.priority ?? 'normal';
+    // Tipo y prioridad, ANTES del INSERT. Sin esto el valor viajaba hasta el `CHECK` de la tabla y
+    // salía como 500. El mensaje nombra lo que se puede escribir: quien se equivoca necesita saber
+    // cuáles son las opciones, no que «algo falló».
+    if (!TASK_TYPES.includes(type))
+      throw new BadRequestException({ code: 'task.type_invalid', title: `Tipo de tarea inválido: ${type}. Puede ser ${TASK_TYPES.join(', ')}.` });
+    if (!TASK_PRIORITIES.includes(priority))
+      throw new BadRequestException({ code: 'task.priority_invalid', title: `Prioridad inválida: ${priority}. Puede ser ${TASK_PRIORITIES.join(', ')}.` });
     const dueDate = input.dueDate ?? null;
     const description = input.description ?? null;
     const relatedType = input.relatedType ?? null;
@@ -392,7 +415,7 @@ export class TaskService {
   /** Cambia la prioridad (E3). Diff-aware; versiona `priority` (sync); historial priority_change. */
   async setPriority(q: Q, input: { taskId: string; priority: TaskPriority }, ctx: TaskContext): Promise<{ changed: boolean; syncOp: PutOp | null }> {
     const t = this.db.tenant;
-    const PRIORITIES = new Set<TaskPriority>(['low', 'normal', 'high', 'urgent']);
+    const PRIORITIES = new Set<TaskPriority>(TASK_PRIORITIES);
     if (!PRIORITIES.has(input.priority)) throw new BadRequestException({ code: 'task.invalid_priority', title: 'Prioridad inválida' });
     const existing = await q.one<{ id: string; priority: string }>(
       `SELECT id, priority FROM tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
@@ -624,6 +647,29 @@ export class TaskService {
            count(*) FILTER (WHERE status = 'done' AND completed_at::date = CURRENT_DATE)::int AS done_today,
            count(*) FILTER (WHERE status = 'done' AND completed_at >= date_trunc('week', CURRENT_DATE))::int AS done_week,
            count(*) FILTER (WHERE status = 'done' AND completed_at >= CURRENT_DATE - 30)::int AS done_30d,
+           -- CUMPLIMIENTO: una sola ventana de 30 días, la misma para los dos lados.
+           --
+           -- La cuenta anterior dividía lo completado en 30 días por eso mismo MÁS las vencidas de
+           -- toda la historia. Medido: cinco tareas olvidadas de 2019 bajaban el número de 94% a
+           -- 71% sin que la finca cambiara nada de lo que hace hoy, y lo dejaban ahí para siempre.
+           -- La etiqueta ya decía «Cumplimiento (30 d)»: la promesa estaba hecha, el número no la
+           -- cumplía.
+           --
+           -- Ahora se pregunta lo que se lee: de lo que VENCIÓ en los últimos 30 días, cuánto se
+           -- hizo. Las canceladas quedan afuera de los dos lados —cancelar es decidir que no hacía
+           -- falta, no cumplir ni incumplir— y las que no tienen vencimiento tampoco entran, porque
+           -- no pueden llegar tarde.
+           --
+           -- El atraso viejo NO se pierde: vive en overdue, que es su propio indicador. Meterlo
+           -- acá hacía que un número tapara al otro.
+           count(*) FILTER (
+             WHERE status <> 'canceled' AND due_date IS NOT NULL
+               AND due_date::date BETWEEN CURRENT_DATE - 30 AND CURRENT_DATE
+           )::int AS vencian_30d,
+           count(*) FILTER (
+             WHERE status = 'done' AND due_date IS NOT NULL
+               AND due_date::date BETWEEN CURRENT_DATE - 30 AND CURRENT_DATE
+           )::int AS cumplidas_30d,
            round(avg((completed_at::date - due_date::date)) FILTER (
              WHERE status = 'done' AND completed_at >= CURRENT_DATE - 30 AND due_date IS NOT NULL AND completed_at::date > due_date::date
            ), 1)::float AS avg_delay_days
@@ -653,9 +699,11 @@ export class TaskService {
         [t],
       ),
     ]);
-    const done30 = totals?.done_30d ?? 0;
     const overdue = totals?.overdue ?? 0;
-    const compliancePct = done30 + overdue > 0 ? Math.round((100 * done30) / (done30 + overdue)) : null;
+    // `null` y no 100 cuando no venció nada: una finca sin tareas en el mes no cumplió el 100%, no
+    // tiene el dato. Un 100 inventado se lee como una felicitación.
+    const vencian = totals?.vencian_30d ?? 0;
+    const compliancePct = vencian > 0 ? Math.round((100 * (totals?.cumplidas_30d ?? 0)) / vencian) : null;
     return {
       overdue,
       critical_overdue: totals?.critical_overdue ?? 0,
