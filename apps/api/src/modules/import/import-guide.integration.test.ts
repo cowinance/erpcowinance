@@ -10,6 +10,9 @@ import { ImportService } from './import.service';
 import { Sex } from '@cowinance/domain';
 import { MovementService } from '../land/movement.service';
 
+/** Un «hoy» fijo: la validación de fecha necesita saber qué es futuro, y un test no puede depender del reloj. */
+const HOY_TEST = '2026-07-29';
+
 /**
  * La ayuda de la importación no puede mentir (O-4).
  *
@@ -91,7 +94,7 @@ describe('la ayuda de la importación dice la verdad', () => {
         category_code: fila[idx('categoria')],
         birth_date: fila[idx('nacimiento')],
       };
-      const r = animalWrite.normalizeAndValidate(raw);
+      const r = animalWrite.normalizeAndValidate(raw, HOY_TEST);
       expect(r.ok, `la plantilla trae una fila que no valida: ${JSON.stringify(raw)} → ${JSON.stringify((r as any).errors)}`).toBe(true);
 
       // Y la categoría tiene que existir Y ser compatible con el sexo: «hembra, novillo» pasa la

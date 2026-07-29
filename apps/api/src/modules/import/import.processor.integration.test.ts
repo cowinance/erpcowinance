@@ -63,6 +63,29 @@ describe('ImportProcessor · integración', () => {
   const MAPPING = { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoria' };
   const MAPPING_GEN = { ...MAPPING, dam_tag: 'Madre', sire_tag: 'Padre' };
 
+  /**
+   * Vence el heartbeat para simular el paso del tiempo.
+   *
+   * Un lote recién reclamado tiene el heartbeat fresco, así que `claimNext` no lo vuelve a tomar
+   * hasta que se vence — en producción, dos minutos. Sin esto el test reclamaría una sola vez y no
+   * ejercitaría el ciclo de reintento, que es justo lo que se quiere probar.
+   */
+  const vencerHeartbeat = () => db.query(`UPDATE import_batches SET heartbeat_at = now() - interval '1 hour'`);
+
+  /**
+   * Deja UN solo lote reclamable.
+   *
+   * `claimNext` toma el más viejo de la cola, así que sin esto agarra los lotes que dejaron los
+   * tests anteriores de este archivo y el reintento se le aplica a otro. Es la diferencia entre
+   * probar la política y probar el azar del orden de ejecución.
+   */
+  const soloReclamable = (id: string) =>
+    db.query(`UPDATE import_batches SET status = 'completed' WHERE id <> $1 AND status IN ('queued','processing')`, [id]);
+
+  const batchRow = async (id: string) =>
+    (await db.query<{ status: string; attempts: number; last_error: string | null; finished_at: string | null }>(
+      `SELECT status, attempts, last_error, finished_at FROM import_batches WHERE id = $1`, [id]))[0];
+
   async function seedBatch(rawRows: Record<string, string>[], status = 'queued', mapping = MAPPING): Promise<string> {
     const batch = (
       await db.query<{ id: string }>(
@@ -215,5 +238,65 @@ describe('ImportProcessor · integración', () => {
     // idempotencia: reproceso no re-emite (diff-aware → sin cambios)
     await processor.processBatch(batchId, tenantId);
     expect(await linkChangesets(batchId)).toHaveLength(1);
+  });
+
+  it('el tope de reintentos es CHICO: reintentar mucho es esconder el fallo', async () => {
+    // El test de abajo usa `MAX_ATTEMPTS` para armar su bucle, así que por sí solo no puede detectar
+    // que el tope se vuelva enorme — pasaría igual con 999, que en la práctica es no tener tope.
+    // Esta afirmación es la que fija la política: un error transitorio se resuelve en uno o dos
+    // reintentos; más que eso es un error determinista, y repetirlo solo demora la mala noticia.
+    expect(ImportClaimRepository.MAX_ATTEMPTS).toBeGreaterThanOrEqual(2);
+    expect(ImportClaimRepository.MAX_ATTEMPTS).toBeLessThanOrEqual(5);
+  });
+
+  it('UN LOTE QUE FALLA SE CIERRA DICIENDO POR QUÉ, no reintenta para siempre', async () => {
+    // El procesador contemplaba `failed` pero nunca lo usaba: su propio comentario decía «no hay
+    // política de máximo de intentos todavía». Medido contra la app, una sola celda mala dejaba el
+    // lote reintentando cada dos minutos —720 veces por día— con los contadores en cero, el estado
+    // en «procesando» y el motivo únicamente en los logs del servidor. El productor veía
+    // «procesando…» y nada más.
+    const batchId = await seedBatch([{ caravana: 'RETRY-1', sexo: 'H', categoria: 'vaca' }]);
+    await soloReclamable(batchId);
+
+    // Los dos primeros fallos ANOTAN el motivo pero dejan el lote vivo: un error transitorio —una
+    // caída, un bloqueo— se resuelve reintentando.
+    for (let i = 1; i < ImportClaimRepository.MAX_ATTEMPTS; i++) {
+      await vencerHeartbeat();
+      await claims.claimNext();
+      const r = await claims.noteFailure(batchId, 'error simulado');
+      expect(r.gaveUp, `intento ${i} no debería rendirse`).toBe(false);
+      expect((await batchRow(batchId)).status).toBe('processing');
+    }
+
+    // El último se rinde y cierra el lote.
+    await vencerHeartbeat();
+    await claims.claimNext();
+    const ultimo = await claims.noteFailure(batchId, 'value too long for type character varying(255)');
+    expect(ultimo.gaveUp).toBe(true);
+
+    const b = await batchRow(batchId);
+    expect(b.status).toBe('failed');
+    expect(b.attempts).toBe(ImportClaimRepository.MAX_ATTEMPTS);
+    expect(b.last_error, 'el motivo se GUARDA: sin esto vivía solo en los logs').toContain('character varying');
+    expect(b.finished_at, 'y queda fechado el cierre').not.toBeNull();
+  });
+
+  it('un lote ya rendido NO se vuelve a reclamar', async () => {
+    // Es lo que corta el bucle: sin esto, el heartbeat vencido lo levantaría de nuevo aunque el
+    // estado dijera `failed`.
+    const batchId = await seedBatch([{ caravana: 'RETRY-2', sexo: 'H', categoria: 'vaca' }]);
+    await soloReclamable(batchId);
+    for (let i = 0; i < ImportClaimRepository.MAX_ATTEMPTS; i++) {
+      await vencerHeartbeat();
+      await claims.claimNext();
+      await claims.noteFailure(batchId, 'error simulado');
+    }
+    expect((await batchRow(batchId)).status).toBe('failed');
+
+    // Se vencen los heartbeats de todo lo que quedó en curso: el reclamo mira eso para recuperar
+    // huérfanos, y es la condición que antes revivía a este lote.
+    await vencerHeartbeat();
+    const reclamado = await claims.claimNext();
+    expect(reclamado?.id, 'el lote rendido no vuelve a la cola').not.toBe(batchId);
   });
 });

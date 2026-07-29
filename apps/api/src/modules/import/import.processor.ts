@@ -17,11 +17,15 @@ type Mapping = Partial<Record<AnimalImportField, string>>;
  * que reclama un batch (ImportClaimRepository) y lo procesa por chunks en
  * transacciones tenant-scoped INDEPENDIENTES, fuera del request.
  *
- * Semántica de errores (aprobada): la validación esperable ocurre ANTES de
- * persistir (→ invalid/skipped, sin lanzar SQL); un error SQL INESPERADO aborta y
- * REVIERTE el chunk completo — el batch queda en `processing` y el heartbeat
- * vencido lo hará reclamar de nuevo (reintento). NO se transiciona a `failed`
- * (no hay política de máximo de intentos todavía). Sin savepoints.
+ * Semántica de errores: la validación esperable ocurre ANTES de persistir (→
+ * invalid/skipped, sin lanzar SQL); un error SQL INESPERADO aborta y REVIERTE el
+ * chunk completo — el batch vuelve a `processing` y el heartbeat vencido lo hace
+ * reclamar de nuevo. Sin savepoints.
+ *
+ * El reintento tiene TOPE (`MAX_ATTEMPTS`): agotado, el lote se cierra en `failed`
+ * con el motivo guardado en `last_error`. Sin ese tope —que es como estaba— un
+ * error determinista reintentaba cada dos minutos para siempre y el productor solo
+ * veía «procesando…».
  *
  * Contadores por DELTA: cada chunk suma solo las filas que pasaron pending→terminal
  * en ESA tx → sin doble conteo en recuperación (solo se procesan `pending`).
@@ -49,12 +53,29 @@ export class ImportProcessor implements OnModuleInit, OnModuleDestroy {
   async tick(): Promise<void> {
     if (this.draining) return;
     this.draining = true;
+    let claimedId = '(sin reclamar)';
     try {
       const claimed = await this.claims.claimNext();
-      if (claimed) await this.processBatch(claimed.id, claimed.tenantId);
+      if (!claimed) return;
+      claimedId = claimed.id;
+      await this.processBatch(claimed.id, claimed.tenantId);
     } catch (err) {
-      // El chunk se revirtió; el batch queda en `processing` → se reintenta por heartbeat vencido.
-      this.logger.warn(`Import fallo procesando; se reintentará por heartbeat: ${String(err)}`);
+      /*
+       * El chunk se revirtió. Antes esto terminaba acá: un `warn` en el log y el lote de vuelta a
+       * `processing`, que el heartbeat vencido volvía a reclamar. Para siempre.
+       *
+       * Medido contra la app: una celda con `14/03/2022` dejaba el lote reintentando cada dos
+       * minutos con los contadores en cero y el estado en «procesando». El productor veía
+       * «procesando…» y nada más — el motivo existía solo en los logs del servidor, donde no lo iba
+       * a leer nunca.
+       *
+       * Ahora el fallo se ANOTA en el lote y, agotados los intentos, el lote se cierra en `failed`
+       * con su motivo. Reintentar sin límite no es tolerancia a fallos: es esconder el fallo.
+       */
+      const motivo = err instanceof Error ? err.message : String(err);
+      const { gaveUp } = await this.claims.noteFailure(claimedId, motivo).catch(() => ({ gaveUp: false }));
+      if (gaveUp) this.logger.error(`Import ${claimedId} FALLÓ tras ${ImportClaimRepository.MAX_ATTEMPTS} intentos: ${motivo}`);
+      else this.logger.warn(`Import ${claimedId} falló; se reintentará: ${motivo}`);
     } finally {
       this.draining = false;
     }
@@ -121,9 +142,12 @@ export class ImportProcessor implements OnModuleInit, OnModuleDestroy {
       let skipped = 0;
       let invalid = 0;
 
+      // Una sola vez por chunk: el día de la finca no cambia entre filas.
+      const hoy = await this.db.today(q);
+
       for (const r of rows) {
         // Validación ESPERABLE antes de persistir (sin lanzar SQL).
-        const nv = this.animalWrite.normalizeAndValidate(buildRawRow(r.raw, mapping));
+        const nv = this.animalWrite.normalizeAndValidate(buildRawRow(r.raw, mapping), hoy);
         if (!nv.ok) {
           await this.markRow(q, tenantId, r.id, 'invalid', { errors: nv.errors });
           invalid++;

@@ -259,8 +259,10 @@ export class ImportService {
   /** GET /v1/imports/:id — batch del tenant actual (404 si no existe o es ajeno). */
   async getBatch(id: string): Promise<ImportBatchDto> {
     const batch = await this.db.one<ImportBatchDto>(
+      // `attempts` y `last_error` viajan al cliente: son lo que convierte un «procesando…» eterno en
+      // una pantalla que dice qué pasó. Sin ellos el motivo vivía solo en los logs del servidor.
       `SELECT id, entity_type, status, source_filename, total_rows, created_count, skipped_count,
-              invalid_count, error_count, reconcile_mode, mapping, created_at, updated_at
+              invalid_count, error_count, reconcile_mode, mapping, attempts, last_error, created_at, updated_at
        FROM import_batches WHERE id = $1 AND tenant_id = $2`,
       [id, this.db.tenant],
     );
@@ -352,7 +354,10 @@ export class ImportService {
     );
 
     // 1) Validación PURA por fila + recolección de categorías/caravanas únicas.
-    const evaluated = rows.map((r) => ({ row_number: r.row_number, nv: this.animalWrite.normalizeAndValidate(buildRawRow(r.raw, mapping)) }));
+    // El «hoy» de la finca se pide UNA vez y se pasa a todas las filas: es el mismo día para toda la
+    // planilla, y pedirlo por fila serían 3.000 consultas para contestar lo mismo.
+    const hoy = await this.db.today();
+    const evaluated = rows.map((r) => ({ row_number: r.row_number, nv: this.animalWrite.normalizeAndValidate(buildRawRow(r.raw, mapping), hoy) }));
     const categoryCodes: string[] = [];
     const tags: string[] = [];
     for (const e of evaluated) {

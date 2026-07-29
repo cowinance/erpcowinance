@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { Sex, TagNumber } from '@cowinance/domain';
+import { parseImportDate, Sex, TagNumber } from '@cowinance/domain';
 import { HlcClock } from '@cowinance/sync-core';
 import type { Op, PutOp } from '@cowinance/sync-core';
 import { DbService, Q } from '../../db/db.service';
@@ -113,7 +113,12 @@ export class AnimalWriteService {
    * Usa los VOs del dominio (`TagNumber` normaliza la caravana; `Sex` valida el
    * conjunto cerrado {F,M}). No decide side-effects ni consulta duplicados.
    */
-  normalizeAndValidate(raw: RawAnimalRow): NormalizeResult {
+  /**
+   * @param hoy Fecha de la FINCA (`YYYY-MM-DD`). Obligatoria y no opcional a propósito: sin ella no
+   * se puede saber si una fecha de nacimiento es futura, y un parámetro opcional se olvida en la
+   * puerta nueva — que es exactamente cómo aparecen los bugs que venimos arreglando.
+   */
+  normalizeAndValidate(raw: RawAnimalRow, hoy: string): NormalizeResult {
     const errors: RowError[] = [];
     /** Texto opcional de planilla: recorta y trata el vacío como ausente. */
     const str = (v: unknown): string | null => {
@@ -168,6 +173,13 @@ export class AnimalWriteService {
       }
     }
 
+    // La fecha de nacimiento se INTERPRETA acá, que es la etapa pura por la que pasan las tres
+    // puertas: la vista previa, el procesador y el alta por REST. Antes el texto de la celda viajaba
+    // crudo hasta el `INSERT`, así que la previa decía «válida» sobre `marzo 2022` y el commit
+    // reventaba con el chunk entero.
+    const fecha = parseImportDate(raw.birth_date, hoy);
+    if (!fecha.ok) errors.push({ field: 'birth_date', code: 'invalid', message: fecha.reason });
+
     if (errors.length) return { ok: false, errors };
 
     return {
@@ -177,7 +189,7 @@ export class AnimalWriteService {
         sex: sex as 'F' | 'M',
         categoryCode: raw.category_code as string,
         name: (raw.name as string) ?? null,
-        birthDate: (raw.birth_date as string) ?? null,
+        birthDate: fecha.ok ? fecha.date : null,
         lotId: (raw.lot_id as string) ?? null,
         origin,
         breedName: str(raw.breed),

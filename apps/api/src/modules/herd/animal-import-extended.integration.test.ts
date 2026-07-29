@@ -9,6 +9,9 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
 import { ANIMAL_IMPORT_DESCRIPTOR } from './animal-import-descriptor';
 import { MovementService } from '../land/movement.service';
 
+/** Un «hoy» fijo: la validación de fecha necesita saber qué es futuro, y un test no puede depender del reloj. */
+const HOY_TEST = '2026-07-29';
+
 /**
  * Auditoría Fase 3c — el alta por PLANILLA acepta lo mismo que el alta manual: raza, RFID,
  * ID oficial y lote (por NOMBRE, como viene en un Excel real). `checkAgainstDb` resuelve los
@@ -24,7 +27,7 @@ describe('Importación de animales — raza / RFID / oficial / lote (Fase 3c)', 
 
   const persist = (raw: any) =>
     db.tx(async (q) => {
-      const nv = writer.normalizeAndValidate(raw);
+      const nv = writer.normalizeAndValidate(raw, HOY_TEST);
       if (!nv.ok) return { failed: nv.errors };
       const check = await writer.checkAgainstDb(q, nv.input);
       if ('skip' in check) return { skipped: check.skip };

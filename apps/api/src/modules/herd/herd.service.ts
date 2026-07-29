@@ -426,7 +426,7 @@ export class HerdService {
     breeds?: { breed_id: string; fraction?: number }[];
   }) {
     await this.billing.assertWithinLimit('animals'); // B-2: límite del plan (create REST; el import se difiere)
-    const nv = this.writer.normalizeAndValidate(body);
+    const nv = this.writer.normalizeAndValidate(body, await this.db.today());
     if (!nv.ok) {
       // Contrato REST preservado: cualquier campo obligatorio ausente → animal.missing_fields.
       if (nv.errors.some((e) => e.code === 'required'))
