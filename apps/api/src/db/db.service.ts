@@ -5,7 +5,7 @@ import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { bootstrapCatalogs, seedDemo } from './seed';
 import { asFarmDate, farmToday, safeTimeZone } from '@cowinance/domain';
-import { requestContext } from '../common/request-context';
+import { requestContext, type AuthContext } from '../common/request-context';
 import { RLS_TABLES, platformMigration, rlsMigration } from './rls';
 import { ROLE_PRIVILEGES_SQL, assessRolePrivileges, type RolePrivileges } from './role-privileges';
 import { checksumOf, loadMigrations, recordBaseline, resolveDbPath, runMigrations } from './migrations';
@@ -455,6 +455,7 @@ export class DbService implements OnModuleInit {
       const q = requestContext.getStore()?.q;
       if (q) return await q.query<T>(sql, params);
       const res = await this.db.query<T>(sql, params);
+      this.registrarEscritura(res);
       return res.rows;
     } catch (e) {
       throw translateDbError(e);
@@ -471,6 +472,9 @@ export class DbService implements OnModuleInit {
    * Nunca usar BEGIN/COMMIT manuales: con la conexión compartida, las queries
    * de otras requests se intercalarían dentro de la transacción ajena.
    */
+  /** Generación de escritura por tenant. Ver `writeGeneration()`. */
+  private readonly writeGen = new Map<string, number>();
+
   async tx<T>(fn: (q: Q) => Promise<T>): Promise<T> {
     // Si la request ya corre dentro de su transacción (interceptor de auth),
     // se reutiliza: PGlite no soporta transacciones anidadas.
@@ -491,7 +495,9 @@ export class DbService implements OnModuleInit {
        */
       const traducido = async <R>(sql: string, params?: unknown[]) => {
         try {
-          return (await t.query<R>(sql, params)).rows;
+          const res = await t.query<R>(sql, params);
+          this.registrarEscritura(res);
+          return res.rows;
         } catch (e) {
           throw translateDbError(e);
         }
@@ -502,5 +508,69 @@ export class DbService implements OnModuleInit {
       };
       return fn(q);
     });
+  }
+
+  /**
+   * Anota que una sentencia CAMBIÓ filas, para que las cachés derivadas sepan que su foto venció.
+   *
+   * Quien dice si hubo cambio es el motor: `affectedRows` es cuántas filas tocó de verdad, y lo
+   * normaliza el driver porque PGlite y `pg` lo informan distinto. No se mira el texto del SQL ni el
+   * método HTTP — este sistema tiene **varios GET que escriben** (`/alerts/kpis` guarda alertas, `/notifications/unread-count` arma su ledger,
+   * `/billing/subscription` crea el trial), y el interceptor de auth ya advierte que un guard por
+   * método los habría dejado pasar creyendo que los cubría.
+   *
+   * Que sea por FILAS TOCADAS y no por forma de la sentencia es lo que hace que el motor de alertas
+   * no se invalide a sí mismo: su `UPDATE` condicional no toca nada cuando nada cambió.
+   *
+   * Se marca también en el contexto de la request: la generación sirve para que OTROS requests
+   * recalculen, y la marca sirve para que ÉSTE no confíe en una foto anterior a su propia escritura
+   * —ni deje una hecha sobre datos que todavía puede deshacer.
+   */
+  private registrarEscritura(res: { affectedRows: number }): void {
+    if (!res?.affectedRows || this.sinInvalidar) return;
+    const t = this.tenant;
+    if (t) this.writeGen.set(t, (this.writeGen.get(t) ?? 0) + 1);
+    const ctx = requestContext.getStore() as (AuthContext & { wrote?: boolean }) | undefined;
+    if (ctx) ctx.wrote = true;
+  }
+
+  /**
+   * Cuántas veces cambió algo de este tenant desde que arrancó el proceso.
+   *
+   * No es una métrica: es la llave con la que las cachés derivadas saben si lo que guardaron sigue
+   * valiendo. Un número igual significa que nadie tocó nada en el medio.
+   */
+  writeGeneration(tenant = this.tenant): number {
+    return tenant ? (this.writeGen.get(tenant) ?? 0) : 0;
+  }
+
+  /** ¿Esta request ya escribió? Si sí, no puede confiar en una foto anterior a su propia escritura. */
+  hasWritten(): boolean {
+    return !!(requestContext.getStore() as { wrote?: boolean } | undefined)?.wrote;
+  }
+
+  private sinInvalidar = 0;
+
+  /**
+   * Corre un bloque cuyas escrituras son SALIDA de un cálculo, no entrada de ninguno.
+   *
+   * El caso es el motor de alertas: `evaluate()` guarda las alertas que `computeDesired()` acaba de
+   * derivar. Esas filas no alimentan a `computeDesired()` —no lee la tabla `alerts`—, así que
+   * contarlas como cambio hacía que el motor tirara con sus propias salidas la caché que él mismo
+   * acababa de llenar. Se veía como una caché que no acertaba nunca.
+   *
+   * La condición para usar esto es una sola y hay que releerla antes de agregar un caso: lo que se
+   * escribe acá adentro NO puede ser leído por el cálculo que se está cacheando. El día que
+   * `computeDesired()` mire la tabla `alerts`, esta supresión pasa a estar mal.
+   *
+   * Anidable, y restaura siempre — si quedara trabado, el sistema dejaría de invalidar nada.
+   */
+  async suppressInvalidation<T>(fn: () => Promise<T>): Promise<T> {
+    this.sinInvalidar++;
+    try {
+      return await fn();
+    } finally {
+      this.sinInvalidar--;
+    }
   }
 }

@@ -14,15 +14,39 @@ import { dbSslFromEnv, warnsAboutPlaintext } from './db-ssl';
  *
  * La forma imita la de PGlite (`query` devuelve `{ rows }`) para que `DbService` no cambie.
  */
+
+/**
+ * Cuántas filas CAMBIÓ una sentencia. Cero para las lecturas.
+ *
+ * Lo normalizan los dos drivers porque los dos lo dicen distinto, y confiar en cualquiera de las
+ * dos formas crudas sale mal:
+ *
+ *  · PGlite expone `affectedRows`, y ya vale 0 en un `SELECT`.
+ *  · `pg` expone `rowCount`, que en un `SELECT` es **cuántas filas devolvió**. Tomarlo como
+ *    «escribió» habría dado que toda lectura con resultados es una escritura — invisible en dev,
+ *    porque en dev corre PGlite. Por eso acá se mira además `command`.
+ *
+ * Antes esta capa devolvía solo `rows` y tiraba el resto, así que el dato no llegaba a `DbService`.
+ */
+export type QueryResult<T> = { rows: T[]; affectedRows: number };
+
+/** Las sentencias que cambian datos, según el `command` que informa `pg`. */
+const COMANDOS_DE_ESCRITURA = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE', 'COPY']);
+
+export function filasCambiadas(r: { command?: string; rowCount?: number | null; affectedRows?: number }): number {
+  if (typeof r?.affectedRows === 'number') return r.affectedRows;
+  return r?.command && COMANDOS_DE_ESCRITURA.has(r.command) ? (r.rowCount ?? 0) : 0;
+}
+
 export interface TxHandle {
-  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
 }
 
 export interface SqlDriver {
   /** Nombre para logs. */
   readonly kind: 'pglite' | 'postgres';
   ready(): Promise<void>;
-  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
   /** Ejecuta SQL de varias sentencias (DDL, migraciones). Sin parámetros. */
   exec(sql: string): Promise<void>;
   /** Transacción real; rollback automático si el callback lanza. */
@@ -43,8 +67,9 @@ export class PGliteDriver implements SqlDriver {
   ready() {
     return this.db.waitReady.then(() => undefined);
   }
-  query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
-    return this.db.query<T>(sql, params) as Promise<{ rows: T[] }>;
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
+    const r = await this.db.query<T>(sql, params);
+    return { rows: r.rows as T[], affectedRows: filasCambiadas(r as any) };
   }
   async exec(sql: string) {
     await this.db.exec(sql);
@@ -94,7 +119,7 @@ export class PostgresDriver implements SqlDriver {
 
   async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
     const r = await this.pool.query(sql, params as unknown[]);
-    return { rows: r.rows as T[] };
+    return { rows: r.rows as T[], affectedRows: filasCambiadas(r as any) };
   }
 
   /** DDL/migraciones: van por la conexión administrativa (multi-sentencia, protocolo simple). */
@@ -109,7 +134,7 @@ export class PostgresDriver implements SqlDriver {
       const out = await fn({
         query: async <R>(sql: string, params?: unknown[]) => {
           const r = await client.query(sql, params as unknown[]);
-          return { rows: r.rows as R[] };
+          return { rows: r.rows as R[], affectedRows: filasCambiadas(r as any) };
         },
       });
       await client.query('COMMIT');
@@ -128,7 +153,7 @@ export class PostgresDriver implements SqlDriver {
     return {
       query: async <R>(sql: string, params?: unknown[]) => {
         const r = await client.query(sql, params as unknown[]);
-        return { rows: r.rows as R[] };
+        return { rows: r.rows as R[], affectedRows: filasCambiadas(r as any) };
       },
       release: () => client.release(),
     };

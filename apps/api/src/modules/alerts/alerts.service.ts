@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvalidCatalogEntryError, assertThresholdDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import type { AgendaItemDto, Desired } from './alerts.types';
+import { DesiredCache } from './desired-cache';
+import { toAgenda } from './agenda-projection';
 import { isReadOnlySession } from '../../common/request-context';
 import { ReproService } from '../repro/repro.service';
 import { WeatherService } from '../weather/weather.service';
@@ -128,56 +131,10 @@ const RULES: RuleDef[] = [
 /** Nivel de estrés en el idioma del producto: la alerta la lee una persona, no un sistema. */
 const NIVEL_ES: Record<string, string> = { mild: 'leve', moderate: 'moderado', severe: 'severo', emergency: 'de emergencia' };
 
-interface Desired {
-  code: string;
-  category: string;
-  severity: 'info' | 'warning' | 'critical';
-  title: string;
-  message: string;
-  related_type: string | null;
-  related_id: string | null;
-  /** Datos estructurados que la agenda (P4) reutiliza; `evaluate()` los ignora. */
-  due_at?: string | null;
-  tag?: string | null;
-  /**
-   * Clave de agrupación para alertas que son UN SOLO TRABAJO (misma tarea sanitaria, misma fecha).
-   * `undefined` = no agrupa, que es lo correcto para todo lo único por entidad. La calcula quien
-   * genera la alerta: parsear el título después se rompería en silencio al cambiar un texto.
-   */
-  group_key?: string | null;
-  /**
-   * Encabezado del grupo, SIN la entidad. El título individual lleva la caravana y usarlo para el
-   * grupo daría «… — caravana 301 · 10 animales», que se lee como si fuera sobre ese animal.
-   */
-  group_title?: string | null;
-}
-
-/** Ítem de la agenda diaria (P4-1): hecho accionable estructurado del hato. */
-export interface AgendaItemDto {
-  code: string;
-  category: string;
-  severity: 'info' | 'warning' | 'critical';
-  due_at: string | null;
-  title: string;
-  message: string;
-  related_type: string | null;
-  related_id: string | null;
-  tag: string | null;
-  /** Acción SEMÁNTICA; cada superficie la mapea a su ruta (móvil/web). */
-  action: 'vaccinate' | 'review_pregnancy' | 'view_animal' | 'complete_task';
-}
+export type { AgendaItemDto, Desired } from './alerts.types';
 
 const fmt = (d: string | Date) => new Date(d).toLocaleDateString('es-AR');
 const iso = (d: string | Date | null | undefined) => (d ? new Date(d).toISOString() : null);
-const SEVERITY_RANK: Record<string, number> = { critical: 0, warning: 1, info: 2 };
-const AGENDA_ACTION: Record<string, AgendaItemDto['action']> = {
-  vaccination_due: 'vaccinate',
-  pregnancy_overdue: 'review_pregnancy',
-  calving_soon: 'view_animal',
-  withdrawal_active: 'view_animal',
-  health_task_due: 'complete_task',
-};
-
 @Injectable()
 export class AlertsService {
   constructor(
@@ -190,6 +147,15 @@ export class AlertsService {
   /** Reevalúa todas las reglas: crea/actualiza/auto-resuelve. Idempotente.
    *  `precomputed` evita recomputar cuando el caller ya tiene los hechos (agenda, P4-1). */
   async evaluate(precomputed?: Desired[]) {
+    return this.db.suppressInvalidation(() => this.evaluateInner(precomputed));
+  }
+
+  /**
+   * Bajo `suppressInvalidation`: las alertas que guarda son la SALIDA de `computeDesired()`, no una
+   * entrada suya —el cálculo no lee la tabla `alerts`—, y si contaran como cambio el motor tiraría
+   * con lo que él mismo escribe la caché que acaba de llenar.
+   */
+  private async evaluateInner(precomputed?: Desired[]) {
     /**
      * MODO ESPEJO: no se persiste nada.
      *
@@ -248,11 +214,21 @@ export class AlertsService {
         // las alertas que ya estaban abiertas al desplegar se quedarían sin agrupar PARA SIEMPRE —
         // hasta que la condición desapareciera y volviera a dispararse. Se vería como que el
         // agrupado «no funciona», justo en la instalación que más alertas acumuladas tiene.
-        await this.db.query(
-          `UPDATE alerts SET severity = $2, title = $3, message = $4, category = $5, group_key = $6, group_title = $7, updated_at = now() WHERE id = $1`,
+        //
+        // Y el `IS DISTINCT FROM` no es adorno: sin él este UPDATE corría sobre TODA alerta abierta
+        // en CADA evaluación, cambiara algo o no —65 escrituras por carga en el demo— para dejar las
+        // filas como estaban. Va `IS DISTINCT FROM` y no `<>` porque `message` y los `group_*` son
+        // nulables: con `<>` la comparación contra NULL da NULL, la fila no entra en el WHERE, y un
+        // cambio de verdad —de sin mensaje a con mensaje— se perdía en silencio.
+        const [tocada] = await this.db.query<{ id: string }>(
+          `UPDATE alerts SET severity = $2, title = $3, message = $4, category = $5, group_key = $6, group_title = $7, updated_at = now()
+            WHERE id = $1
+              AND (severity IS DISTINCT FROM $2 OR title IS DISTINCT FROM $3 OR message IS DISTINCT FROM $4
+                   OR category IS DISTINCT FROM $5 OR group_key IS DISTINCT FROM $6 OR group_title IS DISTINCT FROM $7)
+          RETURNING id`,
           [ex.id, d.severity, d.title, d.message, d.category, d.group_key ?? null, d.group_title ?? null],
         );
-        updated++;
+        if (tocada) updated++;
       } else if (muted.has(k)) {
         // la PERSONA ya la resolvió/descartó hace poco: no la recreamos
       } else {
@@ -286,7 +262,7 @@ export class AlertsService {
   async agenda(): Promise<AgendaItemDto[]> {
     const desired = await this.computeDesired();
     await this.evaluate(desired); // read-through, sin recomputar
-    return this.toAgenda(desired);
+    return toAgenda(desired);
   }
 
   /**
@@ -298,31 +274,7 @@ export class AlertsService {
   async agendaAndKpis(): Promise<{ agenda: AgendaItemDto[]; kpis: Awaited<ReturnType<AlertsService['kpiCounts']>> }> {
     const desired = await this.computeDesired();
     await this.evaluate(desired);
-    return { agenda: this.toAgenda(desired), kpis: await this.kpiCounts() };
-  }
-
-  /** Proyección pura desired → agenda (sin tocar la base). */
-  private toAgenda(desired: Desired[]): AgendaItemDto[] {
-    return desired
-      .filter((d) => d.category === 'health' || d.category === 'reproduction')
-      .map((d) => ({
-        code: d.code,
-        category: d.category,
-        severity: d.severity,
-        due_at: iso(d.due_at),
-        title: d.title,
-        message: d.message,
-        related_type: d.related_type,
-        related_id: d.related_id,
-        tag: d.tag ?? null,
-        action: AGENDA_ACTION[d.code] ?? 'view_animal',
-      }))
-      .sort((a, b) => {
-        const ad = a.due_at ?? '9999-12-31';
-        const bd = b.due_at ?? '9999-12-31';
-        if (ad !== bd) return ad < bd ? -1 : 1;
-        return SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
-      });
+    return { agenda: toAgenda(desired), kpis: await this.kpiCounts() };
   }
 
   async list(status = 'active') {
@@ -520,7 +472,17 @@ export class AlertsService {
     return this.listRules();
   }
 
-  private async computeDesired(): Promise<Desired[]> {
+  private readonly cacheDesired = new DesiredCache<Desired[]>();
+
+  /**
+   * El estado deseado: qué alertas DEBERÍAN existir ahora. Lo caro del módulo — se cachea por tenant
+   * y se invalida por ESCRITURA, no por tiempo. El razonamiento vive en `desired-cache.ts`.
+   */
+  private computeDesired(): Promise<Desired[]> {
+    return this.cacheDesired.through(this.db, () => this.computeDesiredFresh());
+  }
+
+  private async computeDesiredFresh(): Promise<Desired[]> {
     const t = this.db.tenant;
     const out: Desired[] = [];
     const cfg = await this.ruleConfig();
