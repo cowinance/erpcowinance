@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvalidLotError, Sex, TagNumber, computeFeedlotMetrics, validateLotInput, validateWeighing } from '@cowinance/domain';
+import {
+  parentageChronologyIssue, InvalidLotError, Sex, TagNumber, computeFeedlotMetrics, validateLotInput, validateWeighing } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
@@ -97,7 +98,18 @@ export class HerdService {
     if (params.q) {
       args.push(`%${params.q}%`);
       where.push(
-        `(a.name ILIKE $${args.length} OR EXISTS (SELECT 1 FROM animal_identifiers qi WHERE qi.animal_id = a.id AND qi.deleted_at IS NULL AND qi.value ILIKE $${args.length}))`,
+        // `retired_at IS NULL`: la búsqueda mira los identificadores VIGENTES, no los que el animal
+        // tuvo alguna vez.
+        //
+        // Recaravanear es normal —se saca la caravana de un animal y se le pone a otro— y sin este
+        // filtro, buscar ese número devolvía DOS animales: el que la tiene y el que la tuvo. El
+        // segundo aparecía con su caravana actual, así que no había forma de saber por qué había
+        // salido en esa búsqueda. Comprobado contra la app.
+        //
+        // El resto del sistema ya lo hacía bien: el lookup del modo manga —donde una caravana tiene
+        // que devolver UN animal— filtra los retirados desde siempre. Era el buscador el que estaba
+        // solo.
+        `(a.name ILIKE $${args.length} OR EXISTS (SELECT 1 FROM animal_identifiers qi WHERE qi.animal_id = a.id AND qi.deleted_at IS NULL AND qi.retired_at IS NULL AND qi.value ILIKE $${args.length}))`,
       );
     }
     if (params.sex) {
@@ -478,16 +490,14 @@ export class HerdService {
       if (body.coat_color) { col('coat_color', body.coat_color); syncExtra.coat_color = body.coat_color; }
       if (body.notes) { col('notes', body.notes); syncExtra.notes = body.notes; }
 
-      // Genealogía (animal nuevo → no puede formar ciclo; solo valida existencia + sexo).
-      for (const [field, colName, reqSex] of [['dam_id', 'dam_id', 'F'], ['sire_id', 'sire_id', 'M']] as const) {
+      // Genealogía. Un animal recién nacido no puede formar un ciclo, así que `requireParent`
+      // alcanza: existencia, sexo y cronología. El nombre del campo ES el de la columna.
+      for (const field of ['dam_id', 'sire_id'] as const) {
         const v = body[field];
         if (!v) continue;
-        const parent = await q.one<{ sex: string }>(`SELECT sex FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [v, t]);
-        if (!parent) throw new BadRequestException({ code: `animal.${field === 'dam_id' ? 'dam' : 'sire'}_not_found`, title: 'Progenitor no encontrado' });
-        if (parent.sex !== reqSex)
-          throw new BadRequestException({ code: `animal.${field === 'dam_id' ? 'dam_not_female' : 'sire_not_male'}`, title: field === 'dam_id' ? 'La madre debe ser hembra' : 'El padre debe ser macho' });
-        col(colName, v);
-        syncExtra[colName] = v;
+        await this.writer.requireParent(q, v, field, body.birth_date ?? null);
+        col(field, v);
+        syncExtra[field] = v;
       }
 
       if (setCols.length) {
@@ -990,13 +1000,10 @@ export class HerdService {
         if (v === cur[colName]) continue;
         if (v != null) {
           if (v === id) throw bad('animal.genealogy_self_ref', 'Un animal no puede ser su propio progenitor');
-          const parent = await q.one<{ sex: string }>(
-            `SELECT sex FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
-            [v, this.db.tenant],
-          );
-          if (!parent) throw bad(`animal.${field === 'dam_id' ? 'dam' : 'sire'}_not_found`, 'Progenitor no encontrado');
-          if (parent.sex !== reqSex)
-            throw bad(`animal.${field === 'dam_id' ? 'dam_not_female' : 'sire_not_male'}`, field === 'dam_id' ? 'La madre debe ser hembra' : 'El padre debe ser macho');
+          // La cría puede estar cambiando su propia fecha en esta MISMA llamada: se compara contra
+          // la que va a quedar, no contra la que había. Si no, editar las dos cosas juntas dejaría
+          // pasar el vínculo imposible.
+          await this.writer.requireParent(q, v, field, body.birth_date !== undefined ? body.birth_date : dateStr(cur.birth_date));
           const cyc = await this.writer.detectCycles(q, [{ childId: id, parentId: v }]);
           if (cyc.get(`${id}|${v}`) !== 'ok') throw bad('animal.genealogy_cycle', 'El vínculo crearía un ciclo genealógico');
         }

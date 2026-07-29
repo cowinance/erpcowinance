@@ -11,10 +11,10 @@ const CHILD = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 const DAM = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
 const SIRE = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 const genCtx = new Map([
-  ['MADRE1', { animalId: DAM, sex: 'F' }],
-  ['PADRE1', { animalId: SIRE, sex: 'M' }],
-  ['MACHO', { animalId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', sex: 'M' }],
-  ['SELF', { animalId: CHILD, sex: 'F' }],
+  ['MADRE1', { animalId: DAM, sex: 'F', birthDate: null }],
+  ['PADRE1', { animalId: SIRE, sex: 'M', birthDate: null }],
+  ['MACHO', { animalId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', sex: 'M', birthDate: null }],
+  ['SELF', { animalId: CHILD, sex: 'F', birthDate: null }],
 ]);
 const noCycles = new Map<string, 'cycle' | 'cycle_check_limit' | 'ok'>();
 

@@ -119,4 +119,69 @@ describe('HerdService.updateAnimal — edición completa (E2)', () => {
     const after = (await herd.timeline(id)).length;
     expect(after).toBe(before);
   });
+
+  it('UNA MADRE NO PUEDE HABER NACIDO DESPUÉS QUE SU HIJA', async () => {
+    // Se verificaban existencia, sexo y ciclos, pero no las fechas. Comprobado contra la app: se
+    // pudo poner como madre a una vaca nacida en 2025 de una hija nacida en 2017. Ese árbol lo
+    // recorren la consanguinidad, los kilos destetados por madre y el asesor de apareamientos.
+    const hija = await mk('F', 'CRONO-1', catF);
+    const madre = await mk('F', 'CRONO-2', catF);
+    await db.query(`UPDATE animals SET birth_date = '2017-08-08' WHERE id = $1`, [hija]);
+    await db.query(`UPDATE animals SET birth_date = '2025-12-05' WHERE id = $1`, [madre]);
+
+    await expect(herd.updateAnimal(hija, { dam_id: madre })).rejects.toMatchObject({
+      response: { code: 'animal.parent_born_after_child' },
+    });
+  });
+
+  it('el piso es UNA GESTACIÓN, no «nacer antes»', async () => {
+    // Una madre nacida cien días antes que su cría tampoco pudo gestarla. El borde es la constante
+    // que comparte con el intervalo entre partos, no un número aparte.
+    const hija = await mk('F', 'CRONO-3', catF);
+    await db.query(`UPDATE animals SET birth_date = '2020-06-01' WHERE id = $1`, [hija]);
+
+    const casi = await mk('F', 'CRONO-4', catF);
+    await db.query(`UPDATE animals SET birth_date = '2020-06-01'::date - 282 WHERE id = $1`, [casi]);
+    await expect(herd.updateAnimal(hija, { dam_id: casi }), 'un día menos que la gestación').rejects.toThrow();
+
+    const justa = await mk('F', 'CRONO-5', catF);
+    await db.query(`UPDATE animals SET birth_date = '2020-06-01'::date - 283 WHERE id = $1`, [justa]);
+    const r: any = await herd.updateAnimal(hija, { dam_id: justa });
+    expect(r.dam_id, 'justo la gestación sí').toBe(justa);
+  });
+
+  it('cambiar la fecha de la CRÍA en la misma llamada no burla la guarda', async () => {
+    // La cría puede estar corrigiendo su propia fecha junto con el vínculo. Si se comparara contra
+    // la fecha vieja, editar las dos cosas de una vez dejaría pasar el vínculo imposible.
+    const hija = await mk('F', 'CRONO-6', catF);
+    const madre = await mk('F', 'CRONO-7', catF);
+    await db.query(`UPDATE animals SET birth_date = '2015-01-01' WHERE id = $1`, [hija]);
+    await db.query(`UPDATE animals SET birth_date = '2018-01-01' WHERE id = $1`, [madre]);
+
+    // Con la fecha vieja de la hija (2015) la madre de 2018 es imposible; con la nueva (2022) sería
+    // válida. Se pide el vínculo Y una fecha nueva ANTERIOR: tiene que rechazar.
+    await expect(herd.updateAnimal(hija, { dam_id: madre, birth_date: '2016-01-01' })).rejects.toMatchObject({
+      response: { code: 'animal.parent_born_after_child' },
+    });
+    // Y con una fecha nueva coherente, entra.
+    const r: any = await herd.updateAnimal(hija, { dam_id: madre, birth_date: '2022-01-01' });
+    expect(r.dam_id).toBe(madre);
+  });
+
+  it('EL BUSCADOR NO ENCUENTRA POR CARAVANAS RETIRADAS', async () => {
+    // Recaravanear es normal: se saca la caravana de un animal y se le pone a otro. Sin filtrar los
+    // retirados, buscar ese número devolvía DOS animales —el que la tiene y el que la tuvo— y el
+    // segundo aparecía con su caravana actual, sin forma de saber por qué había salido.
+    const viejo = await mk('F', 'RET-VIEJA', catF);
+    const nuevo = await mk('F', 'RET-NUEVA', catF);
+    await db.query(
+      `UPDATE animal_identifiers SET retired_at = now() WHERE animal_id = $1 AND value = 'RET-VIEJA'`,
+      [viejo],
+    );
+    await db.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual','RET-VIEJA')`, [db.tenant, nuevo]);
+
+    const res: any = await herd.listAnimals({ q: 'RET-VIEJA', limit: 10 } as any);
+    expect(res.data, 'solo el que la tiene ahora').toHaveLength(1);
+    expect(res.data[0].id).toBe(nuevo);
+  });
 });

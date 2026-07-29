@@ -200,10 +200,16 @@ export class ImportProcessor implements OnModuleInit, OnModuleDestroy {
    */
   private async processLinkChunk(batchId: string, tenantId: string, createdBy: string | null, mapping: Mapping, lo: number, hi: number): Promise<void> {
     await this.withTenant(tenantId, createdBy, async (q) => {
-      const rows = await q.query<{ id: string; raw: Record<string, string>; resulting_entity_id: string }>(
-        `SELECT id, raw, resulting_entity_id FROM import_rows
-         WHERE tenant_id = $1 AND batch_id = $2 AND row_number > $3 AND row_number <= $4 AND status = 'created' AND resulting_entity_id IS NOT NULL
-         ORDER BY row_number`,
+      // La fecha de nacimiento de la CRÍA viene con la fila: la regla de cronología compara contra
+      // ella, y el animal ya está creado en esta altura del proceso. `::text` porque PGlite devuelve
+      // las columnas `date` como objetos Date.
+      const rows = await q.query<{ id: string; raw: Record<string, string>; resulting_entity_id: string; child_birth_date: string | null }>(
+        `SELECT r.id, r.raw, r.resulting_entity_id, a.birth_date::text AS child_birth_date
+           FROM import_rows r
+           LEFT JOIN animals a ON a.id = r.resulting_entity_id AND a.tenant_id = r.tenant_id
+         WHERE r.tenant_id = $1 AND r.batch_id = $2 AND r.row_number > $3 AND r.row_number <= $4
+           AND r.status = 'created' AND r.resulting_entity_id IS NOT NULL
+         ORDER BY r.row_number`,
         [tenantId, batchId, lo, hi],
       );
       const damHeader = mapping.dam_tag;
@@ -238,7 +244,12 @@ export class ImportProcessor implements OnModuleInit, OnModuleDestroy {
 
       const syncOps: Op[] = [];
       for (const x of withRefs) {
-        const { outcomes, damId, sireId } = this.animalWrite.evaluateLink(x.row.resulting_entity_id, { damTag: x.damTag, sireTag: x.sireTag }, genCtx, cycles);
+        const { outcomes, damId, sireId } = this.animalWrite.evaluateLink(
+          x.row.resulting_entity_id,
+          { damTag: x.damTag, sireTag: x.sireTag, childBirthDate: x.row.child_birth_date },
+          genCtx,
+          cycles,
+        );
         const { syncOp } = await this.animalWrite.applyGenealogyLink(q, x.row.resulting_entity_id, damId, sireId);
         if (syncOp) syncOps.push(syncOp);
         const warnings = outcomes.filter((o) => o.outcome !== 'linked');

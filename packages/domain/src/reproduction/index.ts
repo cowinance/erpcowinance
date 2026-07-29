@@ -13,3 +13,5 @@ export type { SyncResponse, SyncResponseInput } from './synchronization';
 export { GESTATION_DAYS } from './gestation';
 export { calvingIntervalIssue, impossibleCalvingIntervals, MIN_CALVING_INTERVAL_DAYS } from './calving-interval';
 export type { CalvingIntervalIssue } from './calving-interval';
+export { parentageChronologyIssue } from './parentage-chronology';
+export type { ParentageChronologyIssue } from './parentage-chronology';

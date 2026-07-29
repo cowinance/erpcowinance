@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { catalogLookupKeys, normalizeCatalogText, parseImportDate, Sex, TagNumber } from '@cowinance/domain';
+import { parentageChronologyIssue, catalogLookupKeys, normalizeCatalogText, parseImportDate, Sex, TagNumber } from '@cowinance/domain';
 import { HlcClock } from '@cowinance/sync-core';
 import type { Op, PutOp } from '@cowinance/sync-core';
 import { DbService, Q } from '../../db/db.service';
@@ -69,7 +69,10 @@ export type CheckResult =
 /** Resultado de un vínculo genealógico (dam/sire) de una fila. `linked` es interno. */
 export interface LinkOutcome {
   field: 'dam' | 'sire';
-  outcome: 'linked' | 'not_found' | 'sex_incompatible' | 'self_ref' | 'cycle' | 'cycle_check_limit';
+  // `born_after_child`: el progenitor no existía cuando se concibió la cría. Se verificaban
+  // existencia, sexo y ciclos, pero no las fechas — y por esta puerta entran miles de vínculos de
+  // una sola vez.
+  outcome: 'linked' | 'not_found' | 'sex_incompatible' | 'self_ref' | 'cycle' | 'cycle_check_limit' | 'born_after_child';
 }
 
 /** Candidato hijo→padre para la detección de ciclos batch. */
@@ -434,6 +437,42 @@ export class AnimalWriteService {
     });
   }
 
+  /**
+   * Valida un progenitor propuesto: que exista, que el sexo corresponda y que las fechas cierren.
+   *
+   * Vive acá y no en `HerdService` porque la validación de vínculos ya es de este servicio —
+   * `detectCycles`, `evaluateLink` y `loadGenealogyContext` están al lado— y porque son DOS puertas
+   * las que la usan: el alta y la edición. El alta la tenía copiada, y copiada duró hasta que
+   * apareció la cronología: se escribió dos veces, y la segunda es donde se olvida. Los ciclos NO se comprueban acá: en el alta no puede haberlos (el animal recién nace) y
+   * en la edición se resuelven en lote con `detectCycles`.
+   *
+   * `birth_date::text` y no la columna pelada: PGlite devuelve las `date` como objetos Date, y la
+   * regla compara texto — sin el cast daría «Sun Jun 01» en vez de «2017-08-08».
+   */
+  async requireParent(
+    q: Q,
+    parentId: string,
+    field: 'dam_id' | 'sire_id',
+    childBirthDate: string | null,
+  ): Promise<void> {
+    const esMadre = field === 'dam_id';
+    const parent = await q.one<{ sex: string; birth_date: string | null }>(
+      `SELECT sex, birth_date::text AS birth_date FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [parentId, this.db.tenant],
+    );
+    if (!parent) throw new BadRequestException({ code: `animal.${esMadre ? 'dam' : 'sire'}_not_found`, title: 'Progenitor no encontrado' });
+    if (parent.sex !== (esMadre ? 'F' : 'M'))
+      throw new BadRequestException({
+        code: `animal.${esMadre ? 'dam_not_female' : 'sire_not_male'}`,
+        title: esMadre ? 'La madre debe ser hembra' : 'El padre debe ser macho',
+      });
+    // Cronología: el progenitor tuvo que existir en la concepción. Se verificaban existencia, sexo y
+    // ciclos, pero no las fechas — y se podía poner como madre a una vaca nacida ocho años DESPUÉS
+    // que su hija.
+    const crono = parentageChronologyIssue(parent.birth_date, childBirthDate, esMadre ? 'madre' : 'padre');
+    if (crono) throw new BadRequestException({ code: 'animal.parent_born_after_child', title: crono.message });
+  }
+
   /** Emite un changeset de origen servidor con `ops` (dedup por `originRef`). Delega en la infra de sync. */
   async emitServerOrigin(q: Q, ops: Op[], originRef: string): Promise<void> {
     return this.serverOrigin.emit(q, ops, originRef);
@@ -535,16 +574,17 @@ export class AnimalWriteService {
   // ──────────────────── Genealogía (P2 P-d) ────────────────────
 
   /** Resuelve caravanas de dam/sire → {animalId, sex} en UNA query (animales activos del tenant). */
-  async loadGenealogyContext(q: Q, tags: string[]): Promise<Map<string, { animalId: string; sex: string }>> {
+  async loadGenealogyContext(q: Q, tags: string[]): Promise<Map<string, { animalId: string; sex: string; birthDate: string | null }>> {
     const uniq = [...new Set(tags)].filter((t) => typeof t === 'string' && t !== '');
     if (!uniq.length) return new Map();
-    const rows = await q.query<{ tag: string; animal_id: string; sex: string }>(
-      `SELECT ai.value AS tag, a.id AS animal_id, a.sex
+    const rows = await q.query<{ tag: string; animal_id: string; sex: string; birth_date: string | null }>(
+      // `birth_date::text`: PGlite devuelve las `date` como objetos Date y la regla compara texto.
+      `SELECT ai.value AS tag, a.id AS animal_id, a.sex, a.birth_date::text AS birth_date
        FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
        WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND ai.value = ANY($2) AND ai.deleted_at IS NULL AND a.status = 'active'`,
       [this.db.tenant, uniq],
     );
-    return new Map(rows.map((r) => [r.tag, { animalId: r.animal_id, sex: r.sex }]));
+    return new Map(rows.map((r) => [r.tag, { animalId: r.animal_id, sex: r.sex, birthDate: r.birth_date }]));
   }
 
   /**
@@ -587,8 +627,8 @@ export class AnimalWriteService {
    */
   evaluateLink(
     childId: string,
-    refs: { damTag?: string; sireTag?: string },
-    genCtx: Map<string, { animalId: string; sex: string }>,
+    refs: { damTag?: string; sireTag?: string; childBirthDate?: string | null },
+    genCtx: Map<string, { animalId: string; sex: string; birthDate: string | null }>,
     cycles: Map<string, 'cycle' | 'cycle_check_limit' | 'ok'>,
   ): { outcomes: LinkOutcome[]; damId?: string; sireId?: string } {
     const outcomes: LinkOutcome[] = [];
@@ -616,6 +656,12 @@ export class AnimalWriteService {
       const cyc = cycles.get(`${childId}|${resolved.animalId}`);
       if (cyc === 'cycle' || cyc === 'cycle_check_limit') {
         outcomes.push({ field, outcome: cyc });
+        continue;
+      }
+      // Cronología: el progenitor tuvo que existir en la concepción. Sin fecha de alguno de los dos
+      // no se valida — un animal comprado sin fecha de nacimiento es lo más normal del mundo.
+      if (parentageChronologyIssue(resolved.birthDate, refs.childBirthDate ?? null, field === 'dam' ? 'madre' : 'padre')) {
+        outcomes.push({ field, outcome: 'born_after_child' });
         continue;
       }
       if (field === 'dam') damId = resolved.animalId;

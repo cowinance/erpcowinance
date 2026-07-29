@@ -58,15 +58,28 @@ describe('Genealogía · integración batch', () => {
   }
   const uniq = (p: string) => `GEN-${p}-${Date.now()}-${seq++}`;
 
-  it('loadGenealogyContext resuelve caravana → {animalId, sexo} en una query', async () => {
+  it('loadGenealogyContext resuelve caravana → {animalId, sexo, nacimiento} en una query', async () => {
+    // La FECHA entró después: sin ella la importación no podía verificar que un progenitor haya
+    // existido cuando se concibió la cría, y por esa puerta entran miles de vínculos de una vez.
     const dTag = uniq('DAM');
     const sTag = uniq('SIRE');
     const damId = await insertAnimal(dTag, 'F');
     const sireId = await insertAnimal(sTag, 'M');
     const ctx = await db.tx((q) => animalWrite.loadGenealogyContext(q, [dTag, sTag, 'NO-EXISTE']));
-    expect(ctx.get(dTag)).toEqual({ animalId: damId, sex: 'F' });
-    expect(ctx.get(sTag)).toEqual({ animalId: sireId, sex: 'M' });
+    expect(ctx.get(dTag)).toEqual({ animalId: damId, sex: 'F', birthDate: null });
+    expect(ctx.get(sTag)).toEqual({ animalId: sireId, sex: 'M', birthDate: null });
     expect(ctx.has('NO-EXISTE')).toBe(false);
+  });
+
+  it('la fecha del progenitor llega COMO TEXTO, no como objeto Date', async () => {
+    // PGlite devuelve las columnas `date` como objetos Date, y la regla de cronología compara
+    // texto: sin el `::text` la comparación se haría contra «Sun Jun 01» y no contra «2020-06-01».
+    // Es la trampa que ya mordió en destete y en el retiro.
+    const tag = uniq('FECHA');
+    const id = await insertAnimal(tag, 'F');
+    await db.query(`UPDATE animals SET birth_date = '2020-06-01' WHERE id = $1`, [id]);
+    const ctx = await db.tx((q) => animalWrite.loadGenealogyContext(q, [tag]));
+    expect(ctx.get(tag)!.birthDate).toBe('2020-06-01');
   });
 
   it('detectCycles: ciclo profundo → cycle; sin ancestros → ok', async () => {
@@ -119,5 +132,47 @@ describe('Genealogía · integración batch', () => {
     expect(r.syncOp).toBeUndefined();
     const dam = (await db.query<{ dam_id: string | null }>(`SELECT dam_id FROM animals WHERE id = $1`, [childId]))[0];
     expect(dam.dam_id).toBeNull();
+  });
+
+  it('LA IMPORTACIÓN TAMPOCO VINCULA UN PROGENITOR NACIDO DESPUÉS', async () => {
+    // Es la puerta de más volumen: por acá entran miles de vínculos de una sola vez, y un pedigrí
+    // imposible después lo recorren la consanguinidad, los kilos destetados por madre y el asesor de
+    // apareamientos, que devuelven números perfectos sobre un árbol que no puede ser cierto.
+    const madreTag = uniq('MJOVEN');
+    const madreId = await insertAnimal(madreTag, 'F');
+    await db.query(`UPDATE animals SET birth_date = '2025-01-01' WHERE id = $1`, [madreId]);
+    const criaId = await insertAnimal(uniq('CRIA'), 'F');
+    await db.query(`UPDATE animals SET birth_date = '2017-01-01' WHERE id = $1`, [criaId]);
+
+    const ctx = await db.tx((q) => animalWrite.loadGenealogyContext(q, [madreTag]));
+    const { outcomes, damId } = animalWrite.evaluateLink(criaId, { damTag: madreTag, childBirthDate: '2017-01-01' }, ctx, new Map());
+
+    expect(outcomes[0]).toEqual({ field: 'dam', outcome: 'born_after_child' });
+    expect(damId, 'y no se escribe el vínculo').toBeUndefined();
+  });
+
+  it('una madre de verdad SÍ se vincula', async () => {
+    // La otra mitad: la guarda no puede comerse el caso legítimo, que es el 99% de una importación.
+    const madreTag = uniq('MOK');
+    const madreId = await insertAnimal(madreTag, 'F');
+    await db.query(`UPDATE animals SET birth_date = '2015-01-01' WHERE id = $1`, [madreId]);
+    const criaId = await insertAnimal(uniq('CRIAOK'), 'F');
+
+    const ctx = await db.tx((q) => animalWrite.loadGenealogyContext(q, [madreTag]));
+    const { outcomes, damId } = animalWrite.evaluateLink(criaId, { damTag: madreTag, childBirthDate: '2020-06-01' }, ctx, new Map());
+
+    expect(outcomes[0]).toEqual({ field: 'dam', outcome: 'linked' });
+    expect(damId).toBe(madreId);
+  });
+
+  it('sin fecha en la cría el vínculo pasa: no se bloquea por un dato que nadie tiene', async () => {
+    const madreTag = uniq('MSF');
+    const madreId = await insertAnimal(madreTag, 'F');
+    await db.query(`UPDATE animals SET birth_date = '2025-01-01' WHERE id = $1`, [madreId]);
+    const criaId = await insertAnimal(uniq('CRIASF'), 'F');
+
+    const ctx = await db.tx((q) => animalWrite.loadGenealogyContext(q, [madreTag]));
+    const { outcomes } = animalWrite.evaluateLink(criaId, { damTag: madreTag, childBirthDate: null }, ctx, new Map());
+    expect(outcomes[0].outcome).toBe('linked');
   });
 });
