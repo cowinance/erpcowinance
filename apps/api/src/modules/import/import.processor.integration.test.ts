@@ -9,6 +9,7 @@ import { AnimalWriteService } from '../herd/animal-write.service';
 import { ImportClaimRepository } from './import-claim.repository';
 import { ImportProcessor } from './import.processor';
 import { MovementService } from '../land/movement.service';
+import { ImportService } from './import.service';
 
 /**
  * Prueba de INTEGRACIÓN real del procesador de importación (P2 P-c.2), sobre un
@@ -27,6 +28,7 @@ describe('ImportProcessor · integración', () => {
   let processor: ImportProcessor;
   let claims: ImportClaimRepository;
   let animalWrite: AnimalWriteService;
+  let importService: ImportService;
   let tenantId: string;
   let userId: string;
   let originalCwd: string;
@@ -48,6 +50,7 @@ describe('ImportProcessor · integración', () => {
     animalWrite = new AnimalWriteService(db, versions, serverOrigin, new MovementService(db, versions, serverOrigin));
     claims = new ImportClaimRepository(db);
     processor = new ImportProcessor(db, claims, animalWrite); // sin onModuleInit → sin poller
+    importService = new ImportService(db, animalWrite);
 
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
@@ -298,5 +301,54 @@ describe('ImportProcessor · integración', () => {
     await vencerHeartbeat();
     const reclamado = await claims.claimNext();
     expect(reclamado?.id, 'el lote rendido no vuelve a la cola').not.toBe(batchId);
+  });
+
+  it('LA VISTA PREVIA Y EL COMMIT CONTESTAN LO MISMO', async () => {
+    // La previa es lo que el productor APRUEBA. Decía «4 de 4 válidas» sobre un archivo del que el
+    // commit después rechazaba dos filas —raza y lote inexistentes, que la previa ni miraba— y una
+    // previa que promete de más es peor que no tener previa: da confianza para seguir.
+    //
+    // Este test es el que impide que se vuelvan a separar: compara veredicto contra resultado fila
+    // por fila. Si alguien agrega un chequeo al commit y se olvida de la previa, cae acá.
+    const MAP = { tag: 'Caravana', sex: 'Sexo', category_code: 'Categoria', breed: 'Raza', lot: 'Lote' };
+    const lote = (await db.query<{ name: string }>(`SELECT name FROM lots WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].name;
+    const raza = (await db.query<{ name: string }>(`SELECT name FROM breeds LIMIT 1`))[0].name;
+    const tagExistente = (
+      await db.query<{ value: string }>(
+        `SELECT ai.value FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
+          WHERE ai.tenant_id = $1 AND ai.type = 'visual' AND a.status = 'active' AND ai.deleted_at IS NULL LIMIT 1`,
+        [tenantId],
+      )
+    )[0].value;
+
+    const filas = [
+      { Caravana: uniqTag('AG1'), Sexo: 'H', Categoria: 'vaca', Raza: '', Lote: '' },
+      { Caravana: uniqTag('AG2'), Sexo: 'H', Categoria: 'vaca', Raza: 'Raza Que No Existe', Lote: '' },
+      { Caravana: uniqTag('AG3'), Sexo: 'H', Categoria: 'vaca', Raza: '', Lote: 'Lote Que No Existe' },
+      { Caravana: uniqTag('AG4'), Sexo: 'H', Categoria: 'vaca', Raza: raza, Lote: lote },
+      { Caravana: uniqTag('AG5'), Sexo: 'H', Categoria: 'no-existe', Raza: '', Lote: '' },
+      // Duplicada Y con la raza mal: es la fila donde el ORDEN decide el veredicto. El commit mira
+      // la caravana antes que la raza, así que contesta «salteada»; si la previa mirara la raza
+      // primero diría «inválida» y volveríamos a tener dos respuestas para la misma fila.
+      { Caravana: tagExistente, Sexo: 'H', Categoria: 'vaca', Raza: 'Raza Que No Existe', Lote: '' },
+    ];
+    // El flujo real: se mapea, se mira la previa, y recién ahí se confirma. Sembrar en `queued`
+    // saltearía la previa, que es justo lo que se quiere comparar.
+    const batchId = await seedBatch(filas, 'mapped', MAP);
+    const previa = await importService.preview(batchId);
+
+    await db.query(`UPDATE import_batches SET status = 'queued' WHERE id = $1`, [batchId]);
+    await processor.processBatch(batchId, tenantId);
+    const rows = await getRows(batchId);
+
+    // El veredicto de la previa y el resultado del commit son el mismo hecho dicho dos veces.
+    const equivale: Record<string, string> = { valid: 'created', invalid: 'invalid', duplicate: 'skipped' };
+    for (const v of previa.sample) {
+      const fila = rows.find((r: any) => r.row_number === v.row_number);
+      expect(equivale[v.verdict], `fila ${v.row_number}: la previa dijo «${v.verdict}»`).toBe(fila.status);
+    }
+    expect(previa.counts.valid, 'y los conteos también').toBe(rows.filter((r: any) => r.status === 'created').length);
+    expect(previa.counts.invalid).toBe(rows.filter((r: any) => r.status === 'invalid').length);
+    expect(previa.counts.duplicate, 'y las salteadas').toBe(rows.filter((r: any) => r.status === 'skipped').length);
   });
 });

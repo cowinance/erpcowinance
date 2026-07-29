@@ -360,15 +360,20 @@ export class ImportService {
     const evaluated = rows.map((r) => ({ row_number: r.row_number, nv: this.animalWrite.normalizeAndValidate(buildRawRow(r.raw, mapping), hoy) }));
     const categoryCodes: string[] = [];
     const tags: string[] = [];
+    const breedNames: string[] = [];
+    const lotNames: string[] = [];
     for (const e of evaluated) {
       if (e.nv.ok) {
         categoryCodes.push(e.nv.input.categoryCode);
         tags.push(e.nv.input.tag);
+        if (e.nv.input.breedName) breedNames.push(e.nv.input.breedName);
+        if (e.nv.input.lotName) lotNames.push(e.nv.input.lotName);
       }
     }
 
-    // 2) Contexto batch (2 queries).
-    const ctx = await this.animalWrite.loadAnimalImportValidationContext({ categoryCodes, tags });
+    // 2) Contexto batch. Raza y lote se resuelven acá y no fila por fila: el preview de 3.000 filas
+    // no puede pagar un N+1.
+    const ctx = await this.animalWrite.loadAnimalImportValidationContext({ categoryCodes, tags, breedNames, lotNames });
 
     // 3) Veredicto por fila con el contexto + duplicados intra-archivo.
     const seen = new Set<string>();
@@ -388,6 +393,23 @@ export class ImportService {
       } else if (ctx.activeTags.has(e.nv.input.tag) || seen.has(e.nv.input.tag)) {
         v = { row_number: e.row_number, verdict: 'duplicate', reason: ctx.activeTags.has(e.nv.input.tag) ? 'caravana activa existente' : 'caravana duplicada en el archivo' };
         counts.duplicate++;
+        /*
+         * RAZA y LOTE, en el MISMO ORDEN que `checkAgainstDb`.
+         *
+         * Faltaban, y por eso la previa contestaba «4 de 4 válidas» sobre un archivo del que el
+         * commit después rechazaba dos filas. El productor aprueba mirando esto: una previa que
+         * promete de más es peor que no tener previa, porque da confianza para seguir.
+         *
+         * El orden importa tanto como los chequeos: si acá se evaluara la raza antes que el
+         * duplicado, una fila con las dos cosas mal daría un veredicto distinto del que da el
+         * commit, y volveríamos a tener dos respuestas para la misma pregunta.
+         */
+      } else if (e.nv.input.breedName && !ctx.existingBreedNames.has(e.nv.input.breedName.toLowerCase())) {
+        v = { row_number: e.row_number, verdict: 'invalid', errors: [{ field: 'breed', code: 'not_found', message: `Raza inexistente: ${e.nv.input.breedName}` }] };
+        counts.invalid++;
+      } else if (e.nv.input.lotName && !ctx.existingLotNames.has(e.nv.input.lotName.toLowerCase())) {
+        v = { row_number: e.row_number, verdict: 'invalid', errors: [{ field: 'lot', code: 'not_found', message: `Lote inexistente: ${e.nv.input.lotName}` }] };
+        counts.invalid++;
       } else {
         seen.add(e.nv.input.tag);
         v = { row_number: e.row_number, verdict: 'valid' };

@@ -459,14 +459,30 @@ export class AnimalWriteService {
 
   /**
    * Contexto de validación en LOTE para el preview de importación (P2 3.5): en
-   * DOS queries resuelve, para todo el batch, qué códigos de categoría existen y
-   * qué caravanas están activas (→ animalId). Evita el N+1 de `checkAgainstDb`
-   * fila por fila. La regla autoritativa sigue en `checkAgainstDb` (el commit
-   * revalida); esto es la resolución batch del contexto que el preview necesita.
+   * pocas queries resuelve, para todo el batch, qué categorías, razas y lotes
+   * existen y qué caravanas están activas. Evita el N+1 de `checkAgainstDb` fila
+   * por fila. La regla autoritativa sigue en `checkAgainstDb` (el commit revalida);
+   * esto es la resolución batch del contexto que el preview necesita.
+   *
+   * RAZA y LOTE entraron después, y por un motivo concreto: sin ellos la vista
+   * previa contestaba «4 de 4 válidas» y el commit rechazaba dos. El productor
+   * aprueba mirando la previa, así que una previa que promete de más es peor que
+   * ninguna — comprobado con las tres razas más comunes de Venezuela, que no están
+   * en el catálogo y la previa daba por buenas.
+   *
+   * Se comparan con `lower(name)`, EXACTAMENTE como lo hace `checkAgainstDb`: si
+   * acá se fuera más tolerante, la brecha volvería a abrirse del otro lado.
    */
-  async loadAnimalImportValidationContext(input: { categoryCodes: string[]; tags: string[] }): Promise<{
+  async loadAnimalImportValidationContext(input: {
+    categoryCodes: string[];
+    tags: string[];
+    breedNames?: string[];
+    lotNames?: string[];
+  }): Promise<{
     existingCategoryCodes: Set<string>;
     activeTags: Map<string, string>;
+    existingBreedNames: Set<string>;
+    existingLotNames: Set<string>;
   }> {
     const codes = [...new Set(input.categoryCodes)].filter((c) => typeof c === 'string' && c !== '');
     const tags = [...new Set(input.tags)].filter((t) => typeof t === 'string' && t !== '');
@@ -480,6 +496,20 @@ export class AnimalWriteService {
             WHERE deleted_at IS NULL
               AND (${sqlNormalizado('code')} = ANY($1) OR ${sqlNormalizado('name')} = ANY($1))`,
           [claves],
+        )
+      : [];
+    const breedNames = [...new Set(input.breedNames ?? [])].filter((b) => typeof b === 'string' && b !== '').map((b) => b.toLowerCase());
+    const breeds = breedNames.length
+      ? await this.db.query<{ name: string }>(
+          `SELECT name FROM breeds WHERE lower(name) = ANY($1) AND deleted_at IS NULL AND (tenant_id IS NULL OR tenant_id = $2)`,
+          [breedNames, this.db.tenant],
+        )
+      : [];
+    const lotNames = [...new Set(input.lotNames ?? [])].filter((l) => typeof l === 'string' && l !== '').map((l) => l.toLowerCase());
+    const lots = lotNames.length
+      ? await this.db.query<{ name: string }>(
+          `SELECT name FROM lots WHERE lower(name) = ANY($1) AND tenant_id = $2 AND deleted_at IS NULL`,
+          [lotNames, this.db.tenant],
         )
       : [];
     const active = tags.length
@@ -496,6 +526,8 @@ export class AnimalWriteService {
       // códigos obligaría a cada llamador a repetir la normalización, que es como se separan la
       // vista previa y el commit.
       existingCategoryCodes: new Set(cats.flatMap((c) => [normalizeCatalogText(c.code), normalizeCatalogText(c.name)])),
+      existingBreedNames: new Set(breeds.map((b) => b.name.toLowerCase())),
+      existingLotNames: new Set(lots.map((l) => l.name.toLowerCase())),
       activeTags: new Map(active.map((r) => [r.tag, r.animal_id])),
     };
   }
