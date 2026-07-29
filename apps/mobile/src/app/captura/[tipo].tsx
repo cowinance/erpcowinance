@@ -10,7 +10,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { AnimalPickerLocal } from '@/components/AnimalPickerLocal';
-import { Button } from '@/components/ui';
+import { FormScroll, Button } from '@/components/ui';
 import { T } from '@/theme';
 
 const TITLES: Record<string, string> = {
@@ -134,7 +134,7 @@ export default function CaptureForm() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
+      <FormScroll contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />
@@ -314,7 +314,7 @@ export default function CaptureForm() {
         <Text style={{ fontSize: T.type.caption, color: T.ink3, textAlign: 'center' }}>
           Se guarda local y se sube solo al sincronizar.
         </Text>
-      </ScrollView>
+      </FormScroll>
     </SafeAreaView>
   );
 }

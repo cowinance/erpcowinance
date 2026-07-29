@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { EmptyHerd } from '@/components/EmptyHerd';
 import { T } from '@/theme';
+import { KEYBOARD_PROPS } from '@/components/ui';
 
 function Row({ a }: { a: AnimalRow }) {
   return (
@@ -56,6 +57,10 @@ export default function Animales() {
         />
       </View>
       <FlatList
+        // Las mismas props del teclado que usan los formularios, desde el mismo lugar. Sin
+        // `keyboardShouldPersistTaps` el primer toque sobre un animal se gastaba en cerrar el
+        // teclado: se buscaba la caravana, se tocaba el resultado, y no pasaba nada.
+        {...KEYBOARD_PROPS}
         data={animals}
         keyExtractor={(a) => a.id}
         renderItem={({ item }) => <Row a={item} />}

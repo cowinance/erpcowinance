@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSync, API_URL } from '@/sync/SyncContext';
-import { Button } from '@/components/ui';
+import { FormScroll, Button } from '@/components/ui';
 import { T } from '@/theme';
 
 type Mode = 'login' | 'forgot' | 'forgot-sent';
@@ -53,6 +53,20 @@ export function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
+      {/*
+        El formulario centrado también se lo come el teclado: en un iPhone chico, con el teclado
+        abierto queda menos de la mitad de la pantalla y los campos de email y contraseña caen debajo.
+        Es la PRIMERA pantalla de la app — la que ve alguien que todavía no confía en ella.
+
+        Acá no sirve `automaticallyAdjustKeyboardInsets` porque no hay ScrollView que correr: el
+        contenido está centrado con flex. `FormScroll` resuelve las dos cosas — deja el contenido
+        centrado mientras entra, y lo vuelve desplazable cuando el teclado le come el alto.
+      */}
+      <FormScroll
+        style={{ width: '100%' }}
+        contentContainerStyle={styles.scrollBody}
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.box}>
         <View style={styles.logo}>
           <Text style={{ color: '#fff', fontSize: 20, fontWeight: '800' }}>C</Text>
@@ -120,12 +134,17 @@ export function LoginScreen() {
           </View>
         )}
       </View>
+      </FormScroll>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.canvas, alignItems: 'center', justifyContent: 'center' },
+  root: { flex: 1, backgroundColor: T.canvas },
+  // `flexGrow` y `justifyContent` en el CONTENEDOR del scroll: así el formulario queda centrado
+  // mientras sobra alto, y se vuelve desplazable cuando el teclado lo reduce. Centrarlo en el
+  // `root` lo dejaba clavado y el teclado le comía los campos.
+  scrollBody: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   box: { width: '100%', maxWidth: 360, alignItems: 'center', paddingHorizontal: T.space['6'] },
   logo: {
     width: 56,

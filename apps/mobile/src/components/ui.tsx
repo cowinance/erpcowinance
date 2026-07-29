@@ -1,5 +1,47 @@
-import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, ScrollView, ScrollViewProps, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { T } from '@/theme';
+
+/**
+ * El scroll de una pantalla con formulario, que NO deja que el teclado tape lo que se escribe.
+ *
+ * **El problema.** En iOS el teclado cubre cerca del 40% de la pantalla y ninguna pantalla lo
+ * manejaba. En una captura los campos van hacia el final y el botón «Guardar» está al fondo del
+ * scroll: el productor escribía la dosis, el teclado le tapaba el botón, y tenía que cerrarlo a mano
+ * para poder guardar. Con una mano en el celular y la otra en el animal, eso es un paso de más en
+ * cada carga.
+ *
+ * **Cómo se resuelve.** `automaticallyAdjustKeyboardInsets` hace que el propio ScrollView corra su
+ * contenido cuando el teclado aparece. Es de iOS y lo hace el sistema, así que se mueve con la misma
+ * curva y la misma duración que el teclado — un `KeyboardAvoidingView` a mano queda siempre medio
+ * paso atrás. En Android es un no-op y no hace falta: `adjustResize` ya redimensiona la ventana.
+ *
+ * `keyboardDismissMode="interactive"` es el gesto que un usuario de iPhone ya tiene en los dedos:
+ * arrastrar hacia abajo para bajar el teclado, siguiendo el dedo. `keyboardShouldPersistTaps` deja
+ * que el primer toque en un botón funcione con el teclado abierto, en vez de gastarse en cerrarlo.
+ *
+ * **Por qué un componente y no la prop en cada pantalla.** Son seis pantallas con campos hoy y las
+ * que vengan después. Poner la prop seis veces es exactamente la forma en que la séptima se olvida —
+ * y no es teoría: al hacer este arreglo la lista inicial tenía CINCO, y la sexta (tareas) apareció
+ * recién al barrer todos los archivos con `TextInput`.
+ *
+ * Las LISTAS no pueden usar este componente —un `FlatList` no es un `ScrollView`— pero necesitan las
+ * mismas props, así que se exportan aparte en `KEYBOARD_PROPS` y se comparten. Sin
+ * `keyboardShouldPersistTaps`, en un buscador el primer toque sobre un resultado se gasta en cerrar
+ * el teclado: se busca la caravana, se toca el animal, y no pasa nada.
+ */
+export const KEYBOARD_PROPS = {
+  automaticallyAdjustKeyboardInsets: true,
+  keyboardDismissMode: 'interactive',
+  keyboardShouldPersistTaps: 'handled',
+} as const;
+
+export function FormScroll({ children, contentContainerStyle, ...rest }: ScrollViewProps & { children: React.ReactNode }) {
+  return (
+    <ScrollView {...KEYBOARD_PROPS} contentContainerStyle={contentContainerStyle} {...rest}>
+      {children}
+    </ScrollView>
+  );
+}
 
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
   return <View style={[styles.card, style]}>{children}</View>;

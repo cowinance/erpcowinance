@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { mangaCardAlerts, validateWeighing, type MangaAlert } from '@cowinance/domain';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
+import { FormScroll } from '@/components/ui';
 
 const GREEN = '#4ADE80';
 const RED = '#F87171';
@@ -104,7 +105,7 @@ export default function Manga() {
   if (phase === 'setup') {
     return (
       <SafeAreaView style={styles.root}>
-        <ScrollView contentContainerStyle={styles.setupBody}>
+        <FormScroll contentContainerStyle={styles.setupBody}>
           <Text style={styles.kicker}>MODO MANGA</Text>
           <Text style={styles.setupTitle}>Nueva sesión de trabajo</Text>
 
@@ -159,7 +160,7 @@ export default function Manga() {
           <Pressable onPress={() => router.back()}>
             <Text style={styles.link}>Cancelar</Text>
           </Pressable>
-        </ScrollView>
+        </FormScroll>
       </SafeAreaView>
     );
   }
@@ -169,7 +170,7 @@ export default function Manga() {
     const byAction = records.reduce<Record<string, number>>((acc, r) => ((acc[r.action] = (acc[r.action] ?? 0) + 1), acc), {});
     return (
       <SafeAreaView style={styles.root}>
-        <ScrollView contentContainerStyle={styles.setupBody}>
+        <FormScroll contentContainerStyle={styles.setupBody}>
           <Text style={styles.kicker}>RESUMEN DE SESIÓN</Text>
           {!!sessionName && <Text style={styles.setupTitle}>{sessionName}</Text>}
           <Text style={styles.muted}>
@@ -217,7 +218,7 @@ export default function Manga() {
               <Text style={[styles.bigBtnText, { color: '#000', fontSize: 17 }]}>Salir</Text>
             </Pressable>
           </View>
-        </ScrollView>
+        </FormScroll>
       </SafeAreaView>
     );
   }
@@ -244,7 +245,7 @@ export default function Manga() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <FormScroll contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {!animal ? (
           <>
             <Text style={styles.stepLabel}>CARAVANA</Text>
@@ -313,7 +314,7 @@ export default function Manga() {
             </Pressable>
           </>
         )}
-      </ScrollView>
+      </FormScroll>
     </SafeAreaView>
   );
 }
