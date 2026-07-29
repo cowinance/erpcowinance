@@ -22,6 +22,7 @@ describe('TaskService · integración', () => {
   let plans: PlansService;
   let tenantId: string;
   let userId: string;
+  let speciesId: string;
   let originalCwd: string;
   let tmp: string;
   const ctxRest = () => ({ origin: 'rest' as const, emitServerOrigin: true, actorUserId: userId });
@@ -37,6 +38,7 @@ describe('TaskService · integración', () => {
     plans = new PlansService(db, tasks);
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
+    speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
   }, 120_000);
 
   afterAll(() => {
@@ -149,5 +151,59 @@ describe('TaskService · integración', () => {
     const res = await plans.completeTask(taskId);
     expect(res).toEqual({ id: taskId, status: 'done' });
     expect((await taskRow(taskId)).status).toBe('done');
+  });
+
+  it('APLICAR UN PLAN DA CUENTA DE TODO LO QUE MIRÓ', async () => {
+    // El resumen contestaba «65 animales · 0 tareas creadas · 34 salteadas», y las cuentas no
+    // cerraban: 65 animales × 2 pasos son 130 combinaciones, y las 96 que el plan descartaba por
+    // categoría se iban con un `continue` que no contaba nada. El productor no podía distinguir
+    // «este plan no alcanza a estos animales» de «algo falló» — y un «0 creadas» se lee como error.
+    const plan = (await db.query<{ id: string }>(
+      `INSERT INTO health_plans (tenant_id, species_id, name, schedule, created_by) VALUES ($1,$4,'PLAN cuentas',$2::jsonb,$3) RETURNING id`,
+      [tenantId, JSON.stringify([{ label: 'Solo terneros', offset_days: 7, applies_to: ['ternero'] }, { label: 'Todos', offset_days: 14 }]), userId, speciesId],
+    ))[0].id;
+
+    const r: any = await plans.apply(plan, {});
+    expect(r.tasks_created + r.tasks_skipped + r.not_applicable, 'la cuenta tiene que cerrar').toBe(r.animals * r.steps);
+    expect(r.detail).toHaveLength(2);
+
+    // El paso sin `applies_to` alcanza a TODOS; el otro solo a los terneros.
+    const todos = r.detail.find((d: any) => d.step === 'Todos');
+    const soloTerneros = r.detail.find((d: any) => d.step === 'Solo terneros');
+    expect(todos.targeted).toBe(r.animals);
+    expect(soloTerneros.targeted).toBeLessThan(r.animals);
+    expect(soloTerneros.targeted).toBeGreaterThan(0);
+    expect(r.animals_targeted, 'los animales alcanzados son los del paso más amplio').toBe(r.animals);
+  });
+
+  it('un plan que NO ALCANZA A NADIE lo dice, en vez de contestar cero', async () => {
+    // Es el caso que se leía como falla. Ahora `targeted` en cero es la señal de que el plan no
+    // aplica a lo elegido, y `detail` trae a qué categorías sí — que es lo que el productor necesita
+    // para saber qué hacer.
+    const plan = (await db.query<{ id: string }>(
+      `INSERT INTO health_plans (tenant_id, species_id, name, schedule, created_by) VALUES ($1,$4,'PLAN vacío',$2::jsonb,$3) RETURNING id`,
+      [tenantId, JSON.stringify([{ label: 'Para una categoría que nadie tiene', offset_days: 1, applies_to: ['categoria_inexistente'] }]), userId, speciesId],
+    ))[0].id;
+
+    const r: any = await plans.apply(plan, {});
+    expect(r.targeted).toBe(0);
+    expect(r.animals_targeted).toBe(0);
+    expect(r.tasks_created).toBe(0);
+    expect(r.not_applicable, 'todas las combinaciones quedaron afuera, y se cuentan').toBe(r.animals * r.steps);
+    expect(r.detail[0].applies_to).toEqual(['categoria_inexistente']);
+  });
+
+  it('reaplicar el mismo plan no crea de nuevo, y lo dice como salteadas', async () => {
+    const plan = (await db.query<{ id: string }>(
+      `INSERT INTO health_plans (tenant_id, species_id, name, schedule, created_by) VALUES ($1,$4,'PLAN repetido',$2::jsonb,$3) RETURNING id`,
+      [tenantId, JSON.stringify([{ label: 'Paso único', offset_days: 3 }]), userId, speciesId],
+    ))[0].id;
+
+    const a: any = await plans.apply(plan, { anchor_date: '2026-06-01' });
+    expect(a.tasks_created).toBeGreaterThan(0);
+    const b: any = await plans.apply(plan, { anchor_date: '2026-06-01' });
+    expect(b.tasks_created).toBe(0);
+    expect(b.tasks_skipped).toBe(a.tasks_created);
+    expect(b.tasks_created + b.tasks_skipped + b.not_applicable).toBe(b.animals * b.steps);
   });
 });

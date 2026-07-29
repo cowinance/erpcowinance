@@ -89,20 +89,68 @@ export class PlansService {
       args,
     );
 
+    /*
+     * El resumen tiene que dar cuenta de TODO lo que se miró.
+     *
+     * Antes contestaba «65 animales · 0 tareas creadas · 34 salteadas», y las cuentas no cerraban:
+     * 65 animales × 2 pasos son 130 combinaciones, y 96 de ellas se descartaban por categoría con un
+     * `continue` que no contaba nada. El productor aplicaba el plan al hato entero y no tenía cómo
+     * distinguir «este plan no alcanza a estos animales» de «algo falló» — y un «0 creadas» se lee
+     * como lo segundo.
+     *
+     * Ahora se lleva el detalle por paso, y vale el invariante: creadas + salteadas + fuera_de_alcance
+     * = animales × pasos. Si algún día se agrega otro `continue`, la cuenta deja de cerrar y el test
+     * lo dice.
+     */
     let created = 0;
     let skipped = 0;
+    let notApplicable = 0;
+    // A cuántos ANIMALES les toca algo del plan. Es la unidad en la que piensa el productor —«¿a
+    // cuántos les corresponde?»— y no coincide con las combinaciones: un animal puede recibir varios
+    // pasos, y otro ninguno.
+    const alcanzados = new Set<string>();
+    const porPaso = steps.map((step) => ({
+      step: step.label,
+      applies_to: step.applies_to ?? null,
+      targeted: 0,
+      created: 0,
+      skipped: 0,
+    }));
+
     for (const animal of animals) {
-      for (const step of steps) {
-        if (step.applies_to?.length && !step.applies_to.includes(animal.category_code)) continue;
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        if (step.applies_to?.length && !step.applies_to.includes(animal.category_code)) {
+          notApplicable++;
+          continue;
+        }
+        porPaso[i].targeted++;
+        alcanzados.add(animal.id);
         const due = new Date(anchor.getTime() + (step.offset_days || 0) * 86400000);
         const title = `${step.label} — caravana ${animal.tag ?? '—'}`;
+        /*
+         * `($4::timestamptz)::date` y no `$4::date`: el mismo valor comparado de dos maneras.
+         *
+         * `due_date` es `timestamptz`, y al pasarlo a `date` Postgres usa la zona de la SESIÓN —la
+         * de la finca—, así que `2026-10-08T00:00Z` cae el 7 de octubre. El parámetro, en cambio,
+         * llegaba como TEXTO, y de texto a `date` se parsea la fecha ignorando la zona: 8 de
+         * octubre. Los dos lados nunca coincidían.
+         *
+         * Consecuencia: el dedup no encontraba nada y cada reaplicación del plan DUPLICABA todas
+         * sus tareas. Comprobado contra la app: aplicar dos veces con la misma fecha ancla dejó 34
+         * tareas con 17 títulos repetidos, dos recordatorios por animal. Se veía como que el plan
+         * "funcionaba" —contestaba 34 creadas— y por eso pasó desapercibido.
+         *
+         * Pasando el parámetro por `timestamptz` primero, los dos lados hacen el mismo viaje.
+         */
         const dup = await this.db.one(
           `SELECT id FROM tasks WHERE tenant_id = $1 AND related_type = 'animal' AND related_id = $2
-             AND title = $3 AND due_date::date = $4::date AND status = 'pending' AND deleted_at IS NULL`,
+             AND title = $3 AND due_date::date = ($4::timestamptz)::date AND status = 'pending' AND deleted_at IS NULL`,
           [t, animal.id, title, due.toISOString()],
         );
         if (dup) {
           skipped++;
+          porPaso[i].skipped++;
           continue;
         }
         // Sanidad decide QUÉ tarea clínica debe existir (aquí); el CÓMO persistirla —fila,
@@ -127,9 +175,25 @@ export class PlansService {
           { origin: 'health', emitServerOrigin: true, actorUserId: this.db.user },
         );
         created++;
+        porPaso[i].created++;
       }
     }
-    return { plan: plan.name, animals: animals.length, tasks_created: created, tasks_skipped: skipped };
+
+    return {
+      plan: plan.name,
+      animals: animals.length,
+      steps: steps.length,
+      /** Combinaciones animal×paso que el plan SÍ alcanza. */
+      targeted: created + skipped,
+      /** Cuántos ANIMALES distintos alcanza el plan, que es como se lee en la pantalla. */
+      animals_targeted: alcanzados.size,
+      tasks_created: created,
+      tasks_skipped: skipped,
+      /** Las que se descartaron porque el paso no aplica a esa categoría. Antes no se contaban. */
+      not_applicable: notApplicable,
+      /** Por paso, para poder decir CUÁL del plan no alcanzó a nadie. */
+      detail: porPaso,
+    };
   }
 
   /** Tareas sanitarias programadas (recordatorios) por estado. */

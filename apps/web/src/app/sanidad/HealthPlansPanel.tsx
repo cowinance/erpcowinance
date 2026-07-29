@@ -18,6 +18,38 @@ import { farmToday } from '@/lib/date';
 
 const cardCls = 'rounded-[10px] border border-subtle bg-surface p-5 shadow-[var(--shadow-1)]';
 
+/**
+ * Qué contestar después de aplicar un plan.
+ *
+ * Decía «✓ 0 tareas creadas sobre 65 animales (34 ya existían)», y las tres cifras juntas no
+ * explicaban nada: el plan alcanzaba a 17 de esos 65 —sus pasos son para terneros— y los otros 48 se
+ * descartaban sin aparecer. Un «0 creadas» sobre «65 animales» se lee como que algo falló.
+ *
+ * Los tres finales son distintos y piden respuestas distintas:
+ *  · no alcanzó a nadie      → hay que decir a QUÉ categorías aplica, o el productor no sabe qué hacer
+ *  · alcanzó y ya estaba todo → no es un error, es que no había nada nuevo que programar
+ *  · creó tareas             → cuántas, y sobre cuántos animales de verdad
+ */
+function resumenDeAplicar(j: any): string {
+  const alcanzados = j?.targeted ?? 0;
+  const pasos: any[] = j?.detail ?? [];
+
+  if (alcanzados === 0) {
+    const cats = [...new Set(pasos.flatMap((p) => p.applies_to ?? []))];
+    return cats.length
+      ? `Este plan no alcanza a ninguno de los ${j.animals} animales elegidos: sus pasos son para ${cats.join(', ')}.`
+      : `Este plan no alcanza a ninguno de los ${j.animals} animales elegidos.`;
+  }
+  if (j.tasks_created === 0) return `Sin novedades: las ${j.tasks_skipped} tareas del plan ya estaban programadas.`;
+
+  // Se cuentan ANIMALES y no tareas para los que quedan afuera: el productor eligió animales, no
+  // combinaciones, y «96 combinaciones no aplican» no significa nada parado en el corral.
+  const afuera = (j.animals ?? 0) - (j.animals_targeted ?? 0);
+  const sobra = afuera > 0 ? ` Los otros ${afuera} no entran en este plan.` : '';
+  return `✓ ${j.tasks_created} ${j.tasks_created === 1 ? 'tarea creada' : 'tareas creadas'} para ${j.animals_targeted} ${j.animals_targeted === 1 ? 'animal' : 'animales'}` +
+    `${j.tasks_skipped ? ` (${j.tasks_skipped} ya estaban)` : ''}.${sobra}`;
+}
+
 export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories: any[] }) {
   const router = useRouter();
   const [plans, setPlans] = useState<any[]>([]);
@@ -57,7 +89,7 @@ export function HealthPlansPanel({ lots, categories }: { lots: any[]; categories
     const j = await res.json().catch(() => null);
     setApplying(false);
     if (res.ok) {
-      setMsg(`✓ ${j.tasks_created} tareas creadas sobre ${j.animals} animales${j.tasks_skipped ? ` (${j.tasks_skipped} ya existían)` : ''}`);
+      setMsg(resumenDeAplicar(j));
       setOpenPlan(null);
       await load();
       router.refresh();
