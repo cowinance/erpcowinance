@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { addFarmDays, computeGrazingMetrics, computePaddockPerformance, summarizeWeather } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { WeatherService } from '../weather/weather.service';
+import { LandService } from '../land/land.service';
 
 /** Fechas ISO entre dos días, inclusive. La ventana de un pastoreo son sus días, no sus extremos. */
 function rangoDeFechas(desde: string, hasta: string): string[] {
@@ -20,6 +21,7 @@ export class GrazingService {
   constructor(
     private readonly db: DbService,
     private readonly weather: WeatherService,
+    private readonly land: LandService,
   ) {}
 
   async list(paddockId?: string, lotId?: string) {
@@ -65,17 +67,50 @@ export class GrazingService {
     await this.requireLot(lotId);
     const entryDate = body?.entry_date ?? await this.db.today();
 
-    const occupied = await this.db.one<{ id: string }>(`SELECT id FROM grazing_records WHERE paddock_id=$1 AND tenant_id=$2 AND exit_date IS NULL AND deleted_at IS NULL`, [paddockId, t]);
-    if (occupied) throw new ConflictException({ code: 'grazing.paddock_occupied', title: 'El potrero ya tiene un pastoreo abierto' });
-    const grazing = await this.db.one<{ id: string }>(`SELECT id FROM grazing_records WHERE lot_id=$1 AND tenant_id=$2 AND exit_date IS NULL AND deleted_at IS NULL`, [lotId, t]);
-    if (grazing) throw new ConflictException({ code: 'grazing.lot_already_grazing', title: 'El lote ya está pastoreando otro potrero' });
-
-    const row = await this.db.one(
-      `INSERT INTO grazing_records (tenant_id, paddock_id, lot_id, entry_date, pre_grazing_kg_dm_ha, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-      [t, paddockId, lotId, entryDate, body?.pre_grazing_kg_dm_ha ?? null, this.db.user],
+    /*
+     * Entrar a pastorear ES mover el lote al potrero, no anotar que entró.
+     *
+     * Antes esto solo insertaba una fila: el registro decía que el lote estaba en el potrero A
+     * mientras `lots.current_paddock_id` decía B, y ninguna de las dos respuestas era desautorizada
+     * por la otra. Ahora la entrada delega en la rotación —que mueve el lote, arrastra a sus
+     * animales por la regla única de movimientos y abre el pastoreo— y acá solo se le agrega
+     * encima lo que Pastoreo sabe y la rotación no: la medición de forraje y, si se está cargando
+     * en diferido, la fecha real de entrada.
+     *
+     * Ya NO se rechaza por potrero ocupado: en esta finca dos lotes pueden compartir potrero. Sí se
+     * mantiene que un lote no pastoree dos potreros a la vez — eso no es una política, es que un
+     * lote está en un lugar solo.
+     */
+    const yaEnOtro = await this.db.one<{ id: string }>(
+      `SELECT id FROM grazing_records WHERE lot_id=$1 AND tenant_id=$2 AND paddock_id<>$3 AND exit_date IS NULL AND deleted_at IS NULL`,
+      [lotId, t, paddockId],
     );
-    return this.get((row as { id: string }).id);
+    if (yaEnOtro) throw new ConflictException({ code: 'grazing.lot_already_grazing', title: 'El lote ya está pastoreando otro potrero' });
+
+    // Si el lote YA está en ese potrero no se rota: solo se empieza a registrar el pastoreo. Es el
+    // caso normal el día que la finca empieza a usar esta pantalla, con los rodeos ya parados donde
+    // están — y rotar habría dado «ya está ahí» sobre algo que el productor no pidió mover.
+    const lot = await this.db.one<{ current_paddock_id: string | null }>(
+      `SELECT current_paddock_id FROM lots WHERE id=$1 AND tenant_id=$2`,
+      [lotId, t],
+    );
+    if (lot?.current_paddock_id !== paddockId) await this.land.moveLot(paddockId, { lot_id: lotId });
+
+    let abierto = await this.db.one<{ id: string }>(
+      `SELECT id FROM grazing_records WHERE tenant_id=$1 AND lot_id=$2 AND paddock_id=$3 AND exit_date IS NULL AND deleted_at IS NULL
+        ORDER BY created_at DESC LIMIT 1`,
+      [t, lotId, paddockId],
+    );
+    if (!abierto)
+      abierto = await this.db.one<{ id: string }>(
+        `INSERT INTO grazing_records (tenant_id, paddock_id, lot_id, entry_date, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [t, paddockId, lotId, entryDate, this.db.user],
+      );
+    await this.db.query(
+      `UPDATE grazing_records SET entry_date=$2, pre_grazing_kg_dm_ha=$3, updated_at=now() WHERE id=$1 AND tenant_id=$4`,
+      [abierto!.id, entryDate, body?.pre_grazing_kg_dm_ha ?? null, t],
+    );
+    return this.get(abierto!.id);
   }
 
   /** Salida: cierra el pastoreo (libera el potrero). exit_date ≥ entry_date; solo sobre uno abierto. */
@@ -96,21 +131,41 @@ export class GrazingService {
    * recuperación del forraje). Los días los calcula SQL con CURRENT_DATE.
    */
   async occupancy() {
+    /*
+     * Ocupado es que HAY ANIMALES, no que alguien haya abierto un registro.
+     *
+     * Antes salía del pastoreo abierto, y por eso podía mentir: se rotaron dos lotes al «Potrero
+     * Norte» —31 cabezas— y esta pantalla seguía informando todos los potreros libres. Es la
+     * pregunta con la que se decide a dónde mandar el rodeo mañana; contestarla mirando un registro
+     * que puede no haberse cargado es contestar otra cosa.
+     *
+     * Se listan TODOS los lotes presentes porque en esta finca dos lotes pueden compartir potrero
+     * (decisión del productor). Mostrar solo el primero escondería justo la carga que importa.
+     *
+     * El DESCANSO sí sale de `grazing_records`: es el único que sabe cuándo salió el último, y la
+     * rotación ahora lo cierra al irse, así que esa fecha es real.
+     */
     return this.db.query(
       `SELECT p.id AS paddock_id, p.name AS paddock_name,
-              og.lot_id, l.name AS lot_name, og.entry_date::text AS entry_date,
-              CASE WHEN og.id IS NOT NULL THEN (CURRENT_DATE - og.entry_date) END AS days_grazing,
+              pres.lot_ids, pres.lot_names AS lot_name, pres.head,
+              og.entry_date::text AS entry_date,
+              CASE WHEN og.entry_date IS NOT NULL THEN (CURRENT_DATE - og.entry_date) END AS days_grazing,
               last.exit_date::text AS last_exit_date,
-              CASE WHEN og.id IS NULL AND last.exit_date IS NOT NULL THEN (CURRENT_DATE - last.exit_date) END AS days_rest,
-              (og.id IS NOT NULL) AS occupied
+              CASE WHEN pres.lot_ids IS NULL AND last.exit_date IS NOT NULL THEN (CURRENT_DATE - last.exit_date) END AS days_rest,
+              (pres.lot_ids IS NOT NULL) AS occupied
        FROM paddocks p
-       LEFT JOIN LATERAL (SELECT g.id, g.lot_id, g.entry_date FROM grazing_records g
-                          WHERE g.paddock_id=p.id AND g.tenant_id=p.tenant_id AND g.exit_date IS NULL AND g.deleted_at IS NULL LIMIT 1) og ON true
-       LEFT JOIN lots l ON l.id = og.lot_id
+       LEFT JOIN LATERAL (
+         SELECT array_agg(l.id) AS lot_ids, string_agg(l.name, ' + ' ORDER BY l.name) AS lot_names,
+                sum((SELECT count(*) FROM animals a WHERE a.current_lot_id = l.id AND a.status='active' AND a.deleted_at IS NULL))::int AS head
+           FROM lots l
+          WHERE l.current_paddock_id = p.id AND l.tenant_id = p.tenant_id AND l.deleted_at IS NULL
+       ) pres ON true
+       LEFT JOIN LATERAL (SELECT min(g.entry_date) AS entry_date FROM grazing_records g
+                          WHERE g.paddock_id=p.id AND g.tenant_id=p.tenant_id AND g.exit_date IS NULL AND g.deleted_at IS NULL) og ON true
        LEFT JOIN LATERAL (SELECT max(g.exit_date) AS exit_date FROM grazing_records g
                           WHERE g.paddock_id=p.id AND g.tenant_id=p.tenant_id AND g.deleted_at IS NULL) last ON true
        WHERE p.tenant_id=$1 AND p.deleted_at IS NULL
-       ORDER BY (og.id IS NOT NULL) DESC, p.name`,
+       ORDER BY (pres.lot_ids IS NOT NULL) DESC, p.name`,
       [this.db.tenant],
     );
   }

@@ -6,6 +6,10 @@ import { CropsService } from '../agriculture/crops.service';
 import { GrazingService } from '../grazing/grazing.service';
 import { WeatherService } from '../weather/weather.service';
 import { ReportsService } from './reports.service';
+import { LandService } from '../land/land.service';
+import { MovementService } from '../land/movement.service';
+import { SyncVersionStore } from '../sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 
 /**
  * Arma `ReportsService` con sus colaboradores reales, para los tests.
@@ -26,6 +30,6 @@ export function buildReportsService(db: DbService): ReportsService {
     inventory,
     new MachineryService(db),
     new CropsService(db),
-    new GrazingService(db, new WeatherService(db)),
+    new GrazingService(db, new WeatherService(db), new LandService(db, new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)))),
   );
 }

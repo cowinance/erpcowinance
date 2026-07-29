@@ -1166,6 +1166,24 @@ export async function seedDemo(db: Queryable) {
     ]);
   }
   /*
+   * La estadía ACTUAL de cada lote en su potrero, abierta.
+   *
+   * Las rotaciones históricas de arriba quedan todas cerradas, así que sin esto ningún lote tenía
+   * pastoreo abierto: la ocupación mostraba los potreros ocupados —eso ahora se deriva de dónde
+   * están los lotes— pero sin desde cuándo, y los días de pastoreo salían en blanco. La app real ya
+   * abre el pastoreo al rotar; esto es para que el demo se vea como se va a ver la finca.
+   */
+  await q(
+    `INSERT INTO grazing_records (tenant_id, paddock_id, lot_id, entry_date, pre_grazing_kg_dm_ha, created_by)
+     SELECT l.tenant_id, l.current_paddock_id, l.id, CURRENT_DATE - 18, 2800, $2
+       FROM lots l
+      WHERE l.tenant_id = $1 AND l.current_paddock_id IS NOT NULL AND l.deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM grazing_records g
+                         WHERE g.lot_id = l.id AND g.tenant_id = l.tenant_id AND g.exit_date IS NULL AND g.deleted_at IS NULL)`,
+    [org, userId],
+  );
+
+  /*
    * El ingreso de cada animal a su lote, para que el historial del lote no nazca vacío.
    *
    * El seed inserta el hato con su `current_lot_id` puesto —es una carga masiva, no pasa por los

@@ -28,6 +28,8 @@ describe('Lotes — dividir / fusionar / mover todo', () => {
   let speciesId: string;
 
   const mkLot = async (name: string) => (await lotsSvc.createLot({ name }) as any).id;
+  const mkPaddock = async (name: string) =>
+    (await db.query<{ id: string }>(`INSERT INTO paddocks (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [db.tenant, farmId, name]))[0].id;
   const addAnimals = async (lot: string, n: number) => {
     const ids: string[] = [];
     for (let i = 0; i < n; i++) {
@@ -170,6 +172,45 @@ describe('Lotes — dividir / fusionar / mover todo', () => {
     await expect(land.moveAllAnimals(a, { target_lot_id: archived }, randomUUID())).rejects.toMatchObject({ status: 409 });
     await expect(land.mergeLots(a, { target_lot_id: a }, randomUUID())).rejects.toMatchObject({ status: 400 });
     await expect(land.splitLot(a, { name: '', animal_ids: [] }, randomUUID())).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('ROTAR UN LOTE ABRE Y CIERRA SU PASTOREO: la ocupación no puede mentir', async () => {
+    // El bug: eran dos registros que no se hablaban. Se rotaron dos lotes al «Potrero Norte» —31
+    // cabezas— y la pantalla de Pastoreo seguía informando TODOS los potreros libres. Es la
+    // pregunta con la que se decide a dónde mandar el rodeo mañana, contestada al revés.
+    const lot = await mkLot('ROT pastoreo');
+    await addAnimals(lot, 2);
+    const p1 = await mkPaddock('ROT uno');
+    const p2 = await mkPaddock('ROT dos');
+
+    await land.moveLot(p1, { lot_id: lot });
+    const abierto1 = await db.query<{ paddock_id: string; exit_date: string | null }>(
+      `SELECT paddock_id, exit_date::text AS exit_date FROM grazing_records WHERE tenant_id=$1 AND lot_id=$2`, [db.tenant, lot]);
+    expect(abierto1, 'entrar al primer potrero abre un pastoreo').toHaveLength(1);
+    expect(abierto1[0].paddock_id).toBe(p1);
+    expect(abierto1[0].exit_date).toBeNull();
+
+    await land.moveLot(p2, { lot_id: lot });
+    const todos = await db.query<{ paddock_id: string; exit_date: string | null }>(
+      `SELECT paddock_id, exit_date::text AS exit_date FROM grazing_records WHERE tenant_id=$1 AND lot_id=$2 ORDER BY created_at`, [db.tenant, lot]);
+    expect(todos, 'la rotación cierra el viejo y abre el nuevo').toHaveLength(2);
+    expect(todos[0].exit_date, 'el del potrero que dejó queda cerrado').not.toBeNull();
+    expect(todos[1].paddock_id).toBe(p2);
+    expect(todos[1].exit_date, 'el del nuevo queda abierto').toBeNull();
+  });
+
+  it('la salida se fecha en el día de la FINCA, no en el de Greenwich', async () => {
+    // Una rotación de las 21:00 no pertenece al día siguiente: con la fecha en UTC, los días de
+    // pastoreo y de descanso —que se cuentan restando fechas— salían corridos.
+    const lot = await mkLot('ROT fecha');
+    await addAnimals(lot, 1);
+    const p1 = await mkPaddock('ROT f1');
+    const p2 = await mkPaddock('ROT f2');
+    await land.moveLot(p1, { lot_id: lot });
+    await land.moveLot(p2, { lot_id: lot });
+    const [cerrado] = await db.query<{ exit_date: string }>(
+      `SELECT exit_date::text AS exit_date FROM grazing_records WHERE tenant_id=$1 AND lot_id=$2 AND exit_date IS NOT NULL`, [db.tenant, lot]);
+    expect(cerrado.exit_date).toBe(await db.today());
   });
 
   it('ARCHIVAR CON ANIMALES ADENTRO SE BLOQUEA POR LAS DOS PUERTAS', async () => {

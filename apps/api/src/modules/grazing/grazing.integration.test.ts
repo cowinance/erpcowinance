@@ -5,6 +5,10 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { GrazingService } from './grazing.service';
 import { WeatherService } from '../weather/weather.service';
+import { LandService } from '../land/land.service';
+import { MovementService } from '../land/movement.service';
+import { SyncVersionStore } from '../sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 
 /**
  * Integración de pastoreo (PG-1): entrada/salida con las reglas de rotación (un potrero ocupado y un
@@ -21,6 +25,7 @@ describe('grazing — pastoreo', () => {
   let padB: string;
   let lot1: string;
   let lot2: string;
+  let lot3: string;
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -29,7 +34,7 @@ describe('grazing — pastoreo', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    svc = new GrazingService(db, new WeatherService(db));
+    svc = new GrazingService(db, new WeatherService(db), new LandService(db, new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db))));
     tenantId = db.tenant;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [tenantId]))[0].id;
     const mkPaddock = async (name: string) => (await db.query<{ id: string }>(`INSERT INTO paddocks (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [tenantId, farmId, name]))[0].id;
@@ -38,6 +43,7 @@ describe('grazing — pastoreo', () => {
     padB = await mkPaddock('Potrero B');
     lot1 = await mkLot('Lote 1');
     lot2 = await mkLot('Lote 2');
+    lot3 = await mkLot('Lote 3');
   }, 120_000);
 
   afterAll(() => {
@@ -52,9 +58,50 @@ describe('grazing — pastoreo', () => {
     expect(g.pre_grazing_kg_dm_ha).toBe(3000);
   });
 
-  it('rotación: potrero ocupado → 409; lote que ya pastorea → 409', async () => {
-    await expect(svc.enter({ paddock_id: padA, lot_id: lot2 })).rejects.toMatchObject({ status: 409 }); // A ocupado por lote 1
-    await expect(svc.enter({ paddock_id: padB, lot_id: lot1 })).rejects.toMatchObject({ status: 409 }); // lote 1 ya pastorea
+  it('DOS LOTES PUEDEN COMPARTIR POTRERO, y la ocupación los muestra a los dos', async () => {
+    // Decisión del productor. Antes se rechazaba con 409 acá y se permitía en la rotación de lotes:
+    // dos módulos contestando distinto la misma pregunta. Se alineó al lado que ya permitía, y la
+    // ocupación pasó a listar a todos los presentes — mostrar solo el primero escondería justo la
+    // carga del potrero, que es lo que se mira para decidir.
+    const g: any = await svc.enter({ paddock_id: padA, lot_id: lot2 });
+    expect(g.is_open).toBe(true);
+
+    const occ: any[] = await svc.occupancy();
+    const a = occ.find((o) => o.paddock_id === padA);
+    expect(a.occupied).toBe(true);
+    expect(a.lot_name, 'los dos lotes, no uno').toMatch(/\+/);
+  });
+
+  it('CERRAR EL PASTOREO NO SACA A LOS ANIMALES: el potrero sigue ocupado', async () => {
+    // Acá se ve por qué la ocupación se DERIVA de dónde están los lotes y no del registro abierto.
+    // Cerrar un pastoreo es dejar de medirlo; los animales siguen parados en el potrero hasta que
+    // alguien los mueva. Con la versión vieja —que leía el registro— la pantalla pasaba a «libre» y
+    // el potrero quedaba disponible para mandar otro rodeo encima.
+    const pad = (await db.query<{ id: string }>(`INSERT INTO paddocks (tenant_id, farm_id, name) VALUES ($1,$2,'Potrero C') RETURNING id`, [tenantId, farmId]))[0].id;
+    const lote = (await db.query<{ id: string }>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote C') RETURNING id`, [tenantId, farmId]))[0].id;
+    const g: any = await svc.enter({ paddock_id: pad, lot_id: lote });
+    await svc.exit(g.id, {});
+
+    const occ: any[] = await svc.occupancy();
+    const c = occ.find((o) => o.paddock_id === pad);
+    expect(c.occupied, 'el lote sigue ahí, así que el potrero sigue ocupado').toBe(true);
+    expect(c.lot_name).toBe('Lote C');
+  });
+
+  it('un lote NO puede pastorear dos potreros a la vez', async () => {
+    // Esto no es una política que se pueda cambiar: un lote está en un lugar solo.
+    await expect(svc.enter({ paddock_id: padB, lot_id: lot1 })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('ENTRAR A PASTOREAR MUEVE EL LOTE: no es anotar que entró', async () => {
+    // El bug de origen: `enter` insertaba una fila y nada más, así que el registro podía decir que
+    // el lote estaba en el potrero A mientras `lots.current_paddock_id` decía B. Dos verdades sobre
+    // dónde está el rodeo, y ninguna desautorizada por la otra.
+    const antes = await db.one<{ current_paddock_id: string }>(`SELECT current_paddock_id FROM lots WHERE id=$1`, [lot3]);
+    expect(antes!.current_paddock_id).not.toBe(padB);
+    await svc.enter({ paddock_id: padB, lot_id: lot3 });
+    const despues = await db.one<{ current_paddock_id: string }>(`SELECT current_paddock_id FROM lots WHERE id=$1`, [lot3]);
+    expect(despues!.current_paddock_id, 'el lote tiene que haberse movido de verdad').toBe(padB);
   });
 
   it('salida: cierra, calcula días y forraje consumido (derivados)', async () => {

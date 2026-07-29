@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { LandModule } from '../land/land.module';
 import { WeatherModule } from '../weather/weather.module';
 import { GrazingController } from './grazing.controller';
 import { GrazingService } from './grazing.service';
@@ -9,7 +10,7 @@ import { GrazingService } from './grazing.service';
  */
 @Module({
   // El rendimiento del potrero cruza ocupación con el clima de sus ventanas (Fase 3.2).
-  imports: [WeatherModule],
+  imports: [WeatherModule, LandModule],
   controllers: [GrazingController],
   providers: [GrazingService],
   exports: [GrazingService], // Reportes compone el rendimiento de potreros en el resumen (Fase 5).

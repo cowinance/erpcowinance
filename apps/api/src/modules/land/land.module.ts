@@ -10,6 +10,6 @@ import { MovementSyncHandler } from './sync/movement-sync.handler';
 @Module({
   controllers: [LandController],
   providers: [LandService, MovementService, MovementSyncHandler],
-  exports: [MovementService],
+  exports: [MovementService, LandService],
 })
 export class LandModule {}

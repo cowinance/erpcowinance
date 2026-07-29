@@ -170,6 +170,32 @@ export class LandService {
         emitServerOrigin: true,
       });
 
+      /*
+       * 3) El PASTOREO sigue a la rotación: se cierra el del potrero que deja y se abre el del nuevo.
+       *
+       * Antes eran dos registros que no se hablaban, y la pantalla de Pastoreo informaba LIBRES
+       * potreros con animales adentro: se rotaron dos lotes al «Potrero Norte» —31 cabezas— y la
+       * ocupación seguía diciendo que estaban todos vacíos. Dos respuestas a «¿qué lote está en el
+       * potrero X?», y la que se mira para decidir la rotación era la equivocada.
+       *
+       * Se escribe desde acá y no llamando al módulo de Pastoreo porque ese módulo ya depende de
+       * éste —la entrada manual mueve el lote— y llamarnos mutuamente sería un ciclo. `grazing_records`
+       * tiene dos clases de dato: CUÁNDO estuvo cada lote, que es consecuencia de dónde está y lo
+       * escribe la rotación, y las mediciones de forraje, que las carga Pastoreo encima.
+       *
+       * La fecha es la de la FINCA: una rotación de las 21:00 no pertenece al día siguiente.
+       */
+      const hoy = await this.db.today(q);
+      await q.query(
+        `UPDATE grazing_records SET exit_date = $3, updated_at = now()
+          WHERE tenant_id = $1 AND lot_id = $2 AND exit_date IS NULL AND deleted_at IS NULL`,
+        [t, body.lot_id, hoy],
+      );
+      await q.query(
+        `INSERT INTO grazing_records (tenant_id, paddock_id, lot_id, entry_date, created_by) VALUES ($1,$2,$3,$4,$5)`,
+        [t, paddockId, body.lot_id, hoy, this.db.user],
+      );
+
       return { moved: animals.length, lot: lot.name, from: lot.from_name ?? null, to: paddock.name };
     });
   }

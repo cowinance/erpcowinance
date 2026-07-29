@@ -27,6 +27,8 @@ interface Occupancy {
   paddock_name: string;
   lot_name: string | null;
   occupied: boolean;
+  /** Cabezas que hay en el potrero, sumando TODOS los lotes presentes. */
+  head: number | null;
   days_grazing: number | null;
   days_rest: number | null;
 }
@@ -110,7 +112,10 @@ export function PastoreoView({ grazings, occupancy, paddocks, lots }: { grazings
                   <tr key={o.paddock_id} className="h-8 border-b border-subtle last:border-0">
                     <td>{o.paddock_name}</td>
                     <td className={o.occupied ? 'text-warning' : 'text-success'}>
-                      {o.occupied ? `Ocupado · ${o.lot_name}` : 'Libre'}
+                      {/* La carga va al lado del nombre porque en esta finca dos lotes pueden
+                          compartir potrero: sin las cabezas, «Rodeo Cría 1 + Rodeo Cría 2» no dice
+                          si son 20 animales o 200, que es lo que decide si aguanta. */}
+                      {o.occupied ? `Ocupado · ${o.lot_name}${o.head ? ` · ${o.head} cab` : ''}` : 'Libre'}
                     </td>
                     <td className="tnum text-right text-ink-3">
                       {o.occupied ? (o.days_grazing != null ? `${o.days_grazing} pastoreo` : '—') : o.days_rest != null ? `${o.days_rest} descanso` : '—'}
