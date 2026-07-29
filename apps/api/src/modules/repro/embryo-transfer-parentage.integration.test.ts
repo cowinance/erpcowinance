@@ -13,6 +13,7 @@ import { ServicePlanService } from './service-plan.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Transferencia de embrión: la madre GENÉTICA y el VIENTRE son dos vacas distintas.
@@ -68,6 +69,7 @@ describe('transferencia de embrión — quién aporta los genes y quién el vien
       straws,
       new ServicePlanService(db, straws),
       inbreeding,
+      new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)),
     );
     farmId = (await db.query<any>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<any>(`SELECT id FROM species LIMIT 1`))[0].id;

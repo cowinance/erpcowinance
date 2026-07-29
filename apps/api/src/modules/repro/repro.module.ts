@@ -15,9 +15,10 @@ import { CalvingSyncHandler } from './sync/calving-sync.handler';
 import { CalvingOffspringSyncHandler } from './sync/calving-offspring-sync.handler';
 import { PregnancySyncHandler } from './sync/pregnancy-sync.handler';
 import { WeaningSyncHandler } from './sync/weaning-sync.handler';
+import { LandModule } from '../land/land.module';
 
 @Module({
-  imports: [TasksModule, GeneticsModule],
+  imports: [TasksModule, GeneticsModule, LandModule],
   controllers: [ReproController, ReproReportsController, ServicePlanController],
   providers: [ReproService, ReproReportsService, WeaningService, ServicePlanService, BreedingEventSyncHandler, CalvingSyncHandler, CalvingOffspringSyncHandler, PregnancySyncHandler, WeaningSyncHandler, ProtocolService, ReproDashboardService],
   exports: [ReproService, ServicePlanService], // AlertsModule reusa `statusAlerts` (mismas reglas de estado, sin duplicar SQL).

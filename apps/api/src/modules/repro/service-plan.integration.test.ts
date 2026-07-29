@@ -12,6 +12,9 @@ import { ReproService } from './repro.service';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
+import { MovementService } from '../../modules/land/movement.service';
+import { SyncVersionStore } from '../../modules/sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../../modules/sync/registry/server-origin-changeset.writer';
 
 /**
  * Plan de servicio por animal (GT-3).
@@ -87,7 +90,7 @@ describe('plan de servicio — reserva, liberación y lista de retiro', () => {
     // El diagnóstico agenda tareas (recontrol / nuevo servicio); acá se stubean porque lo que se
     // prueba es el cierre de la campaña, no la agenda —que ya tiene sus propios tests—.
     const tareas = { createTask: async () => ({ id: 'stub' }) } as unknown as TaskService;
-    repro = new ReproService(db, {} as WeaningService, tareas, semen, embryos, straws, plans, new InbreedingService(db));
+    repro = new ReproService(db, {} as WeaningService, tareas, semen, embryos, straws, plans, new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
 
     const t: any = await cryo.createTank({ code: '207' });
     const c1: any = await cryo.createCanister(t.id, { code: '1', color: 'azul' });

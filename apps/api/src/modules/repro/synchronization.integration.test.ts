@@ -14,6 +14,7 @@ import { ServicePlanService } from './service-plan.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Respuesta a la sincronización.
@@ -61,6 +62,7 @@ describe('repro — respuesta a la sincronización', () => {
       straws,
       new ServicePlanService(db, straws),
       new InbreedingService(db),
+      new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)),
     );
     reports = new ReproReportsService(db, repro);
     farmId = (await db.query<any>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;

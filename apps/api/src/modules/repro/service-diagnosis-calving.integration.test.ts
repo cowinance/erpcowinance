@@ -14,6 +14,7 @@ import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import type { WeaningService } from './weaning.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
+import { MovementService } from '../../modules/land/movement.service';
 
 /**
  * Reproducción E2 — servicios/diagnósticos/partos robustos: idempotencia por Idempotency-Key,
@@ -55,7 +56,7 @@ describe('repro — servicios/diagnósticos/partos robustos (E2)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
+    repro = new ReproService(db, {} as WeaningService, new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
@@ -244,6 +245,56 @@ describe('repro — servicios/diagnósticos/partos robustos (E2)', () => {
     const again: any = await repro.calving({ dam_id: a, offspring: [{ sex: 'F', vitality: 'live' }] }, key);
     expect(again.already).toBe(true);
     expect(await db.query(`SELECT id FROM animals WHERE dam_id=$1`, [a])).toHaveLength(1);
+  });
+
+  it('LA CRÍA ENTRA AL LOTE DE LA MADRE Y QUEDA EN EL HISTORIAL', async () => {
+    // Era el último alta que escribía `current_lot_id` derecho en el INSERT. La cría quedaba bien
+    // ubicada —copiaba lote y potrero de la madre— pero sin ingreso en el historial del lote, que se
+    // arma con `animal_movements`. Un rodeo de cría suma veinte terneros en la temporada y el
+    // historial no mostraba ninguno.
+    const madre = await mkFemale(uniq('NAC'));
+    const pot = (await db.query<{ id: string }>(`INSERT INTO paddocks (tenant_id, farm_id, name) VALUES ($1,$2,$3) RETURNING id`, [t, farmId, uniq('POT')]))[0].id;
+    await db.query(`UPDATE lots SET current_paddock_id=$2 WHERE id=$1`, [lot, pot]);
+    await db.query(`UPDATE animals SET current_lot_id=$2, current_paddock_id=$3 WHERE id=$1`, [madre, lot, pot]);
+    await openPreg(madre);
+
+    const res: any = await repro.calving({ dam_id: madre, offspring: [{ sex: 'F', vitality: 'live' }] }, randomUUID());
+    const cria = res.offspring[0].animal_id;
+
+    const a = await db.one<{ current_lot_id: string; current_paddock_id: string }>(
+      `SELECT current_lot_id, current_paddock_id FROM animals WHERE id=$1`, [cria]);
+    expect(a!.current_lot_id, 'la cría nace en el lote de la madre').toBe(lot);
+    expect(a!.current_paddock_id, 'y el potrero se deriva del lote').toBe(pot);
+
+    const mov = await db.query<{ to_lot_id: string; from_lot_id: string | null; reason: string; moved_at: string }>(
+      `SELECT to_lot_id, from_lot_id, reason, moved_at::text AS moved_at FROM animal_movements WHERE tenant_id=$1 AND animal_id=$2`, [t, cria]);
+    expect(mov, 'el nacimiento deja su ingreso').toHaveLength(1);
+    expect(mov[0].to_lot_id).toBe(lot);
+    expect(mov[0].from_lot_id, 'no viene de ningún lote: acaba de nacer').toBeNull();
+    expect(mov[0].reason).toBe('nacimiento');
+  });
+
+  it('el ingreso se fecha el día del PARTO, no el día que se cargó', async () => {
+    // Un parto se anota después —a veces días después— y fechar el ingreso el día de la carga
+    // correría el historial del lote respecto de lo que pasó en el campo.
+    const madre = await mkFemale(uniq('FEC'));
+    await db.query(`UPDATE animals SET current_lot_id=$2 WHERE id=$1`, [madre, lot]);
+    await openPreg(madre);
+    const res: any = await repro.calving({ dam_id: madre, calving_date: '2026-07-20', offspring: [{ sex: 'M', vitality: 'live' }] }, randomUUID());
+    const [mov] = await db.query<{ moved_at: string }>(
+      `SELECT moved_at::date::text AS moved_at FROM animal_movements WHERE tenant_id=$1 AND animal_id=$2`, [t, res.offspring[0].animal_id]);
+    expect(mov.moved_at).toBe('2026-07-20');
+  });
+
+  it('una cría MUERTA no genera movimiento', async () => {
+    // Un nacido muerto no entra a ningún lote: no se crea el animal, así que tampoco hay ingreso.
+    const madre = await mkFemale(uniq('MRT'));
+    await db.query(`UPDATE animals SET current_lot_id=$2 WHERE id=$1`, [madre, lot]);
+    await openPreg(madre);
+    const antes = await db.one<{ n: number }>(`SELECT count(*)::int AS n FROM animal_movements WHERE tenant_id=$1`, [t]);
+    await repro.calving({ dam_id: madre, offspring: [{ sex: 'F', vitality: 'stillborn' }] }, randomUUID());
+    const despues = await db.one<{ n: number }>(`SELECT count(*)::int AS n FROM animal_movements WHERE tenant_id=$1`, [t]);
+    expect(despues!.n).toBe(antes!.n);
   });
 
   it('servicio grupal por lote aplica a los vientres del lote', async () => {

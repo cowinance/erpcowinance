@@ -12,6 +12,7 @@ import { StrawsService } from '../genetics/straws.service';
 import { calvingIntervalIssue } from '@cowinance/domain';
 import { InbreedingService } from '../genetics/inbreeding.service';
 import { ServicePlanService } from './service-plan.service';
+import { MovementService } from '../land/movement.service';
 
 @Injectable()
 export class ReproService {
@@ -24,6 +25,7 @@ export class ReproService {
     private readonly straws: StrawsService,
     private readonly plans: ServicePlanService,
     private readonly inbreeding: InbreedingService,
+    private readonly movement: MovementService,
   ) {}
 
   /**
@@ -632,12 +634,38 @@ export class ReproService {
           o.sex = existente.sex;
         } else if (o.vitality !== 'stillborn') {
           const cat = await q.one<any>(`SELECT id FROM animal_categories WHERE code = $1`, [newbornCategoryCode(o.sex)]);
+          /*
+           * La cría nace SIN lote ni potrero puestos a mano: la ubica el movimiento, abajo.
+           *
+           * Copiarle los de la madre en el INSERT dejaba al ternero bien ubicado pero sin ingreso en
+           * el historial del lote, que se arma con `animal_movements`. Era el último alta que
+           * quedaba escribiendo `current_lot_id` derecho: un rodeo de cría podía sumar veinte
+           * terneros en la temporada y el historial del lote no mostraba ninguno.
+           *
+           * Y el destino es el LOTE de la madre, no su potrero: el potrero se deriva del lote, que
+           * es la regla única. Si la madre estuviera en un potrero sin lote —dato inconsistente que
+           * el sistema tolera— se usa ése para no perder la ubicación.
+           */
           const calf = await q.one<any>(
-            `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, recipient_dam_id, sire_id, breeding_method_origin, current_lot_id, current_paddock_id, status, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,'born',$7,$8,$9,$10,$11,$12,'active',$13) RETURNING id`,
-            [this.db.tenant, damRow.farm_id, species.id, cat?.id ?? null, o.sex ?? 'F', calvingDate, madreGenetica, receptora, evento?.sire_id ?? null, metodo, damRow.current_lot_id, damRow.current_paddock_id, this.db.user],
+            `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, birth_date, origin, dam_id, recipient_dam_id, sire_id, breeding_method_origin, status, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,'born',$7,$8,$9,$10,'active',$11) RETURNING id`,
+            [this.db.tenant, damRow.farm_id, species.id, cat?.id ?? null, o.sex ?? 'F', calvingDate, madreGenetica, receptora, evento?.sire_id ?? null, metodo, this.db.user],
           );
           calfId = calf.id;
+          if (damRow.current_lot_id || damRow.current_paddock_id) {
+            await this.movement.recordMovement(q, {
+              animalIds: [calf.id],
+              to: damRow.current_lot_id ? { lot: damRow.current_lot_id as string } : { paddock: damRow.current_paddock_id as string },
+              // La fecha del movimiento es la del PARTO, no la de la carga: un parto se anota
+              // después, y fechar el ingreso el día que alguien lo escribió correría el historial.
+              movedAt: calvingDate,
+              reason: 'nacimiento',
+              actorUserId: this.db.user,
+              origin: 'web',
+              movementId: randomUUID(),
+              emitServerOrigin: true,
+            });
+          }
           if (o.tag) await q.query(`INSERT INTO animal_identifiers (tenant_id, animal_id, type, value) VALUES ($1,$2,'visual',$3)`, [this.db.tenant, calfId, String(o.tag)]);
           await q.query(`INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source) VALUES ($1,$2,'birth',$3,$4,now(),'manual')`, [this.db.tenant, calfId, JSON.stringify({ dam_tag: dam.tag, birth_weight_kg: o.birth_weight_kg ?? null, method: metodo, ...(receptora ? { recipient_dam_id: receptora, recipient_tag: dam.tag } : {}) }), calvingDate]);
         }

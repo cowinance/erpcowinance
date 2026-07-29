@@ -12,6 +12,9 @@ import type { WeaningService } from './weaning.service';
 import type { TaskService } from '../tasks/task.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
 import { ProtocolService } from './protocol.service';
+import { MovementService } from '../../modules/land/movement.service';
+import { SyncVersionStore } from '../../modules/sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../../modules/sync/registry/server-origin-changeset.writer';
 
 /**
  * Integración del CRUD de protocolos reproductivos (R-2.a): alta con validación de dominio,
@@ -31,7 +34,7 @@ describe('repro protocolos — CRUD', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     protocols = new ProtocolService(db, {} as TaskService, new ServicePlanService(db, new StrawsService(db)), repro);
   }, 120_000);
 

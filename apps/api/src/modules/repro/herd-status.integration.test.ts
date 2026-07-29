@@ -13,6 +13,9 @@ import type { TaskService } from '../tasks/task.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
 import { ProtocolService } from './protocol.service';
 import { ReproDashboardService } from './repro-dashboard.service';
+import { MovementService } from '../../modules/land/movement.service';
+import { SyncVersionStore } from '../../modules/sync/registry/sync-version.store';
+import { ServerOriginChangesetWriter } from '../../modules/sync/registry/server-origin-changeset.writer';
 
 /**
  * Integración del estado reproductivo RICO (Reproducción E1): `herdStatus` deriva el estado por
@@ -56,7 +59,7 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     panel = new ReproDashboardService(repro, new ProtocolService(db, {} as TaskService, new ServicePlanService(db, new StrawsService(db)), repro));
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
