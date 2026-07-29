@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { assertTreatable, computeWithdrawal, TREATMENT_APPLIED } from '@cowinance/domain';
+import { assertNotBeforeBirth, assertTreatable, computeWithdrawal, TREATMENT_APPLIED } from '@cowinance/domain';
 import type { TreatmentApplied } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 
@@ -115,6 +115,16 @@ export class TreatmentService {
         code: 'treatment.future_date',
         title: `La fecha de aplicación es futura. Un tratamiento se registra cuando se aplicó.`,
       });
+    // Y la otra mitad del par: tampoco antes de que el animal existiera. Se aceptaba un tratamiento
+    // fechado en 1990 sobre un animal nacido en 2025, y ese hecho después aparece en los reportes
+    // por período sin forma de explicarlo desde la pantalla.
+    //
+    // Se pasa `input.appliedAt`, lo que LLEGÓ, y no el `Date` de arriba. Es la misma advertencia que
+    // está diez líneas más abajo para el retiro, y la volví a pisar: una fecha pelada («1990-01-01»,
+    // lo que manda el formulario) es un día calendario, no un instante, y `new Date()` la vuelve
+    // medianoche UTC — que en América es el día anterior. Con el `Date`, el mensaje decía
+    // «1989-12-31» y un tratamiento aplicado EL DÍA del nacimiento se rechazaba.
+    assertNotBeforeBirth(await this.db.farmDateOf(input.appliedAt ?? new Date().toISOString(), q), animal.birth_date, 'La fecha de aplicación');
     // Server Authority: el retiro es SIEMPRE el derivado por el dominio desde el producto.
     // La zona de la FINCA: el retiro de carne se cuenta en días de calendario, y el calendario es
     // el de donde está el animal. Calcularlo en UTC lo corría un día — tarde de este lado del
@@ -181,8 +191,11 @@ export class TreatmentService {
   }
 
   private async requireAnimal(q: Q, animalId: string) {
-    const row = await q.one<{ id: string; status: string; tag: string | null }>(
-      `SELECT a.id, a.status, ai.value AS tag
+    const row = await q.one<{ id: string; status: string; tag: string | null; birth_date: string | null }>(
+      // `birth_date::text` y no la columna pelada: PGlite devuelve las `date` como objetos Date, y
+      // `String(new Date(...))` da «Sun Jun 01» — comparado como texto contra «2025-12-08» daría
+      // cualquier cosa. Es la misma trampa que ya mordió en destete.
+      `SELECT a.id, a.status, a.birth_date::text AS birth_date, ai.value AS tag
        FROM animals a
        LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
        WHERE a.id = $1 AND a.tenant_id = $2 AND a.deleted_at IS NULL`,

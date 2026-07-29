@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
-import { InvalidAdmissionError, resolveAdmissionKind } from '@cowinance/domain';
+import { assertNotBeforeBirth, HealthApplicationError, InvalidAdmissionError, resolveAdmissionKind } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
 import { MovementService } from '../land/movement.service';
 
@@ -29,12 +29,16 @@ export class HospitalizationService {
         const existing = await q.one<any>(`SELECT id FROM health_admissions WHERE id = $1 AND tenant_id = $2`, [admissionId, this.db.tenant]);
         if (existing) return { ...(await this.detail(q, admissionId)), already_admitted: true };
 
-        const animal = await q.one<{ id: string; status: string; current_lot_id: string | null }>(
-          `SELECT id, status, current_lot_id FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+        const animal = await q.one<{ id: string; status: string; current_lot_id: string | null; birth_date: string | null }>(
+          // `birth_date::text`: PGlite devuelve las `date` como Date, y compararlas como texto daría «Sun Jun 01».
+          `SELECT id, status, current_lot_id, birth_date::text AS birth_date FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
           [body.animal_id, this.db.tenant],
         );
         if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
         if (animal.status !== 'active') throw new ConflictException({ code: 'admission.animal_inactive', title: 'El animal no está activo' });
+        // Misma regla que en tratamientos y vacunas: un hecho del animal no puede ser anterior a su
+        // nacimiento. Acá además arrastra: de la fecha de ingreso salen los días de internación.
+        assertNotBeforeBirth(body?.admitted_at ?? new Date().toISOString(), animal.birth_date, 'La fecha de ingreso');
 
         const lot = await q.one<{ id: string; purpose: string | null }>(
           `SELECT id, purpose FROM lots WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND is_active`,
@@ -80,6 +84,9 @@ export class HospitalizationService {
         if (e.code === 'admission.lot_not_admissible' || e.code === 'admission.kind_mismatch') throw new ConflictException({ code: e.code, title: e.reason });
         throw new BadRequestException({ code: e.code, title: e.reason });
       }
+      // La regla de «no antes de nacer» es del dominio sanitario y viaja con su propio error: es un
+      // dato mal cargado, así que 400.
+      if (e instanceof HealthApplicationError) throw new BadRequestException({ code: e.code, title: e.reason });
       throw e;
     }
   }
@@ -90,8 +97,8 @@ export class HospitalizationService {
    */
   async discharge(admissionId: string, body: any) {
     return this.db.tx(async (q) => {
-      const adm = await q.one<{ id: string; animal_id: string; kind: string; from_lot_id: string | null; status: string; case_id: string | null }>(
-        `SELECT id, animal_id, kind, from_lot_id, status, case_id FROM health_admissions WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      const adm = await q.one<{ id: string; animal_id: string; kind: string; from_lot_id: string | null; status: string; case_id: string | null; admitted_at: string }>(
+        `SELECT id, animal_id, kind, from_lot_id, status, case_id, admitted_at::text AS admitted_at FROM health_admissions WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
         [admissionId, this.db.tenant],
       );
       if (!adm) throw new NotFoundException({ code: 'admission.not_found', title: 'Internación no encontrada' });
@@ -103,6 +110,24 @@ export class HospitalizationService {
       if (!lot) throw new BadRequestException({ code: 'admission.dest_not_found', title: 'Lote destino no encontrado o archivado' });
 
       const dischargedAt = body?.discharged_at ?? new Date().toISOString();
+      /*
+       * El alta no puede ser anterior al ingreso.
+       *
+       * Se aceptaba: un animal internado el 20/7 dado de alta el 2020-01-01 quedaba con MENOS 2.392
+       * días de internación, y ese número entra en el promedio de días en el hospital. El módulo de
+       * pastoreo ya tiene esta misma guarda para la salida de un potrero —«exit_date no puede ser
+       * anterior a entry_date»—; acá faltaba.
+       *
+       * Se comparan los primeros diez caracteres, que son la fecha calendario: las dos son días, y
+       * en `YYYY-MM-DD` el orden alfabético es el cronológico. Convertirlas a `Date` las volvería
+       * medianoche UTC y las correría un día en América.
+       */
+      if (String(dischargedAt).slice(0, 10) < String(adm.admitted_at).slice(0, 10))
+        throw new BadRequestException({
+          code: 'admission.invalid_discharge',
+          title: `El alta (${String(dischargedAt).slice(0, 10)}) no puede ser anterior al ingreso (${String(adm.admitted_at).slice(0, 10)}).`,
+        });
+
       await this.movement.recordMovement(q, {
         animalIds: [adm.animal_id], to: { lot: destLot },
         reason: 'Alta sanitaria', actorUserId: this.db.user, origin: 'web', movementId: randomUUID(), emitServerOrigin: true,

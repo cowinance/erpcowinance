@@ -21,7 +21,13 @@ export class HealthService {
 
   /** Traduce los errores de dominio/lookup de los núcleos neutrales a HTTP. */
   private mapHealthError(e: unknown): never {
-    if (e instanceof HealthApplicationError) throw new ConflictException({ code: e.code, title: e.reason });
+    // `health.before_birth` es un dato MAL CARGADO —una fecha imposible— y no un conflicto con el
+    // estado del animal como «no está activo». 400 y no 409: lo que hay que corregir es lo que se
+    // escribió, no el mundo.
+    if (e instanceof HealthApplicationError)
+      throw e.code === 'health.before_birth'
+        ? new BadRequestException({ code: e.code, title: e.reason })
+        : new ConflictException({ code: e.code, title: e.reason });
     if (e instanceof HealthApplicationLookupError) {
       if (e.code === 'product.wrong_type') throw new BadRequestException({ code: e.code, title: e.reason });
       throw new NotFoundException({ code: e.code, title: e.reason });

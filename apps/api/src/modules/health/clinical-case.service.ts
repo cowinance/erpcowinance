@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import {
+  assertNotBeforeBirth,
+  HealthApplicationError,
   assertCaseOutcome,
   assertCaseSeverity,
   assertCaseStatus,
@@ -50,7 +52,15 @@ export class ClinicalCaseService {
       const existing = await q.one<any>(`SELECT id FROM clinical_cases WHERE id = $1 AND tenant_id = $2`, [caseId, this.db.tenant]);
       if (existing) return { ...(await this.header(q, caseId)), already_created: true };
 
-      await this.requireAnimal(q, body.animal_id);
+      const animal = await this.requireAnimal(q, body.animal_id);
+      // La otra mitad del par de la guarda de arriba: un caso clínico tampoco puede empezar antes de
+      // que el animal existiera.
+      try {
+        assertNotBeforeBirth(await this.db.farmDateOf(startedAt), animal.birth_date, 'La fecha de inicio del caso');
+      } catch (e) {
+        if (e instanceof HealthApplicationError) throw new BadRequestException({ code: e.code, title: e.reason });
+        throw e;
+      }
       if (body.diagnosis_id) await this.requireDiagnosis(q, body.diagnosis_id);
 
       await q.query(
@@ -223,7 +233,12 @@ export class ClinicalCaseService {
   }
 
   private async requireAnimal(q: Q, animalId: string) {
-    const a = await q.one<{ id: string }>(`SELECT id FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [animalId, this.db.tenant]);
+    // `birth_date::text`: PGlite devuelve las `date` como objetos Date, y compararlas como texto
+    // daría «Sun Jun 01» en vez de «2025-12-08».
+    const a = await q.one<{ id: string; birth_date: string | null }>(
+      `SELECT id, birth_date::text AS birth_date FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [animalId, this.db.tenant],
+    );
     if (!a) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
     return a;
   }

@@ -52,6 +52,16 @@ describe('TreatmentService · integración', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  /** Animal con fecha de nacimiento, para las guardas que la miran. */
+  async function animalNacido(birth: string): Promise<string> {
+    return (
+      await db.query<{ id: string }>(
+        `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, origin, birth_date) VALUES ($1,$2,$3,'F','active','born',$4) RETURNING id`,
+        [tenantId, farmId, speciesId, birth],
+      )
+    )[0].id;
+  }
+
   async function animal(status = 'active', tag?: string): Promise<string> {
     const id = (
       await db.query<{ id: string }>(
@@ -124,5 +134,41 @@ describe('TreatmentService · integración', () => {
     expect(res.withdrawalMismatch.some((m) => m.field === 'meat_withdrawal_until')).toBe(true);
     const rows = await trtRows(a);
     expect(rows[0].meat_withdrawal_until).toBe('2026-06-28'); // el servidor manda
+  });
+
+  it('UN TRATAMIENTO NO PUEDE SER ANTERIOR AL NACIMIENTO', async () => {
+    // Se aceptaba: Ivermectina fechada en 1990 sobre un animal nacido en 2025 entraba sin queja. El
+    // retiro derivado no hace daño —venció hace décadas— pero el hecho queda en el historial y en
+    // los reportes por período, y desde la pantalla no hay forma de explicarlo ni de encontrarlo.
+    const a = await animalNacido('2025-12-08');
+    await expect(
+      db.tx((q) => svc.recordTreatment(q, { animalId: a, productId, appliedAt: '1990-01-01', treatmentId: randomUUID(), actorUserId: userId, origin: 'rest' })),
+    ).rejects.toMatchObject({ code: 'health.before_birth' });
+  });
+
+  it('EL DÍA DEL NACIMIENTO SÍ, y sin corrimiento de zona', async () => {
+    // El borde que importa: a un ternero se lo trata el día que nace más seguido que cualquier otro
+    // día de su vida.
+    //
+    // Y es donde casi se cuela un bug: al conectar la regla se le pasaba el `Date` ya convertido en
+    // vez de la fecha que llegó, y una fecha pelada («2025-12-08») convertida a instante es
+    // medianoche UTC, que en América cae el día ANTERIOR. El mensaje decía «1989-12-31» y este caso
+    // se rechazaba. Es la misma advertencia que ya estaba escrita diez líneas más abajo, para el
+    // retiro.
+    const a = await animalNacido('2025-12-08');
+    const r: any = await db.tx((q) =>
+      svc.recordTreatment(q, { animalId: a, productId, appliedAt: '2025-12-08', treatmentId: randomUUID(), actorUserId: userId, origin: 'rest' }),
+    );
+    expect(r.recorded).toBe(true);
+  });
+
+  it('un animal SIN fecha de nacimiento no queda bloqueado', async () => {
+    // Comprar un animal sin ese dato es normal. Rechazar sus tratamientos por algo que nadie sabe
+    // sería peor que el problema que la guarda resuelve.
+    const a = await animal('active');
+    const r: any = await db.tx((q) =>
+      svc.recordTreatment(q, { animalId: a, productId, appliedAt: '1990-01-01', treatmentId: randomUUID(), actorUserId: userId, origin: 'rest' }),
+    );
+    expect(r.recorded).toBe(true);
   });
 });

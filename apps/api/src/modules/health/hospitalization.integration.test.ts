@@ -130,4 +130,28 @@ describe('HospitalizationService · integración', () => {
     const ev = await db.query<any>(`SELECT note FROM clinical_case_events WHERE case_id=$1 AND kind='note'`, [caseId]);
     expect(ev.some((e: any) => /hospital/i.test(e.note))).toBe(true);
   });
+
+  it('EL ALTA NO PUEDE SER ANTERIOR AL INGRESO', async () => {
+    // Se aceptaba: internado el 20/7 y dado de alta el 2020-01-01 daba MENOS 2.392 días de
+    // internación, y ese número entra en el promedio de días en el hospital. El módulo de pastoreo
+    // ya tenía esta misma guarda para la salida de un potrero; acá faltaba.
+    const a = await animal(baseLot, uniq('ALT'));
+    const adm: any = await svc.admit({ animal_id: a, lot_id: hospitalLot, admitted_at: '2026-07-20' });
+    await expect(svc.discharge(adm.id, { discharged_at: '2020-01-01', discharge_lot_id: baseLot })).rejects.toMatchObject({
+      response: { code: 'admission.invalid_discharge' },
+    });
+    // Y el alta del MISMO día sí: una internación de unas horas es lo más común de todo.
+    const ok: any = await svc.discharge(adm.id, { discharged_at: '2026-07-20', discharge_lot_id: baseLot });
+    expect(ok.status).toBe('discharged');
+  });
+
+  it('un ingreso tampoco puede ser anterior al nacimiento del animal', async () => {
+    const a = (await db.query<{ id: string }>(
+      `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, origin, birth_date, current_lot_id) VALUES ($1,$2,$3,'F','active','born','2025-12-08',$4) RETURNING id`,
+      [tenantId, farmId, speciesId, baseLot],
+    ))[0].id;
+    await expect(svc.admit({ animal_id: a, lot_id: hospitalLot, admitted_at: '1990-01-01' })).rejects.toMatchObject({
+      response: { code: 'health.before_birth' },
+    });
+  });
 });

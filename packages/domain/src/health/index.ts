@@ -1,6 +1,6 @@
 export { computeWithdrawal } from './withdrawal';
 export type { WithdrawalResult } from './withdrawal';
-export { TREATABLE_STATUS, HealthApplicationError, isTreatableStatus, assertTreatable } from './application';
+export { TREATABLE_STATUS, HealthApplicationError, isTreatableStatus, assertTreatable, assertNotBeforeBirth } from './application';
 export {
   CLINICAL_CASE_STATUSES,
   OPEN_CASE_STATUSES,
