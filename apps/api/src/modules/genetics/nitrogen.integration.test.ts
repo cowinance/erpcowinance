@@ -1,3 +1,4 @@
+import { addFarmDays } from '@cowinance/domain';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -25,7 +26,14 @@ describe('nitrógeno — consumo derivado y recarga contra inventario', () => {
   let item: string;
   let deposito: string;
 
-  const dia = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  // Días RELATIVOS AL DÍA DE LA FINCA, no al de Greenwich.
+  //
+  // `new Date().toISOString()` da la fecha UTC: a partir de las 21:00 en Buenos Aires ya es mañana
+  // allá, así que `dia(0)` era una fecha futura para la finca y la guarda de inventario —que sí
+  // compara contra el día de la finca— rechazaba la recarga. El test fallaba tres horas por noche y
+  // pasaba el resto del día, que es la peor forma de fallar: parece un test flojo y es el reloj.
+  let hoyFinca: string;
+  const dia = (n: number) => addFarmDays(hoyFinca, n);
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -38,6 +46,7 @@ describe('nitrógeno — consumo derivado y recarga contra inventario', () => {
     cryo = new CryoStorageService(db);
     inv = new InventoryService(db);
     nitro = new NitrogenService(db, inv);
+    hoyFinca = await db.today();
     termo = await cryo.createTank({ code: '207' });
 
     // Nitrógeno líquido como insumo de inventario. La base demo no trae depósitos ni artículos, así

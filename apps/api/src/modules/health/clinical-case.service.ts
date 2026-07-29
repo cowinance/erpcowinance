@@ -40,7 +40,7 @@ export class ClinicalCaseService {
 
     // Un caso clínico empieza cuando se ve el problema, no antes de que pase.
     const hoy = await this.db.today();
-    if (String(startedAt).slice(0, 10) > hoy)
+    if ((await this.db.farmDateOf(startedAt)) > hoy)
       throw new BadRequestException({
         code: 'clinical_case.future_date',
         title: 'La fecha de inicio del caso es futura. Se registra lo que ya ocurrió.',

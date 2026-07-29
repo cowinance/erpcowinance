@@ -103,7 +103,7 @@ export class MortalityService {
     // Una muerte es un hecho, no un pronóstico. Un tipeo con fecha futura descoloca la mortalidad
     // del período y las anomalías que se calculan sobre ella.
     const hoy = await this.db.today(q);
-    if (String(diedAt).slice(0, 10) > hoy)
+    if ((await this.db.farmDateOf(diedAt, q)) > hoy)
       throw new BadRequestException({
         code: 'mortality.future_date',
         title: 'La fecha de muerte es futura. Se registra lo que ya ocurrió.',

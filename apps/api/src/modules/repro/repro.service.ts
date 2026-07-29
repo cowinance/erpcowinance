@@ -144,7 +144,7 @@ export class ReproService {
    */
   private async rechazarFuturo(fecha: string, que: string): Promise<void> {
     const hoy = await this.db.today();
-    if (String(fecha).slice(0, 10) > hoy)
+    if ((await this.db.farmDateOf(fecha)) > hoy)
       throw new BadRequestException({
         code: 'repro.future_date',
         title: `La fecha ${que} (${String(fecha).slice(0, 10)}) es futura. Se registra lo que ya ocurrió.`,

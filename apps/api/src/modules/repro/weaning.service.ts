@@ -88,7 +88,12 @@ export class WeaningService {
     );
     if (!animal) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
 
-    const weaningDate = (input.weaningDate ? String(input.weaningDate).slice(0, 10) : await this.db.today(q));
+    // `farmDateOf` y no `String(...).slice(0, 10)`: el destete llega del móvil como INSTANTE, y
+    // recortar su ISO da la fecha UTC. Un destete cargado a las 21:00 en Buenos Aires se guardaba con
+    // fecha de mañana — y encima la guarda de «no en el futuro» de más abajo lo rechazaba, porque
+    // ella sí comparaba contra el día de la finca. Acá se decide la fecha que QUEDA GUARDADA, así
+    // que el error no era solo un rechazo molesto: era edad al destete y peso al destete corridos.
+    const weaningDate = (input.weaningDate ? await this.db.farmDateOf(String(input.weaningDate), q) : await this.db.today(q));
     const weightKg = input.weightKg ?? null;
 
     // UN SOLO DESTETE POR ANIMAL. Se desteta una vez en la vida.

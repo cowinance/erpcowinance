@@ -198,7 +198,7 @@ export class InventoryService {
     // Un movimiento es un hecho. Con fecha futura entra al saldo de hoy pero se reporta en un
     // período que no llegó: el kardex deja de cuadrar con lo que hay en el galpón.
     const hoy = await this.db.today(q);
-    if (String(occurredAt).slice(0, 10) > hoy)
+    if ((await this.db.farmDateOf(occurredAt, q)) > hoy)
       throw new BadRequestException({
         code: 'inventory.future_date',
         title: 'La fecha del movimiento es futura. Se registra lo que ya ocurrió.',

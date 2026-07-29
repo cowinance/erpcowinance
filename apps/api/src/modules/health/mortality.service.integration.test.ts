@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { addFarmDays, toFarmDate } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
@@ -141,6 +142,57 @@ describe('MortalityService · integración', () => {
     // Sin persistencia parcial: sigue habiendo una sola mortalidad y ningún changeset de la 2da.
     expect(await mortRows(a)).toHaveLength(1);
     expect(await changesets(mid2)).toHaveLength(0);
+  });
+
+  it('UNA MUERTE DE LAS 22:00 NO ES «FUTURA»: la guarda mira el día de la finca de los DOS lados', async () => {
+    // El bug: `today()` ya devolvía el día de la finca, pero al valor entrante se le cortaban los
+    // diez primeros caracteres de su ISO — que es UTC. Media comparación.
+    //
+    // En Buenos Aires (UTC−3) un instante de las 22:00 tiene fecha UTC del día siguiente, así que el
+    // sistema contestaba «la fecha de muerte es futura» sobre un animal que el productor acababa de
+    // encontrar muerto. Tres horas por noche, todas las noches, y justo en el horario en que se
+    // recorre y se encierra. Lo mismo pasaba en mortalidad, casos clínicos, tratamientos, eventos de
+    // reproducción, movimientos de inventario y destete.
+    //
+    // El instante se CONSTRUYE, no se toma del reloj: si se usara `new Date()` el test pasaría 21
+    // horas por día sin probar nada y fallaría las otras 3 — que fue exactamente cómo se descubrió.
+    const hoy = await db.today();
+    const tz = await db.timeZone();
+    const laNoche = new Date(`${addFarmDays(hoy, 1)}T01:00:00Z`);
+
+    // Precondición del escenario, explícita: ese instante YA es mañana en Greenwich y TODAVÍA es hoy
+    // en la finca. Si algún día el demo se sembrara con una zona al este de Greenwich, esto avisa en
+    // vez de dejar el test verde sin probar el caso.
+    expect(laNoche.toISOString().slice(0, 10)).toBe(addFarmDays(hoy, 1));
+    expect(toFarmDate(laNoche, tz)).toBe(hoy);
+
+    const a = await animal('muerte-nocturna');
+    const r: any = await db.tx((q) =>
+      mortality.recordMortality(q, { animalId: a, actorUserId: userId, origin: 'rest', mortalityId: randomUUID(), diedAt: laNoche.toISOString(), emitServerOrigin: true }),
+    );
+    expect(r.recorded).toBe(true);
+
+    // Y queda fechada en el día de la finca, no en el de Greenwich: si se guardara «mañana», la
+    // mortalidad del mes se correría de período.
+    // `died_at` es un INSTANTE (`timestamptz`), así que lo que se guarda es el momento exacto y está
+    // bien que sea 01:00 UTC. Lo que importa es a qué DÍA cae, y eso se pregunta como lo pregunta
+    // cualquier reporte: casteando a `date`, que usa la zona de la sesión — y `db.tx` la fija en la
+    // de la finca. Si el día se corriera, la mortalidad del mes se contaría en el período siguiente.
+    const [fila] = await db.query<{ d: string }>(
+      `SELECT died_at::date::text AS d FROM mortalities WHERE tenant_id = $1 AND animal_id = $2`,
+      [db.tenant, a],
+    );
+    expect(fila.d).toBe(hoy);
+  });
+
+  it('una fecha REALMENTE futura sigue rechazándose', async () => {
+    // La otra mitad: arreglar el falso rechazo no puede haber apagado la guarda. Mañana en la finca
+    // es futuro en cualquier zona.
+    const manana = addFarmDays(await db.today(), 1);
+    const a = await animal('muerte-manana');
+    await expect(
+      db.tx((q) => mortality.recordMortality(q, { animalId: a, actorUserId: userId, origin: 'rest', mortalityId: randomUUID(), diedAt: manana, emitServerOrigin: true })),
+    ).rejects.toMatchObject({ response: { code: 'mortality.future_date' } });
   });
 
   it('animal inexistente → rechazo animal.not_found', async () => {

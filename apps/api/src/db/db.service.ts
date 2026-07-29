@@ -4,7 +4,7 @@ import { PGliteDriver, PostgresDriver, type SqlDriver, type TxHandle } from './d
 import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { bootstrapCatalogs, seedDemo } from './seed';
-import { farmToday, safeTimeZone } from '@cowinance/domain';
+import { asFarmDate, farmToday, safeTimeZone } from '@cowinance/domain';
 import { requestContext } from '../common/request-context';
 import { RLS_TABLES, platformMigration, rlsMigration } from './rls';
 import { ROLE_PRIVILEGES_SQL, assessRolePrivileges, type RolePrivileges } from './role-privileges';
@@ -393,6 +393,24 @@ export class DbService implements OnModuleInit {
    */
   async today(q?: Q): Promise<string> {
     return farmToday(await this.timeZone(q));
+  }
+
+  /**
+   * La fecha de finca de un valor que puede ser un INSTANTE o una FECHA calendario.
+   *
+   * Es la otra mitad de `today()`, y faltaba. Las cinco guardas de «esto no puede ser futuro»
+   * comparaban contra `today()` —que ya era la fecha de la finca— pero al valor entrante le cortaban
+   * los diez primeros caracteres de su ISO, que es UTC. Media comparación en cada zona: a las 21:00
+   * en Buenos Aires un hecho de AHORA tiene fecha UTC de mañana, así que el sistema rechazaba con
+   * «la fecha es futura» lo que el productor acababa de ver. Tres horas por día, todas las noches, y
+   * justo en el horario en que se encierra el rodeo.
+   *
+   * `asFarmDate` distingue lo que hay que distinguir: una fecha calendario no tiene zona y vuelve
+   * intacta; un instante sí la tiene y se convierte. Convertir una fecha calendario la correría un
+   * día para atrás, que es el error simétrico.
+   */
+  async farmDateOf(value: string | Date, q?: Q): Promise<string> {
+    return asFarmDate(value, await this.timeZone(q));
   }
 
   /**

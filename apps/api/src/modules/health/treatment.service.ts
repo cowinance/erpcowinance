@@ -110,7 +110,7 @@ export class TreatmentService {
     // la fecha de aplicación es la que arranca el retiro: un 2030 deja al animal retirado cuatro
     // años.
     const hoy = await this.db.today(q);
-    if (appliedAt.toISOString().slice(0, 10) > hoy)
+    if ((await this.db.farmDateOf(appliedAt, q)) > hoy)
       throw new BadRequestException({
         code: 'treatment.future_date',
         title: `La fecha de aplicación es futura. Un tratamiento se registra cuando se aplicó.`,
