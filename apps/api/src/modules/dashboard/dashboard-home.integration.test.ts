@@ -28,6 +28,8 @@ describe('DashboardHomeService · home agregado (E1)', () => {
   let db: DbService;
   let home: DashboardHomeService;
   let tasks: TaskService;
+  let alerts: AlertsService;
+  let health: HealthService;
   let userId: string;
   let farmId: string;
   let originalCwd: string;
@@ -43,8 +45,8 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     await db.onModuleInit();
     tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db));
-    const alerts = new AlertsService(db, repro as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
-    const health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
+    alerts = new AlertsService(db, repro as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
+    health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
     home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
@@ -246,6 +248,113 @@ describe('DashboardHomeService · home agregado (E1)', () => {
       const h: any = await home.home();
       const fechas = h.agenda.map((a: any) => a.due_at ?? '9999-12-31');
       expect(fechas).toEqual([...fechas].sort());
+    }, 60_000);
+
+    it('UNA PIEZA ROTA NO TUMBA LA PANTALLA: se degrada de a una', async () => {
+      // Con `Promise.all`, una sola de las nueve fuentes rechazando volvía 500 el endpoint entero, y
+      // la web mostraba «La API no está disponible — iniciá el backend con npm run api»: un mensaje
+      // para programadores, con el sistema andando y ocho piezas listas.
+      const original = health.kpis.bind(health);
+      (health as any).kpis = async () => {
+        throw new Error('falla simulada del módulo sanidad');
+      };
+      try {
+        const h: any = await home.home();
+        expect(h.degraded).toEqual(['sanidad']);
+        // El resto SIGUE: el hato, las tareas y la agenda no dependen de sanidad.
+        expect(h.kpis.active_animals).toBeGreaterThan(0);
+        expect(h.agenda.length).toBeGreaterThan(0);
+      } finally {
+        (health as any).kpis = original;
+      }
+    }, 60_000);
+
+    it('lo que no se pudo leer va en NULL, nunca en cero — y el semáforo no dice «al día»', async () => {
+      // Es la parte que de verdad importa. Un cero es una AFIRMACIÓN: «no hay vacunas vencidas», «no
+      // hay casos abiertos». Afirmarla porque la consulta falló es peor que no mostrar nada, porque
+      // el productor cierra la pantalla tranquilo. Lo mismo el estado general en verde.
+      const original = health.kpis.bind(health);
+      (health as any).kpis = async () => {
+        throw new Error('falla simulada del módulo sanidad');
+      };
+      try {
+        const h: any = await home.home();
+        for (const kpi of ['vaccines_overdue', 'vaccines_due_45d', 'in_treatment', 'clinical_cases_open'])
+          expect(h.kpis[kpi], `${kpi} debería ser null y no un número inventado`).toBeNull();
+        expect(h.farm_status.health).toBe('unknown');
+        // Y no se cuela en la atención prioritaria: de lo que no cargó no se sabe si hay.
+        expect(h.priority.map((p: any) => p.code)).not.toContain('vaccines_overdue');
+      } finally {
+        (health as any).kpis = original;
+      }
+    }, 60_000);
+
+    it('EL MOTOR DE ALERTAS CORRE UNA VEZ POR CARGA, no una por consulta', async () => {
+      // El encabezado (badge de notificaciones) y el Inicio evaluaban las reglas por separado: dos
+      // corridas completas de `computeDesired` —lo caro, O(vientres)— en cada carga del Inicio, y
+      // una más en CADA otra pantalla, porque el encabezado vive en el layout. Medido: 40-60 ms por
+      // corrida con 65 animales, y crece con el hato.
+      const hoy = await db.today();
+      const espia = alerts as any;
+      const real = espia.computeDesiredFresh.bind(espia);
+      let corridas = 0;
+      espia.computeDesiredFresh = async () => {
+        corridas++;
+        return real();
+      };
+      try {
+        // Se arranca desde una ESCRITURA para no medir sobre una caché que dejó tibia otro test: así
+        // el primer `home()` es un fallo garantizado y lo que se cuenta es lo que pasa después.
+        await db.tx((q) => tasks.createTask(q, { title: 'punto de partida', dueDate: hoy, farmId }, ctx()));
+
+        await home.home();
+        await alerts.kpis(); // lo que hace el badge del encabezado, en TODA pantalla
+        await home.home();
+        expect(corridas, 'tres consultas seguidas tienen que compartir UN cómputo').toBe(1);
+      } finally {
+        espia.computeDesiredFresh = real;
+      }
+    }, 60_000);
+
+    it('PERO UNA ESCRITURA LA INVALIDA EN EL ACTO: no se espera al vencimiento', async () => {
+      // Es lo que vuelve aceptable a la caché. Sin esto, completar una tarea y recargar mostraría la
+      // alerta que el productor acaba de resolver — justo el momento en que mira. La invalidación no
+      // es por tiempo: `db.writeGeneration()` sube cuando una transacción escribe, y quien dice si
+      // escribió es PostgreSQL (`pg_current_xact_id_if_assigned`), no una heurística por método HTTP
+      // — que habría fallado, porque en este sistema varios GET escriben.
+      const hoy = await db.today();
+      const espia = alerts as any;
+      const real = espia.computeDesiredFresh.bind(espia);
+      let corridas = 0;
+      espia.computeDesiredFresh = async () => {
+        corridas++;
+        return real();
+      };
+      try {
+        await db.tx((q) => tasks.createTask(q, { title: 'punto de partida 2', dueDate: hoy, farmId }, ctx()));
+
+        await home.home();
+        expect(corridas).toBe(1);
+        await home.home();
+        expect(corridas, 'sin escrituras en el medio, se reusa').toBe(1);
+
+        await db.tx((q) => tasks.createTask(q, { title: 'tarea que invalida', dueDate: hoy, farmId }, ctx()));
+        const h: any = await home.home();
+        expect(corridas, 'después de escribir TIENE que recalcular').toBe(2);
+        expect(h.agenda.some((a: any) => a.title === 'tarea que invalida')).toBe(true);
+      } finally {
+        espia.computeDesiredFresh = real;
+      }
+    }, 60_000);
+
+    it('NO reescribe las alertas que no cambiaron', async () => {
+      // El motor hacía `UPDATE alerts SET … updated_at = now()` sobre TODA alerta abierta en cada
+      // evaluación: 65 escrituras por carga en el demo para dejar las filas como estaban. Y como una
+      // transacción que escribe recibe xid, el motor invalidaba con sus PROPIAS salidas la caché que
+      // acababa de llenar — la caché no acertaba nunca.
+      await alerts.evaluate();
+      const r: any = await alerts.evaluate();
+      expect(r.updated, 'la segunda evaluación seguida no tiene nada que actualizar').toBe(0);
     }, 60_000);
 
     it('NO consulta la vista de GDP: es lo que lo volvía cuadrático', async () => {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { DashboardService } from './dashboard.service';
 import { TaskService } from '../tasks/task.service';
@@ -23,6 +23,8 @@ import { farmSetupProgress } from '@cowinance/domain';
  */
 @Injectable()
 export class DashboardHomeService {
+  private readonly log = new Logger(DashboardHomeService.name);
+
   constructor(
     private readonly db: DbService,
     private readonly dashboard: DashboardService,
@@ -33,9 +35,28 @@ export class DashboardHomeService {
   ) {}
 
   async home() {
+    /*
+     * El Inicio COMPONE nueve fuentes, y hasta acá las juntaba con `Promise.all`: si UNA fallaba, la
+     * promesa entera se rechazaba, el endpoint devolvía 500 y la web mostraba «La API no está
+     * disponible — iniciá el backend con npm run api». Un mensaje para programadores, con el sistema
+     * andando y ocho de las nueve piezas listas. Medido: rompiendo solo `health.kpis()`, el productor
+     * perdía el hato, las tareas, la agenda, la actividad y los primeros pasos.
+     *
+     * Ahora se degrada POR PIEZA. Y la regla de qué mostrar cuando una pieza falta es lo que
+     * importa: **el número se va en `null`, nunca en cero**. Un cero es una afirmación —«no hay
+     * vacunas vencidas», «no hay alertas críticas»— y afirmarla sin saberlo es peor que no mostrar
+     * nada: la pantalla diría «todo al día» justo cuando dejó de mirar. Lo mismo con el estado
+     * general, que pasa a `unknown` en vez de a `ok`.
+     *
+     * `degraded` viaja al cliente para que la pantalla lo pueda DECIR. Una pieza que falla en
+     * silencio es indistinguible de una finca sin novedades.
+     */
+    const degraded: string[] = [];
+    const piezas = ['hato', 'tareas', 'alertas', 'sanidad', 'reproduccion', 'agenda_tareas', 'pesajes', 'actividad', 'primeros_pasos'];
+
     // `alerts.agendaAndKpis()` comparte el computeDesired (lo caro: herdStatus O(vientres)) entre
     // la agenda y los KPIs. Antes se llamaba agenda() + kpis() por separado → se computaba DOS veces.
-    const [base, taskK, alertsBundle, healthK, reproK, openTasks, noWeigh, recent, setup]: any[] = await Promise.all([
+    const acuerdos = await Promise.allSettled([
       this.dashboard.kpis(),
       this.tasks.kpis(),
       this.alerts.agendaAndKpis(),
@@ -46,65 +67,93 @@ export class DashboardHomeService {
       this.recentActivity(),
       this.farmSetup(),
     ]);
-    const { agenda, kpis: alertK } = alertsBundle as { agenda: any[]; kpis: any };
 
-    // Señales repro-derivadas contadas desde la agenda (evita recomputar herdStatus).
-    const agendaBy = (code: string) => agenda.filter((a: any) => a.code === code).length;
-    const readyForService = agendaBy('vwp_ready') + agendaBy('service_prep_due');
+    const [base, taskK, alertsBundle, healthK, reproK, openTasks, noWeigh, recent, setup]: any[] = acuerdos.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value;
+      degraded.push(piezas[i]);
+      // La falla NO se traga: si no queda registrada, un módulo roto se vuelve invisible y el Inicio
+      // muestra huecos que nadie sabe explicar.
+      this.log.error(`Inicio degradado: la pieza «${piezas[i]}» falló`, (r.reason as any)?.stack ?? String(r.reason));
+      return null;
+    });
+
+    const { agenda, kpis: alertK } = (alertsBundle ?? { agenda: null, kpis: null }) as { agenda: any[] | null; kpis: any };
+
+    // Señales repro-derivadas contadas desde la agenda (evita recomputar herdStatus). Sin agenda no
+    // se cuentan en cero: se dejan en `null`, que es lo que de verdad se sabe.
+    const agendaBy = (code: string) => (agenda ? agenda.filter((a: any) => a.code === code).length : null);
+    const vwp = agendaBy('vwp_ready');
+    const prep = agendaBy('service_prep_due');
+    const readyForService = vwp == null || prep == null ? null : vwp + prep;
     const diagnosisPending = agendaBy('diagnosis_due');
-    const calvingsSoon = reproK.calvings_due_30d ?? agendaBy('calving_soon');
-    const withdrawals = (base.alerts?.active_withdrawals ?? []).length;
+    const calvingsSoon = reproK?.calvings_due_30d ?? agendaBy('calving_soon');
+    const withdrawals = base ? (base.alerts?.active_withdrawals ?? []).length : null;
 
+    // Cada KPI se lee de SU fuente con `?.`: si esa fuente no cargó queda en `null`, y la tarjeta
+    // muestra «—» en vez de un cero que el productor leería como un hecho.
     const kpis = {
-      active_animals: base.active_animals,
-      total_animals: base.total_animals,
-      new_this_month: base.new_this_month,
-      avg_adg_kg_day: base.avg_adg_kg_day,
-      pregnancy_rate_pct: base.pregnancy?.rate ?? null,
-      open_pregnancies: base.pregnancy?.open ?? 0,
-      breeding_females: base.pregnancy?.breeding_females ?? 0,
-      overdue_tasks: taskK.overdue,
-      urgent_tasks: taskK.critical_overdue,
-      done_today: taskK.done_today,
-      compliance_pct: taskK.compliance_pct,
-      open_tasks: taskK.open,
-      critical_alerts: alertK.critical,
-      open_alerts: alertK.open,
+      active_animals: base?.active_animals ?? null,
+      total_animals: base?.total_animals ?? null,
+      new_this_month: base?.new_this_month ?? null,
+      avg_adg_kg_day: base?.avg_adg_kg_day ?? null,
+      pregnancy_rate_pct: base?.pregnancy?.rate ?? null,
+      open_pregnancies: base?.pregnancy?.open ?? null,
+      breeding_females: base?.pregnancy?.breeding_females ?? null,
+      overdue_tasks: taskK?.overdue ?? null,
+      urgent_tasks: taskK?.critical_overdue ?? null,
+      done_today: taskK?.done_today ?? null,
+      compliance_pct: taskK?.compliance_pct ?? null,
+      open_tasks: taskK?.open ?? null,
+      critical_alerts: alertK?.critical ?? null,
+      open_alerts: alertK?.open ?? null,
       active_withdrawals: withdrawals,
-      vaccines_overdue: healthK.vaccinations_overdue,
-      vaccines_due_45d: healthK.vaccinations_due_45d,
-      in_treatment: healthK.animals_in_treatment_30d,
-      clinical_cases_open: healthK.clinical_cases_open,
+      vaccines_overdue: healthK?.vaccinations_overdue ?? null,
+      vaccines_due_45d: healthK?.vaccinations_due_45d ?? null,
+      in_treatment: healthK?.animals_in_treatment_30d ?? null,
+      clinical_cases_open: healthK?.clinical_cases_open ?? null,
       ready_for_service: readyForService,
       diagnosis_pending: diagnosisPending,
       calvings_soon: calvingsSoon,
-      no_recent_weighing: noWeigh,
+      no_recent_weighing: noWeigh ?? null,
     };
 
     // ── Atención prioritaria: solo lo que tiene volumen, ordenado por severidad y cantidad ──
     const P = [
-      { code: 'tasks_overdue', label: 'Tareas vencidas', count: taskK.overdue, severity: 'critical', href: '/tareas?bucket=overdue' },
-      { code: 'critical_alerts', label: 'Alertas críticas', count: alertK.critical, severity: 'critical', href: '/alertas' },
-      { code: 'tasks_urgent', label: 'Tareas urgentes', count: taskK.critical_overdue, severity: 'warning', href: '/tareas' },
+      { code: 'tasks_overdue', label: 'Tareas vencidas', count: taskK?.overdue, severity: 'critical', href: '/tareas?bucket=overdue' },
+      { code: 'critical_alerts', label: 'Alertas críticas', count: alertK?.critical, severity: 'critical', href: '/alertas' },
+      { code: 'tasks_urgent', label: 'Tareas urgentes', count: taskK?.critical_overdue, severity: 'warning', href: '/tareas' },
       { code: 'active_withdrawals', label: 'Retiros activos', count: withdrawals, severity: 'warning', href: '/sanidad' },
-      { code: 'vaccines_overdue', label: 'Vacunas vencidas', count: healthK.vaccinations_overdue, severity: 'warning', href: '/sanidad' },
-      { code: 'clinical_cases', label: 'Casos clínicos abiertos', count: healthK.clinical_cases_open, severity: 'warning', href: '/sanidad' },
-      { code: 'in_treatment', label: 'Animales en tratamiento', count: healthK.animals_in_treatment_30d, severity: 'info', href: '/sanidad' },
+      { code: 'vaccines_overdue', label: 'Vacunas vencidas', count: healthK?.vaccinations_overdue, severity: 'warning', href: '/sanidad' },
+      { code: 'clinical_cases', label: 'Casos clínicos abiertos', count: healthK?.clinical_cases_open, severity: 'warning', href: '/sanidad' },
+      { code: 'in_treatment', label: 'Animales en tratamiento', count: healthK?.animals_in_treatment_30d, severity: 'info', href: '/sanidad' },
       { code: 'diagnosis_pending', label: 'Diagnósticos pendientes', count: diagnosisPending, severity: 'warning', href: '/reproduccion' },
       { code: 'ready_for_service', label: 'Listas para servicio', count: readyForService, severity: 'info', href: '/reproduccion' },
       { code: 'calvings_soon', label: 'Partos próximos (30 d)', count: calvingsSoon, severity: 'info', href: '/reproduccion' },
-      { code: 'vaccines_due', label: 'Vacunas próximas (45 d)', count: healthK.vaccinations_due_45d, severity: 'info', href: '/sanidad' },
+      { code: 'vaccines_due', label: 'Vacunas próximas (45 d)', count: healthK?.vaccinations_due_45d, severity: 'info', href: '/sanidad' },
       { code: 'no_recent_weighing', label: 'Sin pesaje reciente', count: noWeigh, severity: 'info', href: '/animales?no_recent_weighing=90' },
     ];
     const SEV_RANK: Record<string, number> = { critical: 0, warning: 1, info: 2 };
-    const priority = P.filter((p) => p.count > 0).sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || b.count - a.count);
+    // `count > 0` sobre `null` da `false`, así que una pieza caída no aporta filas — que es lo
+    // correcto: la atención prioritaria ordena lo que HAY, y de lo que no cargó no se sabe si hay.
+    const priority = P.filter((p) => p.count != null && p.count > 0).sort(
+      (a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || (b.count as number) - (a.count as number),
+    );
 
     // ── Estado general de la finca ──
+    //
+    // `unknown` y no `ok`: el semáforo en verde es una afirmación sobre la finca. Si la fuente no
+    // cargó, decir «al día» es exactamente la mentira que más caro sale — el productor cierra la
+    // pantalla tranquilo. Cada renglón pregunta primero si SABE.
     const farm_status = {
-      operation: alertK.critical > 0 ? 'critical' : taskK.overdue > 0 ? 'late' : 'ok',
-      health: withdrawals > 0 || healthK.clinical_cases_open > 0 || healthK.vaccinations_overdue > 0 ? 'attention' : 'stable',
-      reproduction: diagnosisPending > 0 || readyForService > 0 ? 'action' : 'stable',
-      tasks: taskK.overdue > 0 ? 'overdue' : 'ok',
+      operation: alertK == null || taskK == null ? 'unknown' : alertK.critical > 0 ? 'critical' : taskK.overdue > 0 ? 'late' : 'ok',
+      health:
+        healthK == null || withdrawals == null
+          ? 'unknown'
+          : withdrawals > 0 || healthK.clinical_cases_open > 0 || healthK.vaccinations_overdue > 0
+            ? 'attention'
+            : 'stable',
+      reproduction: diagnosisPending == null || readyForService == null ? 'unknown' : diagnosisPending > 0 || readyForService > 0 ? 'action' : 'stable',
+      tasks: taskK == null ? 'unknown' : taskK.overdue > 0 ? 'overdue' : 'ok',
     };
 
     // ── Agenda combinada: health/repro (alerts.agenda, ya ordenada) + tareas vencidas/hoy ──
@@ -116,9 +165,9 @@ export class DashboardHomeService {
     // sanidad vencida aparecía DOS VECES en «Atención hoy». Se conserva la del motor (trae el
     // mensaje sanitario) y solo se agregan las tareas que no estén ya representadas.
     const alreadyInAgenda = new Set(
-      (agenda as any[]).filter((a) => a.related_type === 'task' && a.related_id).map((a) => a.related_id),
+      (agenda ?? []).filter((a: any) => a.related_type === 'task' && a.related_id).map((a: any) => a.related_id),
     );
-    const taskAgenda = (openTasks as any[])
+    const taskAgenda = ((openTasks as any[]) ?? [])
       .filter((t) => (t.bucket === 'overdue' || t.bucket === 'today') && !alreadyInAgenda.has(t.id))
       .map((t) => ({
         code: 'task',
@@ -133,7 +182,7 @@ export class DashboardHomeService {
         action: 'complete_task',
       }));
     const SEV_A: Record<string, number> = { critical: 0, warning: 1, info: 2 };
-    const combinedAgenda = [...(agenda as any[]), ...taskAgenda].sort((a, b) => {
+    const combinedAgenda = [...(agenda ?? []), ...taskAgenda].sort((a: any, b: any) => {
       const ad = a.due_at ?? '9999-12-31';
       const bd = b.due_at ?? '9999-12-31';
       if (ad !== bd) return ad < bd ? -1 : 1;
@@ -170,14 +219,22 @@ export class DashboardHomeService {
       agenda_total: combinedAgenda.length,
       /** De los que no entran, cuántos son tareas — para mandar a cada uno a su pantalla. */
       agenda_overflow_tasks: combinedAgenda.slice(AGENDA_VISIBLE).filter((a) => a.related_type === 'task').length,
-      recent_activity: recent,
-      by_category: base.by_category,
-      weight_series: base.weight_series,
+      recent_activity: recent ?? [],
+      by_category: base?.by_category ?? [],
+      weight_series: base?.weight_series ?? [],
       counts: {
-        tasks_by_module: taskK.by_module,
-        tasks_by_assignee: taskK.by_assignee,
-        alerts: { open: alertK.open, critical: alertK.critical, warning: alertK.warning },
+        tasks_by_module: taskK?.by_module ?? null,
+        tasks_by_assignee: taskK?.by_assignee ?? null,
+        alerts: alertK ? { open: alertK.open, critical: alertK.critical, warning: alertK.warning } : null,
       },
+      /**
+       * Qué piezas del Inicio no se pudieron cargar. Vacío en el caso normal.
+       *
+       * Viaja al cliente para que la pantalla lo DIGA. Sin esto, una sección caída se ve igual que
+       * una finca sin novedades, y el productor no tiene forma de distinguir «no hay nada» de «no
+       * se pudo mirar» — que es justo la diferencia que importa en sanidad.
+       */
+      degraded,
     };
   }
 

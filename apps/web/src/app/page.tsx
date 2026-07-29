@@ -49,7 +49,11 @@ const SEV = {
   info: { border: 'border-l-info', text: 'text-info', chip: 'bg-info/10 text-info' },
 } as const;
 
-const STATUS: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' }> = {
+const STATUS: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'muted' }> = {
+  // `unknown` es lo que el backend manda cuando la fuente de ese renglón no cargó. NO es verde: un
+  // semáforo en verde afirma algo sobre la finca, y afirmarlo sin haber podido mirar es la mentira
+  // que más caro sale — el productor cierra la pantalla tranquilo.
+  unknown: { label: 'Sin datos', tone: 'muted' },
   ok: { label: 'Al día', tone: 'success' },
   late: { label: 'Con atrasos', tone: 'warning' },
   critical: { label: 'Crítica', tone: 'danger' },
@@ -58,7 +62,27 @@ const STATUS: Record<string, { label: string; tone: 'success' | 'warning' | 'dan
   action: { label: 'Requiere acción', tone: 'warning' },
   overdue: { label: 'Vencidas', tone: 'warning' },
 };
+/**
+ * Nombre en castellano de cada pieza que el Inicio compone, para poder DECIR cuál falló.
+ *
+ * El backend degrada por pieza y manda `degraded`. Sin este cartel el productor vería una sección
+ * en blanco o un «Sin datos» suelto y no tendría cómo distinguir «no hay nada» de «no se pudo
+ * mirar» — que en sanidad es justo la diferencia que importa.
+ */
+const PIEZA: Record<string, string> = {
+  hato: 'hato',
+  tareas: 'tareas',
+  alertas: 'alertas',
+  sanidad: 'sanidad',
+  reproduccion: 'reproducción',
+  agenda_tareas: 'agenda de tareas',
+  pesajes: 'pesajes',
+  actividad: 'actividad reciente',
+  primeros_pasos: 'primeros pasos',
+};
+
 const TONE_CHIP: Record<string, string> = {
+  muted: 'bg-sunken text-ink-3',
   success: 'bg-success/10 text-success',
   warning: 'bg-warning/10 text-warning',
   danger: 'bg-danger/10 text-danger',
@@ -103,6 +127,7 @@ export default async function Dashboard() {
   const neverPopulated = (k.total_animals ?? 0) === 0;
   const noActiveButHasHistory = !neverPopulated && (k.active_animals ?? 0) === 0;
   const fs = home.farm_status ?? {};
+  const degraded: string[] = home.degraded ?? [];
   // Qué le falta a la finca para estar en marcha (O-2). Derivado del estado real por el backend:
   // acá no se decide nada, solo se dibuja.
   const setup = home.setup as Setup;
@@ -201,6 +226,19 @@ export default async function Dashboard() {
             </div>
           )}
 
+          {degraded.length > 0 && (
+            <div className="mb-4 flex items-start gap-2 rounded-md border-l-[3px] border-warning bg-warning/10 px-3 py-2 text-body">
+              <AlertTriangle size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-warning" />
+              <div className="min-w-0">
+                <span className="font-medium">Faltan datos de {degraded.map((d: string) => PIEZA[d] ?? d).join(', ')}.</span>{' '}
+                <span className="text-ink-2">
+                  El resto de la pantalla es correcto. Los números de {degraded.length > 1 ? 'esas secciones' : 'esa sección'} aparecen como «—»: no
+                  son ceros, es que no se pudieron leer. Recargá en un momento.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Estado general de la finca */}
           <div className="mb-5 flex flex-wrap items-center gap-2">
             <span className="text-label font-medium text-ink-3">Estado:</span>
@@ -210,7 +248,9 @@ export default async function Dashboard() {
               ['Reproducción', fs.reproduction],
               ['Tareas', fs.tasks],
             ].map(([label, val]) => {
-              const s = STATUS[val as string] ?? { label: '—', tone: 'success' as const };
+              // El respaldo tampoco es verde. Antes era `tone: 'success'`, así que un estado que la
+              // pantalla no supiera interpretar se dibujaba como «todo bien».
+              const s = STATUS[val as string] ?? { label: 'Sin datos', tone: 'muted' as const };
               return (
                 <span key={label as string} className="inline-flex items-center gap-1.5 rounded-full border border-subtle bg-surface px-3 py-1 text-label">
                   <span className="text-ink-2">{label}</span>
@@ -235,16 +275,16 @@ export default async function Dashboard() {
 
           {/* KPIs integrados */}
           <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2">
-            <KpiCard label="Animales activos" value={k.active_animals} hint={k.new_this_month ? `+${k.new_this_month} este mes` : 'sin altas este mes'} tone={k.new_this_month ? 'success' : undefined} />
+            <KpiCard label="Animales activos" value={k.active_animals ?? "—"} hint={k.active_animals == null ? 'sin dato del hato' : k.new_this_month ? `+${k.new_this_month} este mes` : 'sin altas este mes'} tone={k.new_this_month ? 'success' : undefined} />
             <KpiCard label="GDP promedio (120 d)" value={k.avg_adg_kg_day ?? '—'} unit="kg/día" hint="ganancia diaria de peso" />
-            <KpiCard label="Preñez efectiva" value={k.pregnancy_rate_pct != null ? `${k.pregnancy_rate_pct}%` : '—'} hint={`${k.open_pregnancies} de ${k.breeding_females} vientres`} />
-            <KpiCard label="Retiros activos" value={k.active_withdrawals} hint={k.active_withdrawals ? 'bloqueados para faena' : 'sin bloqueos'} tone={k.active_withdrawals ? 'warning' : 'success'} />
+            <KpiCard label="Preñez efectiva" value={k.pregnancy_rate_pct != null ? `${k.pregnancy_rate_pct}%` : '—'} hint={k.breeding_females != null ? `${k.open_pregnancies} de ${k.breeding_females} vientres` : "sin dato de vientres"} />
+            <KpiCard label="Retiros activos" value={k.active_withdrawals ?? "—"} hint={k.active_withdrawals == null ? 'sin dato de sanidad' : k.active_withdrawals ? 'bloqueados para faena' : 'sin bloqueos'} tone={k.active_withdrawals == null ? undefined : k.active_withdrawals ? 'warning' : 'success'} />
           </div>
           <div className="mt-4 grid grid-cols-4 gap-4 max-md:grid-cols-2">
-            <KpiCard label="Tareas vencidas" value={k.overdue_tasks} hint={k.urgent_tasks ? `${k.urgent_tasks} urgentes` : 'de la finca'} tone={k.overdue_tasks ? 'warning' : 'success'} />
-            <KpiCard label="Cumplimiento (30 d)" value={k.compliance_pct != null ? `${k.compliance_pct}%` : '—'} hint={`${k.done_today} completadas hoy`} tone={k.compliance_pct != null && k.compliance_pct >= 70 ? 'success' : undefined} />
-            <KpiCard label="Alertas críticas" value={k.critical_alerts} hint={`${k.open_alerts} alertas abiertas`} tone={k.critical_alerts ? 'warning' : 'success'} />
-            <KpiCard label="Vacunas vencidas" value={k.vaccines_overdue} hint={k.vaccines_due_45d ? `${k.vaccines_due_45d} próximas (45 d)` : 'al día'} tone={k.vaccines_overdue ? 'warning' : 'success'} />
+            <KpiCard label="Tareas vencidas" value={k.overdue_tasks ?? "—"} hint={k.urgent_tasks ? `${k.urgent_tasks} urgentes` : 'de la finca'} tone={k.overdue_tasks ? 'warning' : 'success'} />
+            <KpiCard label="Cumplimiento (30 d)" value={k.compliance_pct != null ? `${k.compliance_pct}%` : '—'} hint={k.done_today != null ? `${k.done_today} completadas hoy` : "sin dato de tareas"} tone={k.compliance_pct != null && k.compliance_pct >= 70 ? 'success' : undefined} />
+            <KpiCard label="Alertas críticas" value={k.critical_alerts ?? "—"} hint={k.open_alerts != null ? `${k.open_alerts} alertas abiertas` : "sin dato de alertas"} tone={k.critical_alerts ? 'warning' : 'success'} />
+            <KpiCard label="Vacunas vencidas" value={k.vaccines_overdue ?? "—"} hint={k.vaccines_overdue == null ? 'sin dato de sanidad' : k.vaccines_due_45d ? `${k.vaccines_due_45d} próximas (45 d)` : 'al día'} tone={k.vaccines_overdue == null ? undefined : k.vaccines_overdue ? 'warning' : 'success'} />
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-4 max-lg:grid-cols-1">
