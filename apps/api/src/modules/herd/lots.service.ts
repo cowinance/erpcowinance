@@ -258,6 +258,9 @@ export class LotsService {
     // El potrero NO se edita como campo: cambiarlo es una rotación del lote completo (los animales lo
     // siguen y queda historial). Ese cambio pasa por POST /lots/:id/rotate (reusa land.moveLot).
     if (body?.is_active !== undefined) {
+      // Archivar por acá es archivar igual: la misma guarda que `DELETE`. Reactivar no necesita
+      // ninguna — un lote vacío que vuelve a estar disponible no rompe nada.
+      if (!body.is_active) await this.assertLotEmptyToArchive(id);
       args.push(Boolean(body.is_active));
       sets.push(`is_active=$${args.length}`);
     }
@@ -266,16 +269,33 @@ export class LotsService {
     return this.getLot(id);
   }
 
+  /**
+   * Un lote no se archiva con animales adentro.
+   *
+   * Vive en un método porque había DOS puertas al mismo estado y solo una tenía guarda: `DELETE`
+   * contestaba «el lote tiene 21 animales; reasignalos antes de archivarlo», y `PUT {is_active:
+   * false}` lo archivaba con los 21 puestos. Y el estado que quedaba era un callejón sin salida: a
+   * un lote archivado no se le pueden mover animales (`movement.lot_archived`), así que los que
+   * estaban adentro quedaban en un lote que ya no podía recibir a nadie.
+   *
+   * La regla es la misma para las dos puertas, así que se escribe una vez. Copiarla habría durado
+   * hasta que apareciera la tercera.
+   */
+  private async assertLotEmptyToArchive(id: string) {
+    const occ = await this.db.one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`,
+      [id, this.db.tenant],
+    );
+    if ((occ?.n ?? 0) > 0)
+      throw new ConflictException({ code: 'lot.occupied', title: `El lote tiene ${occ!.n} animales; reasignalos antes de archivarlo` });
+  }
+
   /** Archiva un lote. Se bloquea si tiene animales activos (reasignarlos primero). */
   async deleteLot(id: string) {
     const t = this.db.tenant;
     const lot = await this.db.one<any>(`SELECT id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [id, t]);
     if (!lot) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
-    const occ = await this.db.one<{ n: number }>(
-      `SELECT count(*)::int AS n FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL`,
-      [id, t],
-    );
-    if ((occ?.n ?? 0) > 0) throw new ConflictException({ code: 'lot.occupied', title: `El lote tiene ${occ!.n} animales; reasignalos antes de archivarlo` });
+    await this.assertLotEmptyToArchive(id);
     await this.db.query(`UPDATE lots SET is_active=false, deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2`, [id, t]);
     return { id, deleted: true };
   }

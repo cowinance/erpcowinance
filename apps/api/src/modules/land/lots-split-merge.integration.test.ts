@@ -84,6 +84,71 @@ describe('Lotes — dividir / fusionar / mover todo', () => {
     expect(nl.purpose).toBe('weaning');
   });
 
+  it('DIVIDIR NO PUEDE SACAR ANIMALES DE OTRO LOTE', async () => {
+    // El bug: `splitLot` recibía una lista de ids y se la pasaba a `recordMovement` sin mirar de
+    // dónde salían. Comprobado contra la app: dividir «Rodeo Cría 1» se llevó un animal de «Recría
+    // 2026», el lote dividido quedó intacto, y el historial lo registró como una división normal.
+    // El comentario de la función ya decía «(subconjunto del origen)»: describía la regla que nadie
+    // aplicaba.
+    const src = await mkLot('AJ origen');
+    const otro = await mkLot('AJ otro');
+    await addAnimals(src, 3);
+    const ajenos = await addAnimals(otro, 2);
+
+    await expect(land.splitLot(src, { name: 'AJ nuevo', animal_ids: ajenos }, randomUUID())).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'lot.animals_not_in_lot' },
+    });
+
+    // Y no queda rastro: ni el lote nuevo ni un animal movido. La operación se rechaza ENTERA.
+    expect(await head(otro), 'el otro lote no se tocó').toBe(2);
+    expect(await head(src), 'el lote dividido tampoco').toBe(3);
+    expect((await lotsSvc.lots() as any[]).some((l) => l.name === 'AJ nuevo'), 'no se creó el lote').toBe(false);
+  });
+
+  it('una lista MEZCLADA se rechaza entera, no se mueve «los que sí»', async () => {
+    // Filtrar y mover el resto dejaría una división a medias que nadie pidió: la lista sale de una
+    // pantalla que mostraba este lote, así que un id ajeno significa que lo que el productor está
+    // mirando ya no es lo que hay.
+    const src = await mkLot('MIX origen');
+    const otro = await mkLot('MIX otro');
+    const propios = await addAnimals(src, 3);
+    const ajenos = await addAnimals(otro, 1);
+
+    await expect(
+      land.splitLot(src, { name: 'MIX nuevo', animal_ids: [...propios.slice(0, 2), ...ajenos] }, randomUUID()),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(await head(src), 'los propios tampoco se movieron').toBe(3);
+  });
+
+  it('REENVIAR LA MISMA DIVISIÓN devuelve el lote que ya se creó, no uno nuevo', async () => {
+    // El `Idempotency-Key` protegía el movimiento pero no la creación del lote: `recordMovement`
+    // deduplicaba por `movement_id` mientras el `INSERT INTO lots` corría igual. Un doble envío —un
+    // toque repetido, una reconexión en el campo— dejaba DOS lotes, el segundo vacío y sin que nadie
+    // se enterara. Comprobado contra la app antes del arreglo: `moved: 1` y después `moved: 0`, con
+    // los dos lotes en la lista.
+    const src = await mkLot('IDEM origen');
+    const ids = await addAnimals(src, 4);
+    const key = randomUUID();
+
+    const a: any = await land.splitLot(src, { name: 'IDEM nuevo', animal_ids: ids.slice(0, 2) }, key);
+    const b: any = await land.splitLot(src, { name: 'IDEM nuevo', animal_ids: ids.slice(0, 2) }, key);
+
+    expect(b.new_lot_id, 'el reenvío tiene que devolver el MISMO lote').toBe(a.new_lot_id);
+    expect(b.already).toBe(true);
+    expect(b.moved, 'y decir cuántos movió de verdad, no cero').toBe(2);
+    expect((await lotsSvc.lots() as any[]).filter((l) => l.name === 'IDEM nuevo'), 'un solo lote').toHaveLength(1);
+    expect(await head(src)).toBe(2);
+  });
+
+  it('un animal repetido en la lista no cuenta dos veces', async () => {
+    const src = await mkLot('DUP origen');
+    const ids = await addAnimals(src, 3);
+    const res: any = await land.splitLot(src, { name: 'DUP nuevo', animal_ids: [ids[0], ids[0], ids[1]] }, randomUUID());
+    expect(res.moved).toBe(2);
+    expect(await head(src)).toBe(1);
+  });
+
   it('fusionar: mueve todo al destino y archiva el lote origen', async () => {
     const from = await mkLot('FUS from');
     const into = await mkLot('FUS into');
@@ -105,5 +170,34 @@ describe('Lotes — dividir / fusionar / mover todo', () => {
     await expect(land.moveAllAnimals(a, { target_lot_id: archived }, randomUUID())).rejects.toMatchObject({ status: 409 });
     await expect(land.mergeLots(a, { target_lot_id: a }, randomUUID())).rejects.toMatchObject({ status: 400 });
     await expect(land.splitLot(a, { name: '', animal_ids: [] }, randomUUID())).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('ARCHIVAR CON ANIMALES ADENTRO SE BLOQUEA POR LAS DOS PUERTAS', async () => {
+    // Había dos caminos al mismo estado y solo uno tenía guarda: `DELETE` contestaba «el lote tiene
+    // 21 animales; reasignalos antes de archivarlo», y `PUT {is_active:false}` lo archivaba con los
+    // 21 puestos. El estado resultante era un callejón: a un lote archivado no se le pueden mover
+    // animales, así que los de adentro quedaban en un lote que ya no podía recibir a nadie.
+    const lot = await mkLot('ARCH con animales');
+    await addAnimals(lot, 2);
+
+    await expect(lotsSvc.deleteLot(lot)).rejects.toMatchObject({ status: 409, response: { code: 'lot.occupied' } });
+    await expect(lotsSvc.updateLot(lot, { is_active: false })).rejects.toMatchObject({ status: 409, response: { code: 'lot.occupied' } });
+
+    // Sigue activo: ninguna de las dos lo dejó a medias.
+    expect(((await lotsSvc.getLot(lot)) as any).is_active).toBe(true);
+  });
+
+  it('vaciarlo lo desbloquea, y reactivar nunca necesita guarda', async () => {
+    // La otra mitad: la guarda no puede haberse comido el caso legítimo. Un lote vacío se archiva, y
+    // volver a activarlo no pide nada — un lote disponible otra vez no rompe nada.
+    const lot = await mkLot('ARCH vaciable');
+    const destino = await mkLot('ARCH destino');
+    await addAnimals(lot, 2);
+    await land.moveAllAnimals(lot, { target_lot_id: destino }, randomUUID());
+
+    await lotsSvc.updateLot(lot, { is_active: false });
+    expect(((await lotsSvc.getLot(lot)) as any).is_active).toBe(false);
+    await lotsSvc.updateLot(lot, { is_active: true });
+    expect(((await lotsSvc.getLot(lot)) as any).is_active).toBe(true);
   });
 });

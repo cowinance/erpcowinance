@@ -265,8 +265,18 @@ export class LandService {
   }
 
   /**
-   * Divide un lote en dos: crea un lote nuevo y mueve los animales indicados (subconjunto del origen).
-   * Todo en UNA tx: si el movimiento falla, el lote nuevo no queda huérfano. Reusa recordMovement.
+   * Divide un lote en dos: crea un lote nuevo y mueve ahí los animales indicados.
+   *
+   * **Los animales tienen que ser DE ESTE LOTE.** No lo eran: la función recibía una lista de ids y
+   * se los pasaba a `recordMovement` sin mirar de dónde salían, así que «dividir el lote A» podía
+   * sacar animales del lote B. Comprobado contra la app: una división de «Rodeo Cría 1» se llevó un
+   * animal de «Recría 2026», y el historial lo registró como una división normal. El comentario que
+   * estaba acá ya decía «(subconjunto del origen)» — describía la regla, y nadie la aplicaba.
+   *
+   * Se rechaza la operación ENTERA si alguno no pertenece, en vez de filtrar y mover el resto: la
+   * lista sale de una pantalla que mostraba este lote, así que un id ajeno significa que lo que el
+   * productor está mirando ya no es lo que hay. Mover «los que sí» dejaría una división a medias que
+   * nadie pidió y que no se ve.
    */
   async splitLot(fromLotId: string, body: { name?: unknown; purpose?: unknown; animal_ids?: unknown; reason?: string }, movementId: string) {
     let input;
@@ -276,11 +286,65 @@ export class LandService {
       if (e instanceof InvalidLotError) throw new BadRequestException({ code: 'lot.invalid', title: e.reason });
       throw e;
     }
-    const animalIds = Array.isArray(body?.animal_ids) ? (body.animal_ids as string[]) : [];
+    // Sin repetidos: el mismo animal dos veces en la lista no puede contar dos veces al comparar
+    // contra los que de verdad están en el lote.
+    const animalIds = Array.isArray(body?.animal_ids) ? [...new Set(body.animal_ids as string[])] : [];
     if (!animalIds.length) throw new BadRequestException({ code: 'lot.no_animals', title: 'Elegí al menos un animal para el nuevo lote' });
+
     return this.db.tx(async (q) => {
-      const src = await q.one<{ farm_id: string }>(`SELECT farm_id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, [fromLotId, this.db.tenant]);
+      // `FOR UPDATE` como en fusionar y mover-todo: serializa dos divisiones del mismo lote. Sin el
+      // lock, las dos comprueban la pertenencia contra el mismo estado y la segunda vuelve a mover
+      // animales que la primera ya sacó.
+      const src = await q.one<{ farm_id: string }>(
+        `SELECT farm_id FROM lots WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL FOR UPDATE`,
+        [fromLotId, this.db.tenant],
+      );
       if (!src) throw new NotFoundException({ code: 'lot.not_found', title: 'Lote no encontrado' });
+
+      /*
+       * REINTENTO: si esta misma operación ya se hizo, se devuelve el lote que creó.
+       *
+       * El `Idempotency-Key` protegía el movimiento pero no la creación del lote: `recordMovement`
+       * deduplicaba por `movement_id` mientras el `INSERT INTO lots` corría igual, así que un doble
+       * envío —un toque repetido, una reconexión en el campo— dejaba DOS lotes, el segundo vacío.
+       * Comprobado: dos llamadas con la misma clave devolvieron `moved: 1` y `moved: 0`, y quedaron
+       * los dos lotes en la lista.
+       */
+      const yaHecho = await q.one<{ to_lot_id: string; n: number }>(
+        `SELECT to_lot_id, count(*)::int AS n FROM animal_movements
+          WHERE tenant_id=$1 AND movement_id=$2 AND to_lot_id IS NOT NULL AND deleted_at IS NULL
+          GROUP BY to_lot_id LIMIT 1`,
+        [this.db.tenant, movementId],
+      );
+      if (yaHecho) {
+        const lot = await q.one<{ id: string; name: string }>(`SELECT id, name FROM lots WHERE id=$1 AND tenant_id=$2`, [yaHecho.to_lot_id, this.db.tenant]);
+        return { new_lot_id: yaHecho.to_lot_id, name: lot?.name ?? null, moved: yaHecho.n, already: true };
+      }
+
+      // Los que DE VERDAD están en este lote. Mismo criterio que mover-todo y fusionar: activos y no
+      // borrados — mover un animal muerto a un lote nuevo no significa nada.
+      const enElLote = await q.query<{ id: string }>(
+        `SELECT id FROM animals WHERE current_lot_id=$1 AND tenant_id=$2 AND status='active' AND deleted_at IS NULL AND id = ANY($3::uuid[])`,
+        [fromLotId, this.db.tenant, animalIds],
+      );
+      if (enElLote.length !== animalIds.length) {
+        // El texto lo lee el productor parado en el corral: se escribe como se habla, y por eso
+        // distingue uno de varios y «ninguno» de «algunos». «1 de los 1 animales ya no están» es la
+        // clase de frase que hace dudar de si el sistema entendió lo que se le pidió.
+        const faltan = animalIds.length - enElLote.length;
+        const total = animalIds.length;
+        const detalle =
+          total === 1
+            ? 'El animal elegido ya no está en este lote'
+            : faltan === total
+              ? `Ninguno de los ${total} animales elegidos está en este lote`
+              : `${faltan} de los ${total} animales elegidos ${faltan === 1 ? 'ya no está' : 'ya no están'} en este lote`;
+        throw new ConflictException({
+          code: 'lot.animals_not_in_lot',
+          title: `${detalle}. Actualizá la lista y volvé a intentar.`,
+        });
+      }
+
       const newLot = await q.one<{ id: string; name: string }>(
         `INSERT INTO lots (tenant_id, farm_id, name, purpose, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id, name`,
         [this.db.tenant, src.farm_id, input.name, input.purpose, this.db.user],
