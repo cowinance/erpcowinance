@@ -516,17 +516,32 @@ export class TaskService {
     });
   }
 
-  /** Lectura mínima (P6-1: verificación + preparación de la lista web de P6-2). */
-  async list(status?: string): Promise<Record<string, unknown>[]> {
+  /**
+   * Lectura mínima de tareas (P6-1).
+   *
+   * **Acotada.** No lo estaba: devolvía TODAS las tareas que la finca tuvo en su vida, en todos los
+   * estados. Con las reglas automáticas generando tareas a diario eso son ~3.000 al año — medido,
+   * 904 KB en una respuesta al primer año y 4,5 MB al quinto. El endpoint hermano, `board`, tenía
+   * tope desde siempre; era éste el que estaba solo. Se usan los mismos números para que las dos
+   * puertas signifiquen lo mismo.
+   *
+   * **«open» también significa lo mismo que en `board`**: pendientes MÁS en curso. Antes buscaba un
+   * estado literal llamado «open», que no existe, así que `?status=open` devolvía cero — la misma
+   * palabra contestando distinto en dos endpoints.
+   */
+  async list(status?: string, limit?: number): Promise<Record<string, unknown>[]> {
     const args: unknown[] = [this.db.tenant];
     const where = [`tenant_id = $1`, `deleted_at IS NULL`];
-    if (status && status !== 'all') {
+    if (!status || status === 'open') where.push(`status IN ('pending','in_progress')`);
+    else if (status !== 'all') {
       args.push(status);
       where.push(`status = $${args.length}`);
     }
+    const take = Math.min(Math.max(limit ?? 500, 1), 1000);
+    args.push(take);
     return this.db.query(
       `SELECT id, title, description, type, due_date, priority, status, related_type, related_id, completed_at
-       FROM tasks WHERE ${where.join(' AND ')} ORDER BY due_date NULLS LAST, created_at`,
+       FROM tasks WHERE ${where.join(' AND ')} ORDER BY due_date NULLS LAST, created_at LIMIT $${args.length}`,
       args,
     );
   }

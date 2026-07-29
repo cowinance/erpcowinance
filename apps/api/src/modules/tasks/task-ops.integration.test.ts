@@ -265,4 +265,44 @@ describe('TaskService · centro operativo (E1)', () => {
       expect(id, p).toBeTruthy();
     }
   });
+
+  it('LA LISTA ESTÁ ACOTADA: no devuelve todas las tareas de la historia', async () => {
+    // No lo estaba. Con las reglas automáticas generando tareas a diario son ~3.000 al año — medido,
+    // 904 KB en UNA respuesta al primer año y 4,5 MB al quinto. El endpoint hermano, `board`, tenía
+    // tope desde siempre; era éste el que estaba solo.
+    for (let i = 0; i < 12; i++) await mk({ title: `LIM ${i}`, dueDate: testDay(i) });
+
+    expect((await tasks.list('all', 5)), 'el tope pedido se respeta').toHaveLength(5);
+    // Y hay un techo: un límite disparatado no vuelve a dejar la consulta sin freno.
+    const techo = await tasks.list('all', 99_999);
+    expect(techo.length).toBeLessThanOrEqual(1000);
+  });
+
+  it('«open» SIGNIFICA LO MISMO que en el tablero: pendientes y en curso', async () => {
+    // Antes buscaba un estado literal llamado «open», que no existe, así que `?status=open` devolvía
+    // cero. La misma palabra contestando distinto en dos endpoints es la forma en que dos pantallas
+    // muestran números que no coinciden.
+    const enCurso = await mk({ title: 'OPEN en curso', dueDate: testToday() });
+    await db.tx((q) => tasks.startTask(q, { taskId: enCurso }, ctx()));
+    const hecha = await mk({ title: 'OPEN hecha', dueDate: testToday() });
+    await db.tx((q) => tasks.completeTask(q, { taskId: hecha }, ctx()));
+
+    const lista = await tasks.list('open', 1000);
+    const estados = new Set(lista.map((t: any) => t.status));
+    expect(estados.has('done'), 'las hechas quedan afuera').toBe(false);
+    expect(estados.has('canceled')).toBe(false);
+    expect(lista.some((t: any) => t.id === enCurso), 'las en curso entran').toBe(true);
+
+    // Y coincide con lo que contesta el tablero para la misma palabra.
+    const tablero = await tasks.board({ status: 'open', limit: 1000 });
+    expect(lista.length).toBe(tablero.length);
+  });
+
+  it('sin estado, la lista trae lo ABIERTO', async () => {
+    // Es lo que se quiere ver por defecto, y lo mismo que hace el tablero. `all` sigue estando para
+    // quien de verdad necesite el histórico — acotado.
+    const porDefecto = await tasks.list(undefined, 1000);
+    expect(porDefecto.every((t: any) => t.status === 'pending' || t.status === 'in_progress')).toBe(true);
+    expect((await tasks.list('all', 1000)).length).toBeGreaterThan(porDefecto.length);
+  });
 });

@@ -89,8 +89,8 @@ export class TasksController {
 
   /** Lista mínima (verificación + P6-2). */
   @Get('tasks')
-  list(@Query('status') status?: string) {
-    return this.tasks.list(status);
+  list(@Query('status') status?: string, @Query('limit') limit?: string) {
+    return this.tasks.list(status, limit ? Number(limit) : undefined);
   }
 
   /** Tablero operativo enriquecido (E2): joins + bucket + días de atraso + filtros. */

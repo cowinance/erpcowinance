@@ -9,7 +9,10 @@ export default async function WorkLogsPage() {
     apiSafe<any[]>('/hr/work-logs'),
     apiSafe<any[]>('/hr/work-logs/summary'),
     apiSafe<any[]>('/hr/employees?active=true'),
-    apiSafe<any[]>('/tasks'),
+    // Solo las ABIERTAS: el desplegable es para imputar horas a un trabajo, y no se imputan horas a
+    // una tarea hecha o cancelada hace años. Antes pedía todas —incluidas las terminadas— así que la
+    // lista crecía para siempre y ofrecía en su mayoría cosas que ya no se pueden elegir.
+    apiSafe<any[]>('/tasks?status=open'),
     apiSafe<any[]>('/farms'),
   ]);
   if (logs === null) {
