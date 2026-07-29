@@ -35,6 +35,47 @@ export const primitive = {
 } as const;
 
 /** Un tema semántico (fondo, superficie, texto, estados, acento, sombra). */
+/**
+ * ELEVACIÓN: la sombra como NÚMEROS, no como cadena CSS.
+ *
+ * Las tres sombras vivían solo en su forma web (`0 4px 12px rgba(0,0,0,0.1)`), y React Native no
+ * entiende eso: necesita `shadowOffset`, `shadowOpacity` y `shadowRadius` por separado. El resultado
+ * era que el móvil no tenía profundidad — su tema decía «no usa raised/shadow» y en toda la app
+ * había DOS sombras. Todo plano, que es una de las cosas que hacen que una app se vea sin terminar.
+ *
+ * Con los números como fuente, cada plataforma renderiza lo suyo desde el MISMO lugar: la web arma
+ * la cadena CSS, el móvil arma las props nativas. Re-tipear los valores en el tema del móvil habría
+ * sido más corto y es exactamente lo que este paquete prohíbe.
+ *
+ * `null` = sin sombra. En oscuro la elevación 1 no lleva: sobre un fondo casi negro una sombra suave
+ * no se ve, y lo que separa las superficies es el borde.
+ */
+export interface Elevation {
+  /** Desplazamiento vertical en px. Sin horizontal: la luz viene de arriba. */
+  y: number;
+  /** Difuminado en px, en la escala de CSS. */
+  blur: number;
+  /** Opacidad del negro, 0 a 1. */
+  opacity: number;
+}
+
+export const elevation: { light: Record<'1' | '2' | '3', Elevation | null>; dark: Record<'1' | '2' | '3', Elevation | null> } = {
+  light: {
+    '1': { y: 1, blur: 2, opacity: 0.06 },
+    '2': { y: 4, blur: 12, opacity: 0.1 },
+    '3': { y: 12, blur: 32, opacity: 0.16 },
+  },
+  dark: {
+    '1': null,
+    '2': { y: 4, blur: 12, opacity: 0.4 },
+    '3': { y: 12, blur: 32, opacity: 0.5 },
+  },
+};
+
+/** La sombra en CSS. Es la forma que consume la web; el móvil arma la suya con los mismos números. */
+export const cssShadow = (e: Elevation | null): string =>
+  e === null ? 'none' : `0 ${e.y}px ${e.blur}px rgba(0, 0, 0, ${e.opacity})`;
+
 export interface SemanticTheme {
   bg: { canvas: string; surface: string; sunken: string; raised: string };
   border: { subtle: string; strong: string };
@@ -55,10 +96,11 @@ export const semantic: { light: SemanticTheme; dark: SemanticTheme } = {
     status: { success: '#1e7f4f', warning: '#b45309', danger: '#b3261e', info: '#20618a' },
     accent: ref('brand-700'),
     accentSoft: ref('brand-100'),
+    // Derivadas de `elevation.light`: una sola fuente para la web y el móvil.
     shadow: {
-      '1': '0 1px 2px rgba(0, 0, 0, 0.06)',
-      '2': '0 4px 12px rgba(0, 0, 0, 0.1)',
-      '3': '0 12px 32px rgba(0, 0, 0, 0.16)',
+      '1': cssShadow(elevation.light['1']),
+      '2': cssShadow(elevation.light['2']),
+      '3': cssShadow(elevation.light['3']),
     },
   },
   dark: {
@@ -68,7 +110,7 @@ export const semantic: { light: SemanticTheme; dark: SemanticTheme } = {
     status: { success: '#34b375', warning: '#e8a33d', danger: '#e5534b', info: '#5ba3d0' },
     accent: ref('brand-500'),
     accentSoft: 'rgba(46, 125, 91, 0.16)',
-    shadow: { '1': 'none', '2': '0 4px 12px rgba(0, 0, 0, 0.4)', '3': '0 12px 32px rgba(0, 0, 0, 0.5)' },
+    shadow: { '1': cssShadow(elevation.dark['1']), '2': cssShadow(elevation.dark['2']), '3': cssShadow(elevation.dark['3']) },
   },
 };
 

@@ -4,9 +4,26 @@
  * `T` se DERIVA de la fuente canónica única (@cowinance/design-tokens); acá NO se
  * re-tipean valores hex, radios ni ningún token a mano. Preserva la API `T.*` y
  * los mismos valores que hoy (tema claro) → los ~15 consumidores no se tocan.
- * El móvil no usa `raised`/`accent`/`accentSoft`/`shadow`; se omiten como antes.
+ * El móvil no usa `raised`/`accent`/`accentSoft`; se omiten como antes.
+ *
+ * La SOMBRA sí se usa ahora. Antes se omitía por una razón real: en la fuente vivía
+ * solo como cadena CSS (`0 4px 12px rgba(...)`), que React Native no entiende. Los
+ * números ya están en `elevation`, así que acá se traducen a props nativas sin
+ * re-tipear ningún valor.
  */
-import { primitive, semantic, radius, typeRole, typeCompat, space } from '@cowinance/design-tokens';
+import { primitive, semantic, radius, typeRole, typeCompat, space, elevation, type Elevation } from '@cowinance/design-tokens';
+
+/** Traduce una elevación de la fuente canónica a las props que entiende React Native. */
+function rnShadow(e: Elevation | null) {
+  if (!e) return {};
+  return {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: e.y },
+    shadowOpacity: e.opacity,
+    shadowRadius: e.blur / 2,
+    elevation: e.y,
+  } as const;
+}
 
 const L = semantic.light;
 
@@ -31,6 +48,18 @@ export const T = {
   warning: L.status.warning,
   danger: L.status.danger,
   info: L.status.info,
+
+  /**
+   * Profundidad, en las tres alturas del sistema.
+   *
+   * `shadowRadius` es la mitad del difuminado de CSS: iOS mide el radio de la sombra y CSS mide el
+   * ancho total del degradado, así que usar el número tal cual duplicaría el desenfoque. `elevation`
+   * es lo de Android, que solo entiende una altura — se aproxima con el desplazamiento.
+   *
+   * Sin sombra (`null`, como la altura 1 en oscuro) devuelve un objeto vacío: se puede esparcir en
+   * cualquier estilo sin condicionales en el llamador.
+   */
+  shadow: (nivel: '1' | '2' | '3') => rnShadow(elevation.light[nivel]),
 
   radiusSm: radius.sm,
   radiusMd: radius.md,

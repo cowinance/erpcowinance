@@ -13,6 +13,7 @@ import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { AnimalPickerLocal } from '@/components/AnimalPickerLocal';
 import { FormScroll, Button } from '@/components/ui';
 import { T } from '@/theme';
+import * as haptics from '@/lib/haptics';
 
 const REASONS = ['Rotación', 'Destete', 'Sanitario', 'Venta'];
 const CLEAR = 'clear';
@@ -32,6 +33,7 @@ export default function MoverCapture() {
     if (!animal || dest === '') return;
     const toLotId = dest === CLEAR ? null : dest;
     sync.captureMovement(animal.id, toLotId, reason || undefined);
+    haptics.ok();
     const lotName = dest === CLEAR ? 'sin lote' : lots.find((l) => l.id === dest)?.name ?? 'lote';
     setSuccess(`${animal.tag} → ${lotName} · se reflejará al sincronizar`);
     setCount((c) => c + 1);

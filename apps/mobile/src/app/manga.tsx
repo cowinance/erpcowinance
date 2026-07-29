@@ -10,12 +10,13 @@
  * Movement/Heat/Service/Diagnosis), así que el contrato de sync no cambia.
  */
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, Vibration, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { mangaCardAlerts, validateWeighing, type MangaAlert } from '@cowinance/domain';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { FormScroll } from '@/components/ui';
+import * as haptics from '@/lib/haptics';
 
 const GREEN = '#4ADE80';
 const RED = '#F87171';
@@ -64,12 +65,12 @@ export default function Manga() {
   const fail = (msg: string) => {
     setError(msg);
     setErrors((e) => e + 1);
-    Vibration.vibrate([0, 80, 60, 80]);
+    haptics.error();
   };
   const pushRecord = (action: string, detail: string) => {
     if (!animal) return;
     setRecords((r) => [{ key: `${Date.now()}-${Math.random()}`, tag: animal.tag ?? '—', action, detail, at: Date.now() }, ...r]);
-    Vibration.vibrate(60);
+    haptics.ok();
     setAnimal(null);
     setError('');
     setWarn(null);
@@ -95,7 +96,7 @@ export default function Manga() {
     }
     setAnimal(found);
     setTag('');
-    Vibration.vibrate(30);
+    haptics.tap();
   }
 
   const saved = records.length;
@@ -423,7 +424,7 @@ function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, warn, se
       if (v.requiresConfirm && !confirmMsg) {
         setConfirmMsg(v.confirm!.message);
         setWarn(null);
-        Vibration.vibrate([0, 60, 50, 60]);
+        haptics.warn();
         return;
       }
       setWarn(v.warnings.length ? v.warnings[0].message : null);

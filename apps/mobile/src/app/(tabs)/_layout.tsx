@@ -7,11 +7,15 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync } from '@/sync/SyncContext';
 import { T } from '@/theme';
+import * as haptics from '@/lib/haptics';
 
 function CaptureButton() {
   return (
     <Pressable
-      onPress={() => router.push('/captura')}
+      onPress={() => {
+        haptics.tap();
+        router.push('/captura');
+      }}
       style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.95 }] }]}
       accessibilityLabel="Capturar"
     >
@@ -28,7 +32,9 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: T.brand700,
         tabBarInactiveTintColor: T.ink3,
-        tabBarStyle: { backgroundColor: T.surface, borderTopColor: T.borderSubtle, height: 64, paddingTop: T.space['1.5'] },
+        // La barra se separa del contenido con la altura 2: cuando una lista scrollea por debajo, el
+        // borde de 1px solo no alcanza para que se lea como una capa que flota encima.
+        tabBarStyle: { backgroundColor: T.surface, borderTopColor: T.borderSubtle, height: 64, paddingTop: T.space['1.5'], ...T.shadow('2') },
         tabBarLabelStyle: { fontSize: T.type.caption, fontWeight: '500' },
       }}
     >
@@ -81,10 +87,9 @@ const styles = StyleSheet.create({
     backgroundColor: T.brand700,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    // La altura 3 del sistema, no una sombra tipeada a mano. Era una de las dos sombras que había en
+    // toda la app y sus números no salían de ningún token: quedaba parecida por casualidad, y el día
+    // que la escala cambie ésta se queda atrás.
+    ...T.shadow('3'),
   },
 });

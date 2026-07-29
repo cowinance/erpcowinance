@@ -20,6 +20,7 @@ import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { AnimalPickerLocal } from '@/components/AnimalPickerLocal';
 import { FormScroll, Button } from '@/components/ui';
 import { T } from '@/theme';
+import * as haptics from '@/lib/haptics';
 
 export default function MortalidadCapture() {
   const sync = useSync();
@@ -62,6 +63,7 @@ export default function MortalidadCapture() {
   // Solo se emite tras confirmar. Event-only: sin put optimista ni cambio del store.
   function emit(a: AnimalRow) {
     sync.captureMortality(a.id, notes.trim() || undefined);
+    haptics.ok();
     setDoneIds((s) => {
       const next = new Set(s);
       next.add(a.id);

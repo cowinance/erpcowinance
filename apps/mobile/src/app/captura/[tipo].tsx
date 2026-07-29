@@ -12,6 +12,7 @@ import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { AnimalPickerLocal } from '@/components/AnimalPickerLocal';
 import { FormScroll, Button } from '@/components/ui';
 import { T } from '@/theme';
+import * as haptics from '@/lib/haptics';
 
 const TITLES: Record<string, string> = {
   vacunar: 'Vacunar',
@@ -115,6 +116,9 @@ export default function CaptureForm() {
       sync.captureNote(animal.id, note);
       msg = `Nota guardada para ${animal.tag}`;
     }
+    // Confirmación TÁCTIL, además del texto. Se carga parado en el corral, con una mano en el animal
+    // y muchas veces con guantes: la vibración es la única señal que llega sin mirar la pantalla.
+    haptics.ok();
     setSuccess(msg);
     setCount((c) => c + 1);
     setAnimal(null);

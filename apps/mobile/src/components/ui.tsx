@@ -113,6 +113,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: T.borderSubtle,
     padding: T.space['4'],
+    // La misma altura que usa la tarjeta de la web (`--shadow-1`), desde los mismos números. Antes
+    // el móvil no tenía ninguna: las tarjetas se apoyaban solo en el borde y todo quedaba en un
+    // plano, que es de lo que más hace que una app se vea sin terminar.
+    ...T.shadow('1'),
   },
   kpiLabel: { fontSize: T.type.label, color: T.ink2 },
   kpiValue: { fontSize: T.compat['26'], fontWeight: '700', color: T.ink, marginTop: T.space['1'], fontVariant: ['tabular-nums'] },
