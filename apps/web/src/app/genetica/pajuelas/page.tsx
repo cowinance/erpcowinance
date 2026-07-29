@@ -58,7 +58,12 @@ export default async function StrawsPage({
       {goblets.length === 0 && (
         <EmptyState
           title="Todavía no hay gobeletes"
-          body="Cargá primero la estructura del termo en la pestaña Termos: sin gobeletes no hay dónde ubicar las pajuelas."
+          // Mandaba a «la pestaña Termos» sin llevar. Un aviso que nombra el lugar al que hay que ir
+          // y no es un enlace obliga a buscarlo, y acá la búsqueda termina mal: el gobelete está dos
+          // niveles adentro del termo y la pantalla de destino no lo dice.
+          body="La ubicación va en tres niveles: el termo, sus canastas y los gobeletes de cada canasta. Creá al menos un gobelete y las pajuelas van a poder ubicarse ahí."
+          actionHref="/genetica/termos"
+          actionLabel="Cargar la estructura del termo"
         />
       )}
       <StrawManager title={title} straws={straws ?? []} goblets={goblets} ownerParam={query} />

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ChevronRight } from 'lucide-react';
 import { CRYO_COLORS, cryoLocationLabel, isKnownCryoColor } from '@cowinance/domain';
 import { API_URL, authHeaders } from '@/lib/api';
 import { Card, CardTitle, EmptyState } from '@/components/ui';
@@ -150,7 +151,7 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
         <Card>
           <CardTitle>Termos</CardTitle>
           {tanks.length === 0 ? (
-            <p className="text-body text-ink-3">Todavía no cargaste ninguno.</p>
+            <p className="text-body text-ink-3">Todavía no cargaste ninguno. Empezá por el de arriba.</p>
           ) : (
             <ul className="space-y-1">
               {tanks.map((t) => (
@@ -163,10 +164,14 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
                       {t.code}
                       {t.name ? <span className="text-ink-3"> · {t.name}</span> : null}
                     </span>
-                    <span className="shrink-0 text-caption text-ink-3">
+                    <span className="flex shrink-0 items-center gap-1 text-caption text-ink-3">
                       {t.canister_capacity
                         ? `${t.canister_count}/${t.canister_capacity} canastas`
                         : plural(t.canister_count, 'canasta')}
+                      {/* El renglón ABRE la estructura del termo, y sin nada que lo indique se leía
+                          como un dato más de una lista. La pantalla de al lado dice «elegí un termo»
+                          sin que nada parezca elegible. */}
+                      <ChevronRight size={14} strokeWidth={2} />
                     </span>
                   </a>
                 </li>
@@ -178,7 +183,17 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
 
       <div className="col-span-2 max-lg:col-span-1">
         {!selected ? (
-          <EmptyState title="Elegí un termo" body="Se muestra su estructura completa: canastas y gobeletes." />
+          <EmptyState
+            title={tanks.length === 0 ? 'Empezá por cargar el termo' : 'Elegí un termo'}
+            // La cadena tiene TRES niveles y no estaba dicha en ninguna parte. Quien llegaba
+            // buscando dónde crear un gobelete —mandado por el aviso de Pajuelas— veía «elegí un
+            // termo» y no tenía cómo saber que el gobelete estaba dos niveles más adentro.
+            body={
+              tanks.length === 0
+                ? 'La ubicación va en tres niveles: el termo, las canastas que tiene adentro y los gobeletes de cada canasta. Las pajuelas se guardan en el gobelete.'
+                : 'Tocá uno de la lista para ver y editar sus canastas, y los gobeletes de cada canasta.'
+            }
+          />
         ) : (
           <Card>
             <CardTitle>
@@ -237,7 +252,10 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
             )}
 
             {(selected.canisters ?? []).length === 0 ? (
-              <p className="text-body text-ink-3">El termo todavía no tiene canastas.</p>
+              <p className="text-body text-ink-3">
+                El termo todavía no tiene canastas. Los gobeletes van adentro de una canasta, así que
+                este es el paso previo para poder ubicar pajuelas.
+              </p>
             ) : (
               <ul className="space-y-3">
                 {(selected.canisters ?? []).map((c) => (
@@ -258,7 +276,14 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
                           onClick={() => setGobFor(gobFor === c.id ? null : c.id)}
                           className="h-7 rounded-md border border-strong bg-surface px-2 text-label hover:bg-brand-soft"
                         >
-                          Gobelete
+                          {/*
+                            «Agregar gobelete» y no «Gobelete». Decía el sustantivo, al lado de
+                            «Quitar», mientras TODAS las demás acciones de la pantalla dicen el verbo
+                            —«Agregar termo», «Agregar canasta»—. Se leía como una etiqueta y no como
+                            un botón, y es el único lugar de la app donde se crea un gobelete: quien
+                            lo buscaba llegaba hasta acá y no lo veía.
+                          */}
+                          {gobFor === c.id ? 'Cerrar' : 'Agregar gobelete'}
                         </button>
                         <button
                           onClick={() => call('DELETE', `/genetics/cryo/canisters/${c.id}`)}
