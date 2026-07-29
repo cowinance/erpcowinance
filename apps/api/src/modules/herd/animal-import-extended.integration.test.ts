@@ -7,6 +7,7 @@ import { AnimalWriteService } from './animal-write.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { ANIMAL_IMPORT_DESCRIPTOR } from './animal-import-descriptor';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Auditoría Fase 3c — el alta por PLANILLA acepta lo mismo que el alta manual: raza, RFID,
@@ -44,7 +45,7 @@ describe('Importación de animales — raza / RFID / oficial / lote (Fase 3c)', 
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     lotId = (await db.query<{ id: string }>(`SELECT id FROM lots WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     // PGlite tiene UNA conexión: `persistNewAnimal` llama `db.defaultFarm()`, que si no está
     // cacheada consultaría por fuera de la tx y se bloquearía. Se precalienta acá (en la app real

@@ -5,7 +5,7 @@ import { AnimalWriteService } from './animal-write.service';
  * Unit PURO de `evaluateLink` (P2 P-d.1) — validación de vínculos genealógicos con
  * el contexto y los resultados de ciclos ya resueltos en lote (sin DB).
  */
-const svc = new AnimalWriteService(undefined as any, undefined as any, undefined as any);
+const svc = new AnimalWriteService(undefined as any, undefined as any, undefined as any, undefined as any);
 
 const CHILD = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 const DAM = 'dddddddd-dddd-dddd-dddd-dddddddddddd';

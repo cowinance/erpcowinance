@@ -8,6 +8,7 @@ import { HerdService } from './herd.service';
 import { AnimalWriteService } from './animal-write.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Animales E2 — edición completa (updateAnimal): regla única, diff-aware, validaciones
@@ -41,7 +42,7 @@ describe('HerdService.updateAnimal — edición completa (E2)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     herd = new HerdService(db, writer, new BillingService(db));
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;

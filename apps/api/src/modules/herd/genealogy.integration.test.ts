@@ -6,6 +6,7 @@ import { DbService } from '../../db/db.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { AnimalWriteService } from './animal-write.service';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Integración de las consultas batch de genealogía (P2 P-d.1) sobre PGlite en un
@@ -32,7 +33,7 @@ describe('Genealogía · integración batch', () => {
     db = new DbService();
     await db.onModuleInit();
     versions = new SyncVersionStore(db);
-    animalWrite = new AnimalWriteService(db, versions, new ServerOriginChangesetWriter(db));
+    animalWrite = new AnimalWriteService(db, versions, new ServerOriginChangesetWriter(db), new MovementService(db, versions, new ServerOriginChangesetWriter(db)));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;

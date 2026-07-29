@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Sex, TagNumber } from '@cowinance/domain';
 import { HlcClock } from '@cowinance/sync-core';
 import type { Op, PutOp } from '@cowinance/sync-core';
@@ -6,6 +7,7 @@ import { DbService, Q } from '../../db/db.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
 import { ANIMAL_SYNCABLE_FIELDS } from './animal-syncable-fields';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Persistencia estructural neutral de un animal — regla y escritura ÚNICAS,
@@ -103,6 +105,7 @@ export class AnimalWriteService {
     private readonly db: DbService,
     private readonly versions: SyncVersionStore,
     private readonly serverOrigin: ServerOriginChangesetWriter,
+    private readonly movement: MovementService,
   ) {}
 
   /**
@@ -257,9 +260,25 @@ export class AnimalWriteService {
     resolved: { categoryId: string; speciesId: string; breedId?: string | null; lotId?: string | null },
   ): Promise<{ animalId: string; syncOp?: PutOp }> {
     const t = this.db.tenant;
+    /*
+     * El alta NO escribe `current_lot_id`: lo pone el movimiento, más abajo.
+     *
+     * La regla del módulo dice que un animal nunca cambia de lote con un UPDATE directo, y era
+     * cierta para los cambios pero no para el alta: el `INSERT` lo escribía de una. Dos cosas se
+     * rompían con eso.
+     *
+     * La primera es la trazabilidad. El historial del lote se arma con `animal_movements`, así que
+     * un animal creado adentro no dejaba rastro: los seis lotes del demo tenían 22, 24, 10 cabezas y
+     * CERO movimientos. En una finca que importa su hato es peor — cada lote arranca con animales
+     * que aparecieron de la nada, justo en la pantalla que se llama trazabilidad.
+     *
+     * La segunda no la esperaba: el `INSERT` ponía el lote y NO el potrero, y quien resuelve el
+     * potrero a partir del lote es `recordMovement`. Un animal creado en «Rodeo Cría 1» —que está en
+     * «Potrero Norte»— quedaba sin potrero, así que no aparecía en nada que se mire por potrero.
+     */
     const animal = await q.one<{ id: string }>(
-      `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, name, birth_date, origin, current_lot_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active') RETURNING id`,
+      `INSERT INTO animals (tenant_id, farm_id, species_id, category_id, sex, name, birth_date, origin, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active') RETURNING id`,
       [
         t,
         await this.db.defaultFarm(q), // `q`: se resuelve DENTRO de la tx — sin él, la caché fría cuelga la conexión
@@ -269,7 +288,6 @@ export class AnimalWriteService {
         input.name,
         input.birthDate,
         input.origin,
-        input.lotId ?? resolved.lotId ?? null,
       ],
     );
 
@@ -306,7 +324,10 @@ export class AnimalWriteService {
       ],
     );
 
-    if (ctx.sync !== 'server_origin') return { animalId: animal!.id };
+    if (ctx.sync !== 'server_origin') {
+      await this.ubicarEnSuLote(q, animal!.id, input, ctx, resolved, false);
+      return { animalId: animal!.id };
+    }
 
     // Proyección server-origin (ADR-0016): versiona los campos del animal con un
     // tick GENUINO del actor `server` en sync_row_state y devuelve el `syncOp` (put)
@@ -329,7 +350,43 @@ export class AnimalWriteService {
     await this.versions.write(q, 'animals', animal!.id, versionsMap);
 
     const syncOp: PutOp = { kind: 'put', table: 'animals', rowId: animal!.id, fields, hlc };
+
+    // DESPUÉS de la proyección, no antes: `versions.write` REEMPLAZA el mapa entero, y el de acá
+    // arriba se arma de cero. Si el movimiento fuera primero, esta escritura le borraría la versión
+    // de `current_paddock_id` que él acaba de dejar.
+    await this.ubicarEnSuLote(q, animal!.id, input, ctx, resolved, true);
     return { animalId: animal!.id, syncOp };
+  }
+
+  /**
+   * Ubica al animal recién creado en su lote, por la regla única de movimientos.
+   *
+   * Es lo que convierte el alta en un hecho trazable —queda un ingreso en el historial del lote— y
+   * de paso resuelve el potrero, que se deriva del lote y antes quedaba en nulo.
+   *
+   * `movementId` propio por animal: el alta de cada uno es su propio hecho. Agruparlas bajo una sola
+   * clave haría que la segunda se leyera como un reintento de la primera y no se registrara.
+   */
+  private async ubicarEnSuLote(
+    q: Q,
+    animalId: string,
+    input: NormalizedAnimalInput,
+    ctx: PersistAnimalContext,
+    resolved: { lotId?: string | null },
+    emitServerOrigin: boolean,
+  ): Promise<void> {
+    const lotId = input.lotId ?? resolved.lotId ?? null;
+    if (!lotId) return;
+    await this.movement.recordMovement(q, {
+      animalIds: [animalId],
+      to: { lot: lotId },
+      reason: ctx.origin === 'import' ? 'alta por importación' : 'alta del animal',
+      actorUserId: ctx.actorUserId,
+      // `rest` cubre web y móvil, que del lado del movimiento son la misma superficie: `web`.
+      origin: ctx.origin === 'import' ? 'import' : 'web',
+      movementId: randomUUID(),
+      emitServerOrigin,
+    });
   }
 
   /** Emite un changeset de origen servidor con `ops` (dedup por `originRef`). Delega en la infra de sync. */

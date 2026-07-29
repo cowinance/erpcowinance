@@ -616,10 +616,21 @@ export function LotsManager({ lots, paddocks, categories }: { lots: Lot[]; paddo
                             {HIST_LABEL[h.kind]} · {h.animals} {h.animals === 1 ? 'animal' : 'animales'}
                           </div>
                           <div className="text-ink-3">
-                            {h.kind === 'rotacion' ? `${h.from_paddock ?? '—'} → ${h.to_paddock ?? '—'}`
-                              : h.kind === 'ingreso' ? `desde ${h.from_lot ?? h.from_paddock ?? 'sin lote'}`
-                              : h.kind === 'salida' ? `hacia ${h.to_lot ?? h.to_paddock ?? 'sin lote'}` : ''}
-                            {h.reason ? ` · ${h.reason}` : ''}
+                            {/* Un ALTA no viene de ningún lado, así que no se dice «desde sin lote»:
+                                el motivo («alta del animal») ya lo explica, y el separador se arma
+                                según lo que haya para no dejar un «·» colgado adelante. */}
+                            {[
+                              h.kind === 'rotacion'
+                                ? `${h.from_paddock ?? '—'} → ${h.to_paddock ?? '—'}`
+                                : h.kind === 'ingreso'
+                                  ? (h.from_lot ?? h.from_paddock) && `desde ${h.from_lot ?? h.from_paddock}`
+                                  : h.kind === 'salida'
+                                    ? `hacia ${h.to_lot ?? h.to_paddock ?? 'sin lote'}`
+                                    : '',
+                              h.reason,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
                           </div>
                           <div className="text-caption text-ink-3">{String(h.moved_at).slice(0, 10)}{h.actor ? ` · ${h.actor}` : ''}</div>
                         </div>

@@ -11,6 +11,7 @@ import { LotsService } from '../herd/lots.service';
 import { BillingService } from '../billing/billing.service';
 import { OnboardingService } from './onboarding.service';
 import { SAMPLE_HERD, SAMPLE_TAG_PREFIX } from './sample-herd';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Datos de ejemplo (O-3). Lo que se prueba acá no es que se carguen: es que se puedan SACAR.
@@ -47,7 +48,7 @@ describe('los datos de ejemplo se pueden sacar', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     herd = new HerdService(db, writer, new BillingService(db));
     lots = new LotsService(db);
     onboarding = new OnboardingService(db, herd, lots);

@@ -38,7 +38,12 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
  *   ausente    null      → (L0, null) si L0=null ó P(L0)=null        | mismatch si L0≠null y P(L0)≠null
  */
 
-export type MovementOrigin = 'web' | 'map' | 'sync';
+/**
+ * De qué superficie salió el movimiento. `import` se sumó cuando el ALTA de un animal pasó a
+ * registrarse como un movimiento de ingreso: una carga masiva de planilla no es lo mismo que alguien
+ * moviendo un lote desde el mapa, y el historial del lote lo muestra.
+ */
+export type MovementOrigin = 'web' | 'map' | 'sync' | 'import';
 
 /** Intención de destino: clave ausente(undefined)=sin cambio; null=limpiar; string=asignar. */
 export interface MovementIntent {

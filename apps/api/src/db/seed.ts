@@ -1165,6 +1165,25 @@ export async function seedDemo(db: Queryable) {
       String(501 + i),
     ]);
   }
+  /*
+   * El ingreso de cada animal a su lote, para que el historial del lote no nazca vacío.
+   *
+   * El seed inserta el hato con su `current_lot_id` puesto —es una carga masiva, no pasa por los
+   * servicios— y el historial del lote se arma con `animal_movements`. Sin esto el demo mostraba
+   * lotes de 21 y 25 cabezas con CERO movimientos: animales que aparecieron de la nada, justo en la
+   * pantalla que se llama trazabilidad. La app real ya registra el alta como ingreso; esto es para
+   * que el demo se vea como se va a ver la finca.
+   *
+   * Una sola sentencia y no una por animal: es un seed, y el costo se paga en cada arranque de dev.
+   */
+  await q(
+    `INSERT INTO animal_movements (tenant_id, animal_id, moved_at, from_lot_id, to_lot_id, from_paddock_id, to_paddock_id, reason, created_by, origin, movement_id)
+     SELECT a.tenant_id, a.id, a.created_at, NULL, a.current_lot_id, NULL, a.current_paddock_id, 'alta del animal', $2, 'import', gen_random_uuid()
+       FROM animals a
+      WHERE a.tenant_id = $1 AND a.current_lot_id IS NOT NULL AND a.deleted_at IS NULL`,
+    [org, userId],
+  );
+
   // Restaurar el contexto del tenant principal para el resto del boot
   await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
 

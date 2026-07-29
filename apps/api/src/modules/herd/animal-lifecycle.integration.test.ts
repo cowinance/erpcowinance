@@ -9,6 +9,7 @@ import { AnimalWriteService } from './animal-write.service';
 import { AnimalStatusService } from './animal-status.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Animales E5 — ciclo de vida (descarte/pérdida/transferencia vía AnimalStatusService, regla única)
@@ -43,7 +44,7 @@ describe('Animales — ciclo de vida + acciones masivas (E5)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     herd = new HerdService(db, writer, new BillingService(db));
     status = new AnimalStatusService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;

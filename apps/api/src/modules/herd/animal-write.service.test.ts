@@ -8,7 +8,7 @@ import { AnimalWriteService, type RawAnimalRow } from './animal-write.service';
  * `db` no se usa en esta ruta, así que se instancia con un stub.
  */
 // normalizeAndValidate es pura: las dependencias de sync no se usan en esta ruta.
-const svc = new AnimalWriteService(undefined as any, undefined as any, undefined as any);
+const svc = new AnimalWriteService(undefined as any, undefined as any, undefined as any, undefined as any);
 const base: RawAnimalRow = { tag: '1234', sex: 'F', category_code: 'cow' };
 
 describe('normalizeAndValidate · happy path', () => {

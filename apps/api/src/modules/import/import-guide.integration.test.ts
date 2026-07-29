@@ -8,6 +8,7 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
 import { AnimalWriteService } from '../herd/animal-write.service';
 import { ImportService } from './import.service';
 import { Sex } from '@cowinance/domain';
+import { MovementService } from '../land/movement.service';
 
 /**
  * La ayuda de la importación no puede mentir (O-4).
@@ -34,7 +35,7 @@ describe('la ayuda de la importación dice la verdad', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    animalWrite = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    animalWrite = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     imports = new ImportService(db, animalWrite);
   }, 120_000);
 

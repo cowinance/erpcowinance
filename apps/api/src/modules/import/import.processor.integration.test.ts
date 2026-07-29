@@ -8,6 +8,7 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
 import { AnimalWriteService } from '../herd/animal-write.service';
 import { ImportClaimRepository } from './import-claim.repository';
 import { ImportProcessor } from './import.processor';
+import { MovementService } from '../land/movement.service';
 
 /**
  * Prueba de INTEGRACIÓN real del procesador de importación (P2 P-c.2), sobre un
@@ -44,7 +45,7 @@ describe('ImportProcessor · integración', () => {
     await db.onModuleInit(); // carga schema + catálogos + seed demo
     const versions = new SyncVersionStore(db);
     const serverOrigin = new ServerOriginChangesetWriter(db);
-    animalWrite = new AnimalWriteService(db, versions, serverOrigin);
+    animalWrite = new AnimalWriteService(db, versions, serverOrigin, new MovementService(db, versions, serverOrigin));
     claims = new ImportClaimRepository(db);
     processor = new ImportProcessor(db, claims, animalWrite); // sin onModuleInit → sin poller
 

@@ -8,6 +8,9 @@ import { HerdService } from './herd.service';
 import { AnimalWriteService } from './animal-write.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
+import { MovementService } from '../land/movement.service';
+import { LotsService } from './lots.service';
+import { readFileSync } from 'fs';
 
 /**
  * Animales E4 — identificación avanzada (múltiples tipos, oficial único, retiro con
@@ -16,6 +19,7 @@ import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-chan
 describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
   let db: DbService;
   let herd: HerdService;
+  let lots: LotsService;
   let originalCwd: string;
   let tmp: string;
   let animalId: string;
@@ -28,8 +32,9 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
+    const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     herd = new HerdService(db, writer, new BillingService(db));
+    lots = new LotsService(db);
     const created: any = await herd.createAnimal({ tag: 'IDF-1', sex: 'F', category_code: 'vaca' });
     animalId = created.id;
     breedId = (await db.query<{ id: string }>(`SELECT id FROM breeds LIMIT 1`))[0].id;
@@ -107,5 +112,51 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
     await expect(
       herd.createAnimal({ tag: 'BAD-9', sex: 'F', category_code: 'vaca', dam_id: bull.id }),
     ).rejects.toThrow();
+  });
+
+  it('EL ALTA EN UN LOTE DEJA RASTRO: ingreso en el historial y potrero resuelto', async () => {
+    // El historial del lote se arma con `animal_movements`, y el alta escribía `current_lot_id`
+    // derecho en el INSERT. Resultado: los seis lotes del demo tenían 22, 24, 10 cabezas y CERO
+    // movimientos. En una finca que importa su hato es peor — cada lote arranca con animales que
+    // aparecieron de la nada, justo en la pantalla que se llama trazabilidad.
+    //
+    // Y de yapa el potrero: el INSERT ponía el lote pero no el potrero, que se DERIVA del lote y lo
+    // resuelve `recordMovement`. Un animal creado en un lote quedaba sin potrero, así que no salía
+    // en nada que se mire por potrero.
+    const lote = await lots.createLot({ name: 'ALTA con potrero' }) as any;
+    const pot = await db.one<{ id: string }>(`SELECT id FROM paddocks WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`, [db.tenant]);
+    await db.query(`UPDATE lots SET current_paddock_id=$3 WHERE id=$1 AND tenant_id=$2`, [lote.id, db.tenant, pot!.id]);
+
+    const nuevo: any = await herd.createAnimal({ tag: 'ALTA-1', sex: 'F', category_code: 'vaca', lot_id: lote.id });
+
+    const hist = await lots.lotHistory(lote.id);
+    expect(hist, 'el alta tiene que aparecer en el historial del lote').toHaveLength(1);
+    expect(hist[0].kind).toBe('ingreso');
+    expect(hist[0].from_lot, 'viene de ningún lote: es un alta').toBeNull();
+    expect(hist[0].animals).toBe(1);
+    expect(hist[0].reason).toBe('alta del animal');
+
+    const a = await db.one<{ current_lot_id: string; current_paddock_id: string }>(
+      `SELECT current_lot_id, current_paddock_id FROM animals WHERE id=$1 AND tenant_id=$2`, [nuevo.id, db.tenant]);
+    expect(a!.current_lot_id).toBe(lote.id);
+    expect(a!.current_paddock_id, 'el potrero se deriva del lote').toBe(pot!.id);
+  });
+
+  it('un alta SIN lote no inventa un movimiento', async () => {
+    // La otra mitad: no todo animal nace en un lote, y un movimiento «hacia ninguna parte» ensuciaría
+    // la trazabilidad con hechos que no pasaron.
+    const antes = await db.one<{ n: number }>(`SELECT count(*)::int AS n FROM animal_movements WHERE tenant_id=$1`, [db.tenant]);
+    await herd.createAnimal({ tag: 'ALTA-2', sex: 'F', category_code: 'vaca' });
+    const despues = await db.one<{ n: number }>(`SELECT count(*)::int AS n FROM animal_movements WHERE tenant_id=$1`, [db.tenant]);
+    expect(despues!.n).toBe(antes!.n);
+  });
+
+  it('NADIE escribe current_lot_id en el alta: lo pone el movimiento', async () => {
+    // La regla del módulo —«un animal nunca cambia de lote con un UPDATE directo»— era cierta para
+    // los cambios y no para el alta. Se mira el código porque el día que alguien vuelva a meter la
+    // columna en el INSERT, el historial se vacía en silencio y no hay dato que lo delate.
+    const src = readFileSync(join(originalCwd, 'apps/api/src/modules/herd/animal-write.service.ts'), 'utf8');
+    const insert = src.slice(src.indexOf('INSERT INTO animals'), src.indexOf('RETURNING id'));
+    expect(insert).not.toContain('current_lot_id');
   });
 });
