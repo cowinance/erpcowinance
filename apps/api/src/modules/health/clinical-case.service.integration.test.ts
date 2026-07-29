@@ -98,11 +98,50 @@ describe('ClinicalCaseService · integración', () => {
     expect(closed.closed_at).toBeTruthy();
   });
 
-  it('transición inválida → 409 (caso cerrado es terminal)', async () => {
+  it('UN CASO CERRADO NO ADMITE SEGUIMIENTOS, ni con nota ni con cambio de estado', async () => {
+    // La máquina de estados ya decía que `closed` es terminal, pero solo la consultaba la rama del
+    // cambio de estado: un seguimiento con únicamente una NOTA no miraba nada y se podía seguir
+    // anotando sobre un caso cerrado para siempre.
+    //
+    // No quedaba en un rincón: cada nota escribe en la línea de tiempo del ANIMAL como «seguimiento
+    // de caso clínico», así que la ficha mostraba movimiento de un caso que el productor había dado
+    // por terminado, y el historial del caso listaba hechos posteriores a su cierre.
     const a = await animal();
     const c: any = await cases.create({ animal_id: a });
     await cases.close(c.id, { outcome: 'other' });
-    await expect(cases.addFollowUp(c.id, { status: 'in_treatment' })).rejects.toMatchObject({ response: { code: 'clinical_case.invalid_transition' } });
+
+    await expect(cases.addFollowUp(c.id, { status: 'in_treatment' })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'clinical_case.closed' },
+    });
+    // Ésta es la que entraba.
+    await expect(cases.addFollowUp(c.id, { note: 'una nota más' })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'clinical_case.closed' },
+    });
+
+    // Y no dejó rastro: ni evento del caso ni hecho en la ficha del animal.
+    const evs = await db.query<any>(`SELECT id FROM clinical_case_events WHERE case_id = $1 AND kind = 'note'`, [c.id]);
+    expect(evs, 'ninguna nota se coló').toHaveLength(0);
+    const tl = await db.query<any>(
+      `SELECT id FROM animal_events WHERE animal_id = $1 AND event_type = 'clinical_case_followup'`,
+      [a],
+    );
+    expect(tl, 'la ficha del animal quedó limpia').toHaveLength(0);
+  });
+
+  it('un caso que NO terminó sigue aceptando seguimientos', async () => {
+    // La otra mitad: la guarda no puede haberse comido el uso normal. Y `died` a propósito NO es
+    // terminal —todavía puede cerrarse—, porque el resultado de una necropsia llega después de la
+    // muerte y tiene que poder anotarse.
+    const a = await animal();
+    const c: any = await cases.create({ animal_id: a });
+    await cases.addFollowUp(c.id, { note: 'sigue decaída' });
+    await cases.addFollowUp(c.id, { status: 'in_treatment' });
+    const muerto: any = await cases.create({ animal_id: await animal() });
+    await cases.addFollowUp(muerto.id, { status: 'died' });
+    const r: any = await cases.addFollowUp(muerto.id, { note: 'necropsia: neumonía' });
+    expect(r.status).toBe('died');
   });
 
   it('creación idempotente por Idempotency-Key', async () => {

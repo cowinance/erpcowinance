@@ -13,6 +13,8 @@ export {
   assertCaseOutcome,
   assertCaseTransition,
   isOpenCaseStatus,
+  isTerminalCaseStatus,
+  assertCaseAcceptsActivity,
 } from './clinical-case';
 export type { ClinicalCaseStatus, ClinicalCaseSeverity, ClinicalCaseOutcome } from './clinical-case';
 export { ADMISSION_KINDS, InvalidAdmissionError, assertAdmissionKind, resolveAdmissionKind } from './admission';

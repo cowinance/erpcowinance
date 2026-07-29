@@ -80,3 +80,39 @@ export function assertCaseTransition(from: ClinicalCaseStatus, to: ClinicalCaseS
 export function isOpenCaseStatus(status: ClinicalCaseStatus): boolean {
   return OPEN_CASE_STATUSES.includes(status);
 }
+
+/**
+ * ¿Es un estado del que ya no se sale?
+ *
+ * Se DERIVA de la tabla de transiciones en vez de listar los estados a mano: si mañana `closed`
+ * dejara de ser terminal —o apareciera otro que sí lo es— esto lo sigue sin que nadie se acuerde de
+ * tocar dos lugares. Es la misma razón por la que el piso del intervalo entre partos es la gestación
+ * y no un número aparte.
+ */
+export function isTerminalCaseStatus(status: ClinicalCaseStatus): boolean {
+  return (CLINICAL_CASE_TRANSITIONS[status] ?? []).length === 0;
+}
+
+/**
+ * Un caso terminado no admite más actividad.
+ *
+ * La máquina de estados ya decía que `closed` es terminal, pero solo la miraba el cambio de estado:
+ * un seguimiento que traía únicamente una NOTA no consultaba nada, y se podía seguir anotando sobre
+ * un caso cerrado para siempre. Y no quedaba en un rincón: cada nota escribe en la línea de tiempo
+ * del ANIMAL como «seguimiento de caso clínico», así que la ficha mostraba movimiento de un caso que
+ * el productor había dado por terminado — y en el historial del caso aparecían hechos posteriores a
+ * su cierre.
+ *
+ * Cerrar es una afirmación: «esto terminó, con este resultado». Si se le puede seguir agregando, no
+ * afirma nada.
+ *
+ * Ojo con lo que NO entra acá: `died` no es terminal —todavía puede cerrarse— y eso es a propósito,
+ * porque el resultado de una necropsia llega después de la muerte y tiene que poder anotarse.
+ */
+export function assertCaseAcceptsActivity(status: ClinicalCaseStatus): void {
+  if (isTerminalCaseStatus(status))
+    throw new InvalidClinicalCaseError(
+      'clinical_case.closed',
+      'El caso está cerrado y no admite más seguimientos. Si el animal volvió a enfermar, abrí un caso nuevo.',
+    );
+}

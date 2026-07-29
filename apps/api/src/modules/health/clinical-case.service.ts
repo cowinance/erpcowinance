@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import {
+  assertCaseAcceptsActivity,
   assertNotBeforeBirth,
   HealthApplicationError,
   assertCaseOutcome,
@@ -143,6 +144,16 @@ export class ClinicalCaseService {
   async addFollowUp(id: string, body: any) {
     return this.db.tx(async (q) => {
       const cc = await this.requireCase(q, id);
+      // Antes de mirar QUÉ trae el seguimiento: si el caso ya terminó, no admite ninguno.
+      //
+      // La comprobación estaba solo en la rama del cambio de estado —`assertCaseTransition` la hacía
+      // por su cuenta— así que un seguimiento con únicamente una nota entraba sin consultar la
+      // máquina. Va acá arriba, antes de la bifurcación, que es donde no se puede olvidar.
+      try {
+        assertCaseAcceptsActivity(cc.status as ClinicalCaseStatus);
+      } catch (e) {
+        throw this.mapDomain(e);
+      }
       const occurredAt = body.occurred_at ?? new Date().toISOString();
       let newStatus: ClinicalCaseStatus | null = null;
       if (body.status) {
@@ -259,7 +270,7 @@ export class ClinicalCaseService {
 
   private mapDomain(e: unknown): never {
     if (e instanceof InvalidClinicalCaseError) {
-      if (e.code === 'clinical_case.invalid_transition') throw new ConflictException({ code: e.code, title: e.reason });
+      if (e.code === 'clinical_case.invalid_transition' || e.code === 'clinical_case.closed') throw new ConflictException({ code: e.code, title: e.reason });
       throw new BadRequestException({ code: e.code, title: e.reason });
     }
     throw e;
