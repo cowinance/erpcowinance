@@ -4,10 +4,11 @@ import { SyncProvider, useSync } from '@/sync/SyncContext';
 import { AccountProvider } from '@/account/AccountContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import { PushBridge } from '@/push/PushBridge';
-import { T } from '@/theme';
+import { useTheme } from '@/useTheme';
 
 function Gate() {
   const sync = useSync();
+  const T = useTheme();
   if (sync.status === 'login') return <LoginScreen />;
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: T.canvas } }}>
@@ -27,7 +28,12 @@ export default function RootLayout() {
   return (
     <SyncProvider>
       <AccountProvider>
-        <StatusBar style="dark" />
+        {/*
+          `auto` y no `dark`: la barra de estado tiene que invertirse con el sistema. Estaba fija en
+          oscuro, así que en modo oscuro los iconos negros quedaban sobre un fondo negro —
+          invisibles.
+        */}
+        <StatusBar style="auto" />
         <PushBridge />
         <Gate />
       </AccountProvider>

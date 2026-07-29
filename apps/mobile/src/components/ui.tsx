@@ -1,5 +1,5 @@
 import { Pressable, ScrollView, ScrollViewProps, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 /**
  * El scroll de una pantalla con formulario, que NO deja que el teclado tape lo que se escribe.
@@ -44,10 +44,13 @@ export function FormScroll({ children, contentContainerStyle, ...rest }: ScrollV
 }
 
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
+  const styles = useStyles(makeStyles);
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
 export function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'success' | 'warning' }) {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <Card style={{ flex: 1 }}>
       <Text style={styles.kpiLabel}>{label}</Text>
@@ -72,6 +75,8 @@ export function Button({
   variant?: 'primary' | 'secondary' | 'danger';
   disabled?: boolean;
 }) {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -98,6 +103,8 @@ export function Button({
 }
 
 export function SyncDot({ pending }: { pending: number }) {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1.5'] }}>
       <View style={[styles.dot, { backgroundColor: pending ? T.warning : T.success }]} />
@@ -106,7 +113,8 @@ export function SyncDot({ pending }: { pending: number }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   card: {
     backgroundColor: T.surface,
     borderRadius: T.radiusMd,

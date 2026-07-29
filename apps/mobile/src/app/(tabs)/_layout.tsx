@@ -6,10 +6,11 @@ import { Tabs, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync } from '@/sync/SyncContext';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 import * as haptics from '@/lib/haptics';
 
 function CaptureButton() {
+  const styles = useStyles(makeStyles);
   return (
     <Pressable
       onPress={() => {
@@ -26,6 +27,8 @@ function CaptureButton() {
 
 export default function TabsLayout() {
   const unread = useSync().unreadNotifications(); // fuente única del contador (P7-4.c)
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <Tabs
       screenOptions={{
@@ -77,7 +80,8 @@ export default function TabsLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   fabWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fab: {
     width: 52,

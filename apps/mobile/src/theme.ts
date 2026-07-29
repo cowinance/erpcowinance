@@ -17,64 +17,91 @@ import { primitive, semantic, radius, typeRole, typeCompat, space, elevation, ty
 function rnShadow(e: Elevation | null) {
   if (!e) return {};
   return {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: e.y },
-    shadowOpacity: e.opacity,
-    shadowRadius: e.blur / 2,
-    elevation: e.y,
-  } as const;
-}
-
-const L = semantic.light;
-
-export const T = {
-  brand900: primitive.brand['900'],
-  brand700: primitive.brand['700'],
-  brand500: primitive.brand['500'],
-  brand300: primitive.brand['300'],
-  brand100: primitive.brand['100'],
-  amber: primitive.amber['500'],
-
-  canvas: L.bg.canvas,
-  surface: L.bg.surface,
-  sunken: L.bg.sunken,
-  borderSubtle: L.border.subtle,
-  borderStrong: L.border.strong,
-  ink: L.text.primary,
-  ink2: L.text.secondary,
-  ink3: L.text.tertiary,
-
-  success: L.status.success,
-  warning: L.status.warning,
-  danger: L.status.danger,
-  info: L.status.info,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: e.y },
+      shadowOpacity: e.opacity,
+      shadowRadius: e.blur / 2,
+      elevation: e.y,
+    } as const;
+  }
 
   /**
-   * Profundidad, en las tres alturas del sistema.
+   * La paleta para UN esquema.
    *
-   * `shadowRadius` es la mitad del difuminado de CSS: iOS mide el radio de la sombra y CSS mide el
-   * ancho total del degradado, así que usar el número tal cual duplicaría el desenfoque. `elevation`
-   * es lo de Android, que solo entiende una altura — se aproxima con el desplazamiento.
+   * Antes esto era `const L = semantic.light` y un objeto `T` congelado al importar. El modo oscuro
+   * necesita lo contrario: `useColorScheme()` cambia EN CALIENTE —el sistema pasa a oscuro al
+   * atardecer— y un objeto de módulo no puede reaccionar a eso.
    *
-   * Sin sombra (`null`, como la altura 1 en oscuro) devuelve un objeto vacío: se puede esparcir en
-   * cualquier estilo sin condicionales en el llamador.
+   * Se construye por esquema y se arman los dos una sola vez (abajo), así la identidad del objeto es
+   * estable y los `useMemo` de los estilos no se recalculan de más.
    */
-  shadow: (nivel: '1' | '2' | '3') => rnShadow(elevation.light[nivel]),
+  export function buildTheme(scheme: 'light' | 'dark') {
+    const L = semantic[scheme];
+    return {
+    brand900: primitive.brand['900'],
+    brand700: primitive.brand['700'],
+    brand500: primitive.brand['500'],
+    brand300: primitive.brand['300'],
+    brand100: primitive.brand['100'],
+    amber: primitive.amber['500'],
 
-  radiusSm: radius.sm,
-  radiusMd: radius.md,
-  radiusLg: radius.lg,
+    canvas: L.bg.canvas,
+    surface: L.bg.surface,
+    sunken: L.bg.sunken,
+    borderSubtle: L.border.subtle,
+    borderStrong: L.border.strong,
+    ink: L.text.primary,
+    ink2: L.text.secondary,
+    ink3: L.text.tertiary,
 
-  // Escala tipográfica (P1.4.3.5a, ADR-0014): roles y aliases NUMÉRICOS derivados
-  // de la fuente canónica. RN usa números (los strings con `px` son solo del
-  // generador web); NO se re-tipean valores acá (igual criterio que color/radio).
-  // `type.*` = roles estables; `compat.*` = aliases temporales CONGELADOS (deuda).
-  type: typeRole,
-  compat: typeCompat,
+    success: L.status.success,
+    warning: L.status.warning,
+    danger: L.status.danger,
+    info: L.status.info,
 
-  // Escala de SPACING (P1.4.3.6, ADR-0014-B): grid 4px + sub-unidad 2px.
-  // Números (RN), derivados de la fuente canónica SIN re-tipear (igual que
-  // color/radio/tipografía). Claves estilo Tailwind: `space['2']`=8, `['6']`=24…
-  // Solo layout (padding/margin/gap); NO dimensiones/alturas/touch targets.
-  space,
-};
+    /**
+     * Profundidad, en las tres alturas del sistema.
+     *
+     * `shadowRadius` es la mitad del difuminado de CSS: iOS mide el radio de la sombra y CSS mide el
+     * ancho total del degradado, así que usar el número tal cual duplicaría el desenfoque. `elevation`
+     * es lo de Android, que solo entiende una altura — se aproxima con el desplazamiento.
+     *
+     * Sin sombra (`null`, como la altura 1 en oscuro) devuelve un objeto vacío: se puede esparcir en
+     * cualquier estilo sin condicionales en el llamador.
+     */
+      shadow: (nivel: '1' | '2' | '3') => rnShadow(elevation[scheme][nivel]),
+
+    radiusSm: radius.sm,
+    radiusMd: radius.md,
+    radiusLg: radius.lg,
+
+    // Escala tipográfica (P1.4.3.5a, ADR-0014): roles y aliases NUMÉRICOS derivados
+    // de la fuente canónica. RN usa números (los strings con `px` son solo del
+    // generador web); NO se re-tipean valores acá (igual criterio que color/radio).
+    // `type.*` = roles estables; `compat.*` = aliases temporales CONGELADOS (deuda).
+    type: typeRole,
+    compat: typeCompat,
+
+    // Escala de SPACING (P1.4.3.6, ADR-0014-B): grid 4px + sub-unidad 2px.
+    // Números (RN), derivados de la fuente canónica SIN re-tipear (igual que
+    // color/radio/tipografía). Claves estilo Tailwind: `space['2']`=8, `['6']`=24…
+    // Solo layout (padding/margin/gap); NO dimensiones/alturas/touch targets.
+    space,
+  };
+}
+
+/** Los dos temas, armados una vez. Identidad estable → los estilos memoizados no se recalculan. */
+export const themes = { light: buildTheme('light'), dark: buildTheme('dark') } as const;
+
+export type Theme = ReturnType<typeof buildTheme>;
+
+/**
+ * El tema CLARO, estático.
+ *
+ * Sigue en pie a propósito: la conversión al tema reactivo va por pasos, y mientras dura, lo que
+ * todavía no se convirtió tiene que seguir compilando y viéndose como hoy. Una app a medio convertir
+ * con pantallas a medio color sería peor que una clara y consistente.
+ *
+ * Todo lo NUEVO usa `useTheme()`. Esto se va a ir vaciando a medida que avancen los pasos.
+ */
+export const T = themes.light;
