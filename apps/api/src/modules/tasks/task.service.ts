@@ -44,6 +44,41 @@ export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 export const TASK_TYPES: readonly TaskType[] = ['health', 'breeding', 'feeding', 'maintenance', 'crop', 'general'];
 export const TASK_PRIORITIES: readonly TaskPriority[] = ['low', 'normal', 'high', 'urgent'];
 
+/**
+ * A qué puede apuntar una tarea, y en qué tabla vive eso.
+ *
+ * `related_id` es POLIMÓRFICO: apunta a un animal, un lote, un potrero o una asignación de
+ * protocolo según lo que diga `related_type`. Por eso no hay clave foránea que lo proteja —una
+ * columna no puede referenciar cuatro tablas— y por eso la comprobación tiene que ser explícita.
+ *
+ * Sin ella se aceptaba cualquier cosa: una tarea sobre un animal inexistente, y un `related_type`
+ * inventado como «tractor». Lo que queda es una tarea cuyo enlace no lleva a ningún lado y que en
+ * el tablero aparece sin nombre de relacionado, sin que nadie sepa por qué.
+ *
+ * La lista SON los tipos que el sistema usa —animal, lote y asignación de protocolo— más potrero,
+ * que el tablero ya sabe resolver aunque todavía nada lo cree.
+ */
+const RELATED_TABLES: Record<string, string> = {
+  animal: 'animals',
+  lot: 'lots',
+  paddock: 'paddocks',
+  protocol_assignment: 'repro_protocol_assignments',
+};
+
+/**
+ * Cómo se llama cada cosa en castellano, para el mensaje de error.
+ *
+ * Los códigos son internos —`lot`, `protocol_assignment`— y el mensaje lo lee el productor: «No
+ * existe el lot al que apunta la tarea» suena a que se rompió el sistema, no a que hay un dato mal.
+ */
+const RELATED_LABELS: Record<string, string> = {
+  animal: 'animal',
+  lot: 'lote',
+  paddock: 'potrero',
+  protocol_assignment: 'protocolo',
+};
+export const TASK_RELATED_TYPES: readonly string[] = Object.keys(RELATED_TABLES);
+
 export interface TaskContext {
   origin: TaskOrigin;
   /** true SOLO para mutaciones server-authored (REST/web/Sanidad). El sync llama con false. */
@@ -141,6 +176,7 @@ export class TaskService {
       throw new BadRequestException({ code: 'task.type_invalid', title: `Tipo de tarea inválido: ${type}. Puede ser ${TASK_TYPES.join(', ')}.` });
     if (!TASK_PRIORITIES.includes(priority))
       throw new BadRequestException({ code: 'task.priority_invalid', title: `Prioridad inválida: ${priority}. Puede ser ${TASK_PRIORITIES.join(', ')}.` });
+
     const dueDate = input.dueDate ?? null;
     const description = input.description ?? null;
     const relatedType = input.relatedType ?? null;
@@ -148,6 +184,35 @@ export class TaskService {
     const assignedTo = input.assignedTo ?? null;
     const ruleKey = input.ruleKey ?? null;
     const recurrenceId = input.recurrenceId ?? null;
+
+    /*
+     * A qué apunta la tarea: el tipo tiene que ser conocido Y la fila tiene que existir.
+     *
+     * Las dos mitades hacen falta. Sin la primera entraba un `related_type` inventado; sin la
+     * segunda, una tarea sobre un animal que no existe. En los dos casos queda un enlace que no
+     * lleva a ningún lado, y el tablero la muestra sin nombre de relacionado — un hueco que desde la
+     * pantalla no se puede explicar ni corregir.
+     *
+     * Va en `createTask` porque es el embudo: por él pasan REST, los planes sanitarios, las reglas
+     * automáticas, las recurrencias y el sync. Cuesta una consulta por tarea sobre una clave
+     * primaria; es el precio de que la referencia sea cierta y no una suposición de cada llamador.
+     */
+    if (relatedType != null) {
+      const tabla = RELATED_TABLES[relatedType];
+      if (!tabla)
+        throw new BadRequestException({
+          code: 'task.related_type_invalid',
+          title: `«${relatedType}» no es algo a lo que una tarea pueda apuntar. Puede ser ${TASK_RELATED_TYPES.map((x) => RELATED_LABELS[x]).join(', ')}.`,
+        });
+      if (!relatedId)
+        throw new BadRequestException({ code: 'task.related_id_missing', title: `Falta indicar a qué ${RELATED_LABELS[relatedType]} apunta la tarea.` });
+      const existe = await q.one<{ id: string }>(
+        `SELECT id FROM ${tabla} WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+        [relatedId, t],
+      );
+      if (!existe)
+        throw new BadRequestException({ code: 'task.related_not_found', title: `No existe el ${RELATED_LABELS[relatedType]} al que apunta la tarea.` });
+    }
 
     // Dedup de AUTOGENERADAS (E4): una tarea VIVA por (tenant, rule_key). Si ya existe una
     // pendiente/en-curso con esta clave, no se crea otra (idempotente; race-safe con el índice

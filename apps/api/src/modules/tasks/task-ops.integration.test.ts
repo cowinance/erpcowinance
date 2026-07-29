@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { DbService } from '../../db/db.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
@@ -304,5 +305,49 @@ describe('TaskService · centro operativo (E1)', () => {
     const porDefecto = await tasks.list(undefined, 1000);
     expect(porDefecto.every((t: any) => t.status === 'pending' || t.status === 'in_progress')).toBe(true);
     expect((await tasks.list('all', 1000)).length).toBeGreaterThan(porDefecto.length);
+  });
+
+  it('UNA TAREA NO PUEDE APUNTAR A LO QUE NO EXISTE', async () => {
+    // `related_id` es POLIMÓRFICO —apunta a un animal, un lote, un potrero o un protocolo según el
+    // tipo— así que ninguna clave foránea lo protege: una columna no puede referenciar cuatro
+    // tablas. Sin comprobación explícita entraba una tarea sobre un animal inexistente, y lo que
+    // queda es un enlace que no lleva a ningún lado y un tablero que la muestra sin nombre de
+    // relacionado, sin que nadie pueda explicar por qué.
+    await expect(
+      db.tx((q) => tasks.createTask(q, { title: 'REL fantasma', relatedType: 'animal', relatedId: randomUUID() }, ctx())),
+    ).rejects.toMatchObject({ response: { code: 'task.related_not_found' } });
+
+    await expect(
+      db.tx((q) => tasks.createTask(q, { title: 'REL tipo', relatedType: 'tractor', relatedId: randomUUID() }, ctx())),
+    ).rejects.toMatchObject({ response: { code: 'task.related_type_invalid' } });
+
+    await expect(
+      db.tx((q) => tasks.createTask(q, { title: 'REL sin id', relatedType: 'animal' }, ctx())),
+    ).rejects.toMatchObject({ response: { code: 'task.related_id_missing' } });
+  });
+
+  it('apuntar a un animal o un lote REALES sigue andando', async () => {
+    // La otra mitad: la guarda no puede comerse el caso normal, que es el de todas las tareas que
+    // generan las reglas automáticas.
+    const [animal] = await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id = $1 AND deleted_at IS NULL LIMIT 1`, [db.tenant]);
+    const [lote] = await db.query<{ id: string }>(`SELECT id FROM lots WHERE tenant_id = $1 AND deleted_at IS NULL LIMIT 1`, [db.tenant]);
+
+    expect(await mk({ title: 'REL animal ok', relatedType: 'animal', relatedId: animal.id })).toBeTruthy();
+    expect(await mk({ title: 'REL lote ok', relatedType: 'lot', relatedId: lote.id })).toBeTruthy();
+    expect(await mk({ title: 'REL sin relacionado' }), 'y sin relacionado también').toBeTruthy();
+  });
+
+  it('el mensaje usa el nombre en CASTELLANO, no el código interno', async () => {
+    // «No existe el lot al que apunta la tarea» suena a que se rompió el sistema, no a que hay un
+    // dato mal cargado. Lo lee el productor.
+    // `getResponse()` y no `.response`: NestJS expone el cuerpo por ese método, y leer la propiedad
+    // devuelve undefined — la aserción pasaría sin comprobar nada.
+    let titulo = '';
+    try {
+      await db.tx((q) => tasks.createTask(q, { title: 'REL msg', relatedType: 'lot', relatedId: randomUUID() }, ctx()));
+    } catch (e: any) {
+      titulo = (e.getResponse?.() ?? e.response ?? {}).title ?? '';
+    }
+    expect(titulo, 'tiene que decir «lote», no «lot»').toContain('lote');
   });
 });

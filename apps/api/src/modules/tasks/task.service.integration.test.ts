@@ -145,8 +145,17 @@ describe('TaskService · integración', () => {
 
   it('contrato sanitario preservado: PlansService.completeTask delega en la MISMA regla', async () => {
     // Una tarea de salud creada por la vía neutral (como lo hace ahora plans.apply).
+    //
+    // El animal es REAL y no un `randomUUID()`: desde que `createTask` comprueba que la referencia
+    // exista, apuntar a un animal inventado se rechaza. El test antes se apoyaba en esa falta de
+    // validación sin necesitarla — lo que prueba es que `plans.completeTask` delega en la misma
+    // regla, no que se pueda apuntar a la nada.
+    const [animal] = await db.query<{ id: string }>(
+      `SELECT id FROM animals WHERE tenant_id = $1 AND deleted_at IS NULL LIMIT 1`,
+      [db.tenant],
+    );
     const { taskId } = await db.tx((q) =>
-      tasks.createTask(q, { title: 'Vacuna — caravana 100', type: 'health', relatedType: 'animal', relatedId: randomUUID(), dueDate: '2026-07-15' }, { origin: 'health', emitServerOrigin: true, actorUserId: userId }),
+      tasks.createTask(q, { title: 'Vacuna — caravana 100', type: 'health', relatedType: 'animal', relatedId: animal.id, dueDate: '2026-07-15' }, { origin: 'health', emitServerOrigin: true, actorUserId: userId }),
     );
     const res = await plans.completeTask(taskId);
     expect(res).toEqual({ id: taskId, status: 'done' });
