@@ -1,4 +1,4 @@
-import { computeUnitCost } from '../costing/unit-cost';
+import { costPerUnit } from '../costing/unit-cost';
 
 /**
  * Métricas de engorde a corral (C2 · feedlot) — DERIVADAS, regla única. Un corral es un lote con
@@ -6,9 +6,13 @@ import { computeUnitCost } from '../costing/unit-cost';
  * peso/GDP de `v_weighings`) se derivan los indicadores clave del engorde. Nada se persiste: se
  * calcula al leer, reusando el GDP como fuente única (ADR-0007).
  *
- * - `conversion`: kg de alimento por kg ganado (kgFeed / kgGained). null si no hubo ganancia.
- * - `costPerKgGained`: costo del kilo ganado. Delega en `computeUnitCost` (regla única de costo
- *   unitario, G2): la división y sus guardas viven en un solo lugar. null si no hubo ganancia.
+ * - `conversion`: kg de alimento por kg ganado (kgFeed / kgGained). null si no hubo ganancia — y
+ *   también si NO SE CARGÓ ALIMENTO: un corral sin entregas registradas daba «conversión 0», que se
+ *   lee como conversión perfecta y ordena primero justo al que no tiene los datos. Un animal vivo no
+ *   ganó 1.490 kg comiendo cero; lo que falta es el dato, no el alimento.
+ * - `costPerKgGained`: costo del kilo ganado. Delega en `costPerUnit` (regla única, G2): la división
+ *   y sus guardas —incluida la de costo sin atribuir— viven en un solo lugar. null si no hubo
+ *   ganancia o si no hay costo cargado.
  * - `daysToFinish`: días a terminación = (pesoObjetivo − pesoActual) / GDP. null si falta objetivo,
  *   el GDP no es positivo, o ya se alcanzó el objetivo.
  */
@@ -36,8 +40,9 @@ export function computeFeedlotMetrics(input: FeedlotInput): FeedlotMetrics {
   const kgGained = num(input.kgGained);
   const gained = Number.isFinite(kgGained) && kgGained > 0;
 
-  const conversion = gained && Number.isFinite(feedKg) ? round2(feedKg / kgGained) : null;
-  const { unitCost: costPerKgGained } = computeUnitCost({ totalCost: feedCost, output: kgGained });
+  // `feedKg > 0` y no solo `isFinite`: sin alimento cargado la conversión es desconocida, no cero.
+  const conversion = gained && Number.isFinite(feedKg) && feedKg > 0 ? round2(feedKg / kgGained) : null;
+  const { unitCost: costPerKgGained } = costPerUnit({ totalCost: feedCost, output: kgGained });
 
   let daysToFinish: number | null = null;
   const target = input.targetWeightKg;

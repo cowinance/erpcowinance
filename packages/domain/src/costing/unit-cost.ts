@@ -35,6 +35,30 @@ const positive = (v: unknown): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+/**
+ * ¿Este costo total es un COSTO, o es que no se cargó ninguno?
+ *
+ * Un total en cero con producción no dice «producir salió gratis», dice que nadie clasificó el
+ * gasto todavía. La diferencia importa porque el número se usa para comparar: un corral con «$0 el
+ * kilo» ordena primero, como el más eficiente de la finca, y es exactamente el que no tiene los
+ * datos cargados.
+ *
+ * Es el mismo razonamiento que la guarda de producción de acá abajo, aplicado al otro lado de la
+ * división. El motor de costos ya lo hacía por su cuenta —ocultaba el unitario cuando `cost <= 0` y
+ * explicaba por qué— pero las métricas de engorde no, así que el MISMO número salía en cero en el
+ * lote y oculto en costos. Ahora la regla es una sola.
+ *
+ * Ojo con lo que NO entra acá: un MARGEN en cero sí es un dato —quedar hecho— y uno negativo
+ * también. Por eso `computeUnitCost` sigue siendo la división neutra y esto es una capa aparte:
+ * ocultar un margen cero escondería justo la actividad que no deja nada.
+ */
+export function costPerUnit(input: UnitCostInput): UnitCostResult {
+  const cost = Number(input.totalCost);
+  const sinCostoAtribuido = !Number.isFinite(cost) || cost <= 0;
+  if (sinCostoAtribuido) return { unitCost: null, costPerHa: null };
+  return computeUnitCost(input);
+}
+
 export function computeUnitCost(input: UnitCostInput): UnitCostResult {
   const cost = Number(input.totalCost);
   if (!Number.isFinite(cost)) return { unitCost: null, costPerHa: null };

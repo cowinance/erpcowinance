@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { addFarmDays, computeBudgetVariance, computeMargin, computeUnitCost, summarizeLaborByActivity } from '@cowinance/domain';
+import { addFarmDays, computeBudgetVariance, computeMargin, computeUnitCost, costPerUnit, summarizeLaborByActivity } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { SALE_COUNTS } from '../commerce/sales.service';
 
@@ -415,16 +415,15 @@ export class CostingService {
     const cost = +(r?.cost ?? 0);
     const output = +(r?.output ?? 0);
     const areaHa = r?.area_ha != null ? +r.area_ha : null;
-    const { unitCost, costPerHa } = computeUnitCost({ totalCost: cost, output, areaHa });
+    // `costPerUnit` y no `computeUnitCost`: la regla de «un costo en cero no es un costo, es que no
+    // se cargó ninguno» pasó al dominio. Estaba acá, resuelta a mano, y por eso las métricas de
+    // engorde —que dividen los mismos pesos por el mismo alimento— seguían mostrando el «$0 el kilo»
+    // que esta pantalla ocultaba. El MISMO número contestaba distinto según dónde se lo mirara.
+    const { unitCost, costPerHa } = costPerUnit({ totalCost: cost, output, areaHa });
 
     let note: string | null = null;
     if (output > 0 && cost <= 0) note = ACTIVITY_NOTES[activity].costMissing;
     else if (cost > 0 && output <= 0) note = ACTIVITY_NOTES[activity].outputMissing;
-
-    // Producción SIN costo atribuido: aritméticamente el unitario da 0 (la regla de dominio hace
-    // bien su trabajo: cero es un costo válido), pero mostrar "$0 el litro" se lee como "gratis"
-    // cuando en realidad falta clasificar. Se oculta el número y queda la explicación en `note`.
-    const unattributed = output > 0 && cost <= 0;
 
     return {
       activity,
@@ -432,8 +431,8 @@ export class CostingService {
       cost: +cost.toFixed(2),
       output: +output.toFixed(3),
       output_unit: outputUnit,
-      unit_cost: unattributed ? null : unitCost,
-      cost_per_ha: unattributed ? null : costPerHa,
+      unit_cost: unitCost,
+      cost_per_ha: costPerHa,
       detail: { lots: r?.lots != null ? +r.lots : null, head: r?.head != null ? +r.head : null, crops: r?.crops != null ? +r.crops : null, area_ha: areaHa },
       note,
     };

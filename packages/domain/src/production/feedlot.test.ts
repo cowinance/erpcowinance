@@ -28,3 +28,29 @@ describe('computeFeedlotMetrics', () => {
     expect(computeFeedlotMetrics({ feedKg: 0, feedCost: 0, kgGained: 1, avgWeightKg: 500, avgAdg: 1.2, targetWeightKg: 480 }).daysToFinish).toBeNull();
   });
 });
+
+describe('un corral sin alimento cargado no tiene conversión perfecta', () => {
+  it('conversión y costo del kilo van en null, no en cero', () => {
+    // Medido en el demo antes del arreglo: feed_kg 0, kg_gained 1490 → conversion 0 y
+    // cost_per_kg_gained 0. Cero acá afirma dos cosas falsas: que convierte perfecto y que engordar
+    // sale gratis. Y como la regla es del dominio, el mismo cero salía en el lote y en /engorde.
+    const m = computeFeedlotMetrics({ feedKg: 0, feedCost: 0, kgGained: 1490, avgWeightKg: 375, avgAdg: 0.9 });
+    expect(m.conversion).toBeNull();
+    expect(m.costPerKgGained).toBeNull();
+  });
+
+  it('con alimento cargado los dos números aparecen', () => {
+    // La otra mitad: la guarda no puede haberse comido el caso bueno.
+    const m = computeFeedlotMetrics({ feedKg: 8000, feedCost: 240_000, kgGained: 1000, avgWeightKg: 375, avgAdg: 0.9 });
+    expect(m.conversion).toBe(8);
+    expect(m.costPerKgGained).toBe(240);
+  });
+
+  it('alimento cargado SIN costo: la conversión se sabe, el costo no', () => {
+    // Se cargó cuánto comieron pero no cuánto costó. Son dos datos distintos y se contestan por
+    // separado: esconder la conversión perdería lo único que sí se sabe.
+    const m = computeFeedlotMetrics({ feedKg: 8000, feedCost: 0, kgGained: 1000, avgWeightKg: 375, avgAdg: 0.9 });
+    expect(m.conversion).toBe(8);
+    expect(m.costPerKgGained).toBeNull();
+  });
+});

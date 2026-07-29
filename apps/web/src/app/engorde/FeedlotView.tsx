@@ -27,7 +27,10 @@ function Metric({ label, value, unit }: { label: string; value: string; unit?: s
       <div className="text-caption text-ink-3">{label}</div>
       <div className="tnum text-body font-semibold">
         {value}
-        {unit && <span className="ml-0.5 text-caption font-normal text-ink-3">{unit}</span>}
+        {/* La unidad solo acompaña a un número. Con el dato ausente daba «—kg/kg», que se lee como
+            un número raro en vez de como «no se sabe» — y desde que los ceros falsos pasaron a «—»
+            este caso dejó de ser excepcional. */}
+        {unit && value !== '—' && <span className="ml-0.5 text-caption font-normal text-ink-3">{unit}</span>}
       </div>
     </div>
   );
@@ -74,6 +77,14 @@ export function FeedlotView({ initial }: { initial: Lot[] }) {
             </div>
             <div className="mt-3 border-t border-subtle pt-2 text-caption text-ink-3">
               Alimento: <span className="tnum">{fmt(l.feed_kg)}</span> kg · costo <span className="tnum">{fmt(l.feed_cost)}</span>
+              {/* Un guion solo no dice qué hacer. Antes acá había un 0 que mentía; cambiarlo por «—»
+                  arregla la mentira pero deja al productor sin saber por qué, así que se nombra lo
+                  que falta y dónde se carga. */}
+              {!l.feed_kg ? (
+                <span className="text-warning"> · sin entregas de alimento cargadas, por eso no hay conversión ni costo del kilo</span>
+              ) : !l.feed_cost ? (
+                <span className="text-warning"> · las entregas no tienen costo cargado, por eso no hay costo del kilo</span>
+              ) : null}
             </div>
           </Card>
         ))}
