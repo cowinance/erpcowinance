@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, KpiCard, EmptyState, TagMono } from '@/components/ui';
+import { LastUpdated } from '@/components/LastUpdated';
 import { WeightChart } from '@/components/WeightChart';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { FarmSetup, type Setup } from '@/components/FarmSetup';
@@ -184,6 +185,7 @@ export default async function Dashboard() {
                   {farms?.[0]?.name ? ` · ${farms[0].name}` : ''}
                 </span>
                 {focus && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-caption font-medium text-brand">Vista: {focus.label}</span>}
+                <LastUpdated at={home.generated_at} />
               </p>
             </div>
             <Link
