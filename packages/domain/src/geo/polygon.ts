@@ -46,7 +46,60 @@ export function normalizePolygonRing(input: unknown): Ring {
   // Cuenta vértices distintos.
   const distinct = new Set(pts.map((p) => `${p[0]},${p[1]}`));
   if (distinct.size < 3) throw new InvalidPolygonError('El potrero necesita al menos 3 vértices distintos');
+  if (seCruza(pts))
+    throw new InvalidPolygonError('Los lados del potrero se cruzan. Revisá el orden de los puntos: el contorno tiene que poder recorrerse sin pasar dos veces por el mismo lugar');
   return pts;
+}
+
+/** Signo del producto cruzado: de qué lado de `a→b` cae `c`. 0 = alineados. */
+function orientacion(a: number[], b: number[], c: number[]): number {
+  const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+/** Con `p` alineado con `a→b`, ¿cae DENTRO del segmento? */
+function enElSegmento(a: number[], b: number[], p: number[]): boolean {
+  return Math.min(a[0], b[0]) <= p[0] && p[0] <= Math.max(a[0], b[0]) && Math.min(a[1], b[1]) <= p[1] && p[1] <= Math.max(a[1], b[1]);
+}
+
+function seCortan(p1: number[], p2: number[], p3: number[], p4: number[]): boolean {
+  const d1 = orientacion(p3, p4, p1);
+  const d2 = orientacion(p3, p4, p2);
+  const d3 = orientacion(p1, p2, p3);
+  const d4 = orientacion(p1, p2, p4);
+  if (d1 !== d2 && d3 !== d4) return true;
+  // Casos alineados: un extremo apoyado sobre el otro segmento también es un cruce — el contorno se
+  // pellizca y deja de encerrar una sola superficie.
+  if (d1 === 0 && enElSegmento(p3, p4, p1)) return true;
+  if (d2 === 0 && enElSegmento(p3, p4, p2)) return true;
+  if (d3 === 0 && enElSegmento(p1, p2, p3)) return true;
+  if (d4 === 0 && enElSegmento(p1, p2, p4)) return true;
+  return false;
+}
+
+/**
+ * ¿El contorno se cruza a sí mismo?
+ *
+ * Hace falta porque la fórmula del cordón NO se da cuenta: sobre un «moño» —los vértices tomados en
+ * orden equivocado— las dos mitades tienen signo opuesto y se cancelan, así que devolvía 0 ha sin
+ * una queja. Un potrero de 0 ha no tiene carga animal ni kg/ha calculables, y el productor no tenía
+ * cómo saber que lo que estaba mal era el orden en que fue tocando los puntos.
+ *
+ * Se comparan los lados NO CONSECUTIVOS: los que comparten un vértice se tocan por definición, y el
+ * primero con el último también, porque el contorno cierra. Es O(n²), y un potrero se dibuja con
+ * unos pocos vértices.
+ */
+function seCruza(ring: Ring): boolean {
+  const n = ring.length;
+  if (n < 4) return false; // un triángulo no puede cruzarse
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const adyacentes = j === i + 1 || (i === 0 && j === n - 1);
+      if (adyacentes) continue;
+      if (seCortan(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -97,6 +150,9 @@ export function polygonAreaHa(input: unknown): number {
   // las coordenadas y no la superficie que alguien tipeó.
   if (!Number.isFinite(ha) || ha > MAX_PADDOCK_HA)
     throw new InvalidPolygonError('El dibujo da una superficie imposible para un potrero: revisá las coordenadas, parecen estar en otra escala');
+  // Superficie nula: los puntos están todos sobre una misma recta. No es un potrero, es una línea —
+  // y guardarlo dejaba una carga animal y unos kg/ha que no se pueden calcular nunca.
+  if (ha <= 0) throw new InvalidPolygonError('El dibujo no encierra superficie: los puntos están alineados');
   return ha;
 }
 

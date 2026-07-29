@@ -55,10 +55,30 @@ export class LandService {
     }
   }
 
+  /**
+   * Dos potreros no pueden llamarse igual.
+   *
+   * En una finca el potrero se nombra en voz alta —«llevá el rodeo al Norte»— así que dos «Potrero
+   * Norte» en la lista no se distinguen, y todos los selectores de destino los muestran idénticos:
+   * mover un lote al equivocado no deja ninguna señal.
+   *
+   * Se compara sin mayúsculas ni espacios de sobra, que es como se repite un nombre por error.
+   * `excepto` sirve para editar un potrero sin que choque consigo mismo.
+   */
+  private async assertNombreLibre(name: string, excepto?: string) {
+    const repetido = await this.db.one<{ id: string }>(
+      `SELECT id FROM paddocks
+        WHERE tenant_id=$1 AND deleted_at IS NULL AND lower(trim(name)) = lower(trim($2)) AND ($3::uuid IS NULL OR id <> $3)`,
+      [this.db.tenant, name, excepto ?? null],
+    );
+    if (repetido) throw new ConflictException({ code: 'paddock.duplicate_name', title: `Ya hay un potrero llamado «${name}»` });
+  }
+
   async createPaddock(body: any) {
     const name = String(body?.name ?? '').trim();
     if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name es obligatorio' });
     const t = this.db.tenant;
+    await this.assertNombreLibre(name);
     const farm = (await this.db.one<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, [t]))?.id;
     if (!farm) throw new BadRequestException({ code: 'paddock.no_farm', title: 'No hay finca para el potrero' });
     const { boundary, areaHa } = this.geometry(body);
@@ -79,6 +99,7 @@ export class LandService {
     if (body?.name != null) {
       const name = String(body.name).trim();
       if (!name) throw new BadRequestException({ code: 'paddock.missing_name', title: 'name no puede quedar vacío' });
+      await this.assertNombreLibre(name, id);
       args.push(name);
       sets.push(`name=$${args.length}`);
     }
@@ -139,6 +160,30 @@ export class LandService {
       [id, t],
     );
     if ((occ?.n ?? 0) > 0) throw new ConflictException({ code: 'paddock.occupied', title: `El potrero tiene ${occ!.n} animales; movelos antes de borrarlo` });
+
+    /*
+     * Un LOTE asignado también lo bloquea, no solo los animales.
+     *
+     * La guarda contaba cabezas, así que un potrero con un lote vacío adentro se borraba sin más — y
+     * el lote quedaba apuntando a un potrero que ya no existe. Comprobado: «Cuarentena» siguió
+     * mostrando «Bajo Grande» en la lista de lotes después de borrarlo.
+     *
+     * El nombre viejo se sigue viendo porque las consultas no filtran potreros borrados, y eso está
+     * BIEN donde corresponde: en el historial de movimientos el animal estuvo ahí de verdad, y
+     * borrarle el nombre al pasado sería peor. Lo que no puede pasar es que el estado ACTUAL apunte
+     * a algo borrado, y eso se arregla acá, no en los joins.
+     */
+    const conLote = await this.db.one<{ n: number; nombres: string }>(
+      `SELECT count(*)::int AS n, string_agg(name, ', ' ORDER BY name) AS nombres
+         FROM lots WHERE current_paddock_id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+      [id, t],
+    );
+    if ((conLote?.n ?? 0) > 0)
+      throw new ConflictException({
+        code: 'paddock.has_lots',
+        title: `${conLote!.nombres} ${conLote!.n === 1 ? 'está' : 'están'} en este potrero; movélo${conLote!.n === 1 ? '' : 's'} antes de borrarlo`,
+      });
+
     await this.db.query(`UPDATE paddocks SET is_active=false, deleted_at=now(), updated_at=now() WHERE id=$1 AND tenant_id=$2`, [id, t]);
     return { id, deleted: true };
   }

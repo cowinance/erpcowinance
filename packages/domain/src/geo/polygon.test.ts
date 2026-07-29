@@ -85,3 +85,38 @@ describe('un dibujo fuera de escala se rechaza, no rompe', () => {
     expect(polygonAreaHa([[0, 0], [lado, 0], [lado, lado], [0, lado]])).toBeCloseTo(300, 0);
   });
 });
+
+describe('un contorno que se cruza no encierra un potrero', () => {
+  it('el «moño» daba 0 ha en silencio', () => {
+    // La fórmula del cordón no se da cuenta: con los vértices en orden equivocado las dos mitades
+    // tienen signo opuesto y se cancelan. Devolvía 0 ha sin una queja, y un potrero de 0 ha no tiene
+    // carga animal ni kg/ha calculables — el productor no tenía cómo saber que lo que estaba mal era
+    // el orden en que fue tocando los puntos.
+    expect(() => polygonAreaHa([[0, 0], [100, 100], [100, 0], [0, 100]])).toThrow(/se cruzan/);
+  });
+
+  it('un vértice apoyado sobre otro lado también pellizca el contorno', () => {
+    expect(() => polygonAreaHa([[0, 0], [100, 0], [50, 0], [50, 50]])).toThrow(/se cruzan/);
+  });
+
+  it('puntos alineados: no es un potrero, es una línea', () => {
+    expect(() => polygonAreaHa([[0, 0], [50, 50], [100, 100]])).toThrow(/no encierra superficie/);
+  });
+
+  it('UNA FORMA CÓNCAVA SIGUE SIENDO VÁLIDA', () => {
+    // Es lo que rompe una detección mal hecha. Los potreros reales rara vez son convexos: siguen un
+    // alambrado, un arroyo, el borde de un monte. Rechazar lo cóncavo sería peor que el bug.
+    const enL = [[0, 0], [100, 0], [100, 50], [50, 50], [50, 100], [0, 100]];
+    expect(polygonAreaHa(enL)).toBe(6.75);
+  });
+
+  it('un triángulo nunca puede cruzarse', () => {
+    expect(polygonAreaHa([[0, 0], [100, 0], [50, 100]])).toBeGreaterThan(0);
+  });
+
+  it('el orden de recorrido no importa: horario y antihorario valen igual', () => {
+    const horario = [[0, 0], [0, 100], [100, 100], [100, 0]];
+    const anti = [[0, 0], [100, 0], [100, 100], [0, 100]];
+    expect(polygonAreaHa(horario)).toBe(polygonAreaHa(anti));
+  });
+});

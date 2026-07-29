@@ -93,6 +93,44 @@ describe('LandService — editor de potreros', () => {
     ).rejects.toMatchObject({ status: 400, response: { code: 'paddock.invalid_boundary' } });
   });
 
+  it('DOS POTREROS NO PUEDEN LLAMARSE IGUAL', async () => {
+    // En una finca el potrero se nombra en voz alta —«llevá el rodeo al Norte»— así que dos con el
+    // mismo nombre no se distinguen en ningún selector de destino, y mover un lote al equivocado no
+    // deja ninguna señal.
+    await land.createPaddock({ name: 'DUP Norte' });
+    await expect(land.createPaddock({ name: 'DUP Norte' })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'paddock.duplicate_name' },
+    });
+    // Se compara sin mayúsculas ni espacios de sobra: así es como se repite un nombre por error.
+    await expect(land.createPaddock({ name: '  dup norte ' })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('renombrar un potrero no choca CONSIGO MISMO', async () => {
+    // La otra mitad: la guarda no puede impedir editar el resto de un potrero sin cambiarle el
+    // nombre, ni volver a ponerle el que ya tenía.
+    const p: any = await land.createPaddock({ name: 'DUP propio' });
+    const r: any = await land.updatePaddock(p.id, { name: 'DUP propio', pasture_type: 'alfalfa' });
+    expect(r.pasture_type).toBe('alfalfa');
+  });
+
+  it('NO SE BORRA UN POTRERO CON UN LOTE ADENTRO, aunque esté vacío de animales', async () => {
+    // La guarda contaba cabezas nomás, así que un potrero con un lote vacío se borraba sin más y el
+    // lote quedaba apuntando a algo que ya no existe. Comprobado contra la app: «Cuarentena» siguió
+    // mostrando «Bajo Grande» después de borrarlo.
+    const pad: any = await land.createPaddock({ name: 'DEL con lote' });
+    const lote = (await db.query<{ id: string }>(
+      `INSERT INTO lots (tenant_id, farm_id, name, current_paddock_id) VALUES ($1,$2,'DEL lote',$3) RETURNING id`,
+      [db.tenant, farmId, pad.id],
+    ))[0].id;
+
+    await expect(land.deletePaddock(pad.id)).rejects.toMatchObject({ status: 409, response: { code: 'paddock.has_lots' } });
+
+    // Sacado el lote, se borra sin problema: la guarda no bloquea el caso legítimo.
+    await db.query(`UPDATE lots SET current_paddock_id=NULL WHERE id=$1`, [lote]);
+    expect(((await land.deletePaddock(pad.id)) as any).deleted).toBe(true);
+  });
+
   it('rechaza una geometría inválida (< 3 vértices)', async () => {
     await expect(land.createPaddock({ name: 'Malo', boundary: { type: 'Polygon', coordinates: [[[0, 0], [1, 1]]] } })).rejects.toMatchObject({ status: 400 });
   });
