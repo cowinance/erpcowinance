@@ -51,3 +51,4 @@ export * from './inventory';
 export * from './agriculture';
 // Tiempo — fecha calendario en la zona de la finca (el día de trabajo no es el de UTC).
 export * from './time';
+export * from './catalog';

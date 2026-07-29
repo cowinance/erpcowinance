@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCsv, CsvParseError, CsvIrregularRowError } from './csv';
+import { detectarSeparador, parseCsv, CsvParseError, CsvIrregularRowError } from './csv';
 
 /**
  * Pruebas del parser CSV del importador (P2 oleada 3, commit 3.1). Pura, sin DB.
@@ -83,5 +83,50 @@ describe('parseCsv · contenido inválido', () => {
     } catch (e) {
       expect((e as CsvParseError).code).toBe('import.csv_parse_error');
     }
+  });
+});
+
+describe('el separador sale del archivo, no de una suposición', () => {
+  it('EXCEL EN ESPAÑOL GUARDA CON PUNTO Y COMA', () => {
+    // Es lo que sale de «Guardar como → CSV» en cualquier máquina configurada en español, porque la
+    // coma es el separador decimal. Con el separador fijo en coma ese archivo se leía como UNA sola
+    // columna —el encabezado entero en una celda— y la importación moría ahí, con un mensaje que
+    // culpaba al mapeo.
+    const csv = 'Caravana;Sexo;Categoría\nA-1;H;Vaca';
+    const r = parseCsv(csv);
+    expect(r.headers).toEqual(['Caravana', 'Sexo', 'Categoría']);
+    expect(r.rows[0]).toEqual({ Caravana: 'A-1', Sexo: 'H', 'Categoría': 'Vaca' });
+  });
+
+  it('la coma sigue andando, que es el caso de siempre', () => {
+    const r = parseCsv('caravana,sexo\nA-1,H');
+    expect(r.headers).toEqual(['caravana', 'sexo']);
+    expect(r.rows[0]).toEqual({ caravana: 'A-1', sexo: 'H' });
+  });
+
+  it('también tabulaciones y barras verticales', () => {
+    expect(parseCsv('caravana\tsexo\nA-1\tH').headers).toEqual(['caravana', 'sexo']);
+    expect(parseCsv('caravana|sexo\nA-1|H').headers).toEqual(['caravana', 'sexo']);
+  });
+
+  it('NO CUENTA LOS SEPARADORES QUE ESTÁN ENTRE COMILLAS', () => {
+    // Un encabezado como «"Apellido, Nombre";Sexo» tiene una coma que no separa nada. Contarla
+    // elegiría la coma y partiría el archivo por el lugar equivocado.
+    // El caso tiene que DISCRIMINAR: si las comas de adentro pesaran, ganarían por cantidad y el
+    // archivo se partiría por el lugar equivocado. Cuatro comas encerradas contra un punto y coma
+    // que sí separa.
+    expect(detectarSeparador('"a,b,c,d,e";Sexo')).toBe(';');
+    expect(detectarSeparador('"Apellido, Nombre";Sexo;Edad')).toBe(';');
+    expect(detectarSeparador('"a;b;c;d;e",Sexo')).toBe(',');
+  });
+
+  it('una sola columna no rompe: se queda con la coma', () => {
+    expect(detectarSeparador('caravana')).toBe(',');
+    expect(parseCsv('caravana\nA-1').headers).toEqual(['caravana']);
+  });
+
+  it('el BOM no se cuenta como parte del primer encabezado', () => {
+    const r = parseCsv('\uFEFFCaravana;Sexo\nA-1;H');
+    expect(r.headers).toEqual(['Caravana', 'Sexo']);
   });
 });

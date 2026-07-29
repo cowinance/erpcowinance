@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { parseImportDate, Sex, TagNumber } from '@cowinance/domain';
+import { catalogLookupKeys, normalizeCatalogText, parseImportDate, Sex, TagNumber } from '@cowinance/domain';
 import { HlcClock } from '@cowinance/sync-core';
 import type { Op, PutOp } from '@cowinance/sync-core';
 import { DbService, Q } from '../../db/db.service';
@@ -95,6 +95,21 @@ export interface RawAnimalRow {
   rfid?: unknown;
   official_id?: unknown;
 }
+
+/**
+ * El mismo texto que `normalizeCatalogText` deja comparable, pero del lado de SQL.
+ *
+ * Hay dos implementaciones de la misma normalización —una en el dominio para lo que ESCRIBE el
+ * productor, otra acá para lo que está GUARDADO— y eso es una deuda con nombre: si se separan, una
+ * categoría deja de encontrarse. Están atadas por un test que importa usando el nombre de pantalla
+ * de una categoría con acento; si alguna de las dos cambia sin la otra, ese test cae.
+ *
+ * `translate` y no `unaccent`: la extensión no está instalada y agregarla obligaría a una migración
+ * con privilegios en cada despliegue. Se cubren las vocales acentuadas y la eñe del castellano, que
+ * es todo lo que aparece en un catálogo ganadero.
+ */
+const sqlNormalizado = (col: string) =>
+  `translate(lower(trim(${col})), 'áéíóúàèìòùäëïöüâêîôûñ', 'aeiouaeiouaeiouaeioun')`;
 
 @Injectable()
 export class AnimalWriteService {
@@ -206,10 +221,28 @@ export class AnimalWriteService {
    *  - no hay otro animal ACTIVO con la misma caravana visual (regla de dominio).
    */
   async checkAgainstDb(q: Q, input: NormalizedAnimalInput): Promise<CheckResult> {
-    const cat = await q.one<{ id: string; species_id: string }>(
-      `SELECT c.id, c.species_id FROM animal_categories c WHERE c.code = $1`,
-      [input.categoryCode],
-    );
+    /*
+     * La categoría se busca por CÓDIGO o por NOMBRE, y sin distinguir mayúsculas ni espacios.
+     *
+     * Antes era igualdad exacta contra el código: entraba `vaca` y rebotaban `Vaca`, `VACA`, `Toro`
+     * y ` vaca `. En una planilla real la categoría se escribe con mayúscula inicial —que además es
+     * el NOMBRE que muestra el sistema— así que casi todas las filas fallaban con «Categoría
+     * inexistente».
+     *
+     * Los acentos se sacan de los DOS lados: del que escribe el productor —que puede no ponerlos— y
+     * del texto guardado, porque los nombres del catálogo sí los tienen («Vaquillona de reposición»).
+     * Sacarlos de un solo lado era lo que hacía que ese nombre no se encontrara nunca.
+     */
+    const claves = catalogLookupKeys(input.categoryCode);
+    const cat = claves.length
+      ? await q.one<{ id: string; species_id: string }>(
+          `SELECT c.id, c.species_id FROM animal_categories c
+            WHERE c.deleted_at IS NULL
+              AND (${sqlNormalizado('c.code')} = ANY($1) OR ${sqlNormalizado('c.name')} = ANY($1))
+            LIMIT 1`,
+          [claves],
+        )
+      : null;
     if (!cat) {
       return { ok: false, errors: [{ field: 'category_code', code: 'not_found', message: 'Categoría inexistente' }] };
     }
@@ -437,8 +470,17 @@ export class AnimalWriteService {
   }> {
     const codes = [...new Set(input.categoryCodes)].filter((c) => typeof c === 'string' && c !== '');
     const tags = [...new Set(input.tags)].filter((t) => typeof t === 'string' && t !== '');
-    const cats = codes.length
-      ? await this.db.query<{ code: string }>(`SELECT code FROM animal_categories WHERE code = ANY($1)`, [codes])
+    // Misma regla que en `checkAgainstDb`: la vista previa tiene que aceptar exactamente lo mismo que
+    // el commit, o vuelve a prometer lo que después no cumple. Se resuelve cada texto a su código
+    // real para que el llamador compare contra códigos.
+    const claves = codes.flatMap((c) => catalogLookupKeys(c));
+    const cats = claves.length
+      ? await this.db.query<{ code: string; name: string }>(
+          `SELECT code, name FROM animal_categories
+            WHERE deleted_at IS NULL
+              AND (${sqlNormalizado('code')} = ANY($1) OR ${sqlNormalizado('name')} = ANY($1))`,
+          [claves],
+        )
       : [];
     const active = tags.length
       ? await this.db.query<{ tag: string; animal_id: string }>(
@@ -449,7 +491,11 @@ export class AnimalWriteService {
         )
       : [];
     return {
-      existingCategoryCodes: new Set(cats.map((c) => c.code)),
+      // El conjunto lleva las formas NORMALIZADAS —código y nombre— y no los códigos canónicos: el
+      // llamador tiene en la mano el texto de la planilla («Vaca»), no el código. Devolver solo
+      // códigos obligaría a cada llamador a repetir la normalización, que es como se separan la
+      // vista previa y el commit.
+      existingCategoryCodes: new Set(cats.flatMap((c) => [normalizeCatalogText(c.code), normalizeCatalogText(c.name)])),
       activeTags: new Map(active.map((r) => [r.tag, r.animal_id])),
     };
   }

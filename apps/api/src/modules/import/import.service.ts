@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../../db/db.service';
 import { parseCsv } from './csv';
-import { acceptedSexInputs } from '@cowinance/domain';
+import { catalogLookupKeys, acceptedSexInputs } from '@cowinance/domain';
 import { ORIGINS } from '../herd/animal-write.service';
 import { suggestMapping, DuplicateHeadersError, buildRawRow } from './mapping';
 import { ANIMAL_IMPORT_DESCRIPTOR, REQUIRED_ANIMAL_IMPORT_FIELDS, type AnimalImportField } from '../herd/animal-import-descriptor';
@@ -379,7 +379,10 @@ export class ImportService {
       if (!e.nv.ok) {
         v = { row_number: e.row_number, verdict: 'invalid', errors: e.nv.errors };
         counts.invalid++;
-      } else if (!ctx.existingCategoryCodes.has(e.nv.input.categoryCode)) {
+        // Se compara por las MISMAS claves con las que se consultó el catálogo (sin mayúsculas ni
+        // acentos, con y sin plural). Comparar el texto crudo contra códigos canónicos era lo que
+        // hacía que «Vaca» no existiera para la vista previa.
+      } else if (!catalogLookupKeys(e.nv.input.categoryCode).some((k) => ctx.existingCategoryCodes.has(k))) {
         v = { row_number: e.row_number, verdict: 'invalid', errors: [{ field: 'category_code', code: 'not_found', message: 'Categoría inexistente' }] };
         counts.invalid++;
       } else if (ctx.activeTags.has(e.nv.input.tag) || seen.has(e.nv.input.tag)) {

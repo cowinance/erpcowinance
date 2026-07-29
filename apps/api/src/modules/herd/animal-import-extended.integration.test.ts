@@ -127,4 +127,57 @@ describe('Importación de animales — raza / RFID / oficial / lote (Fase 3c)', 
     const breeds = await db.query<any>(`SELECT 1 FROM animal_breeds WHERE animal_id=$1`, [res.animalId]);
     expect(breeds).toHaveLength(0);
   });
+
+  it('LA CATEGORÍA ENTRA COMO LA ESCRIBE EL PRODUCTOR, no solo en minúscula exacta', async () => {
+    // Se buscaba con igualdad exacta contra el CÓDIGO: entraba `vaca` y rebotaban `Vaca`, `VACA`,
+    // `Toro` y ` vaca `. Medido contra la app, en una planilla real casi todas las filas fallaban
+    // con «Categoría inexistente» — porque «Vaca» con mayúscula es además el NOMBRE que muestra el
+    // sistema, no un invento del productor.
+    const escrituras = ['Vaca', 'VACA', ' vaca ', 'vaca'];
+    for (let i = 0; i < escrituras.length; i++) {
+      const r: any = await persist({ tag: `CAT-${i}`, sex: 'H', category_code: escrituras[i] });
+      expect(r.animalId, `«${escrituras[i]}» debería entrar`).toBeTruthy();
+      const [fila] = await db.query<{ code: string }>(
+        `SELECT c.code FROM animals a JOIN animal_categories c ON c.id = a.category_id WHERE a.id = $1`,
+        [r.animalId],
+      );
+      expect(fila.code, 'todas resuelven al MISMO código').toBe('vaca');
+    }
+  });
+
+  it('el plural también, y resuelve al singular del catálogo', async () => {
+    const r: any = await persist({ tag: 'CAT-PL', sex: 'M', category_code: 'Novillos' });
+    expect(r.animalId).toBeTruthy();
+    const [fila] = await db.query<{ code: string }>(
+      `SELECT c.code FROM animals a JOIN animal_categories c ON c.id = a.category_id WHERE a.id = $1`,
+      [r.animalId],
+    );
+    expect(fila.code).toBe('novillo');
+  });
+
+  it('el productor escribe el NOMBRE que ve, no el código interno', async () => {
+    // Con el catálogo del seed nombre y código coinciden al normalizar («Vaca»/`vaca`), así que esa
+    // mitad de la regla no se nota. Se nota con un catálogo propio —los catálogos son editables desde
+    // Configuración— donde el código es una abreviatura y el nombre es lo que se muestra en pantalla.
+    // El productor copia de la pantalla; el código no lo vio nunca.
+    const especie = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
+    await db.query(
+      `INSERT INTO animal_categories (species_id, code, name, sex) VALUES ($1,'vqll','Vaquillona de reposición','F')`,
+      [especie],
+    );
+
+    const r: any = await persist({ tag: 'CAT-NOM', sex: 'H', category_code: 'Vaquillona de reposición' });
+    expect(r.animalId, 'escribiendo el nombre de pantalla tiene que entrar').toBeTruthy();
+    const [fila] = await db.query<{ code: string }>(
+      `SELECT c.code FROM animals a JOIN animal_categories c ON c.id = a.category_id WHERE a.id = $1`,
+      [r.animalId],
+    );
+    expect(fila.code, 'y resuelve al código real').toBe('vqll');
+  });
+
+  it('una categoría que NO existe se sigue rechazando', async () => {
+    // La otra mitad: la tolerancia no puede volverse un «sí» a cualquier cosa.
+    const r: any = await persist({ tag: 'CAT-NO', sex: 'H', category_code: 'Pegaso' });
+    expect(r.failed?.some((e: any) => e.field === 'category_code')).toBe(true);
+  });
 });
