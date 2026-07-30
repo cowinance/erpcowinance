@@ -77,7 +77,12 @@ export class CryoStorageService {
        FROM cryo_goblets g
        JOIN cryo_canisters c ON c.id = g.canister_id AND c.deleted_at IS NULL
        WHERE c.tank_id = $1 AND g.tenant_id = $2 AND g.deleted_at IS NULL
-       ORDER BY g.code`,
+       -- Orden NATURAL: los gobeletes son posiciones numeradas y ordenarlos como texto los deja
+       -- «1, 10, 2, 3…». Quien busca el 9 lo encuentra al final. El código es libre —puede ser una
+       -- letra— así que los numéricos van primero por su valor y el resto alfabético detrás.
+       ORDER BY (g.code ~ '^[0-9]+$') DESC,
+                CASE WHEN g.code ~ '^[0-9]+$' THEN g.code::bigint END,
+                g.code`,
       [id, this.db.tenant],
     );
 
@@ -162,13 +167,37 @@ export class CryoStorageService {
     if (tank.canister_capacity !== null) await this.requireCabe(tankId, tank.canister_capacity, 1);
     await this.requireCodigoLibre('cryo_canisters', 'tank_id', tankId, input.code, null);
 
+    /*
+     * Declarar cuántos gobeletes entran los CREA, numerados del 1 en adelante.
+     *
+     * Los gobeletes de una canasta son posiciones FÍSICAS: la canasta tiene diez huecos numerados,
+     * estén llenos o vacíos. Guardar solo el número —«entran 10»— y obligar a cargarlos de a uno era
+     * pedirle al productor que le cuente al sistema algo que el sistema ya sabía.
+     *
+     * Y esa ceremonia tenía una consecuencia concreta, reportada desde producción: para ubicar UNA
+     * pajuela había que crear el termo, elegirlo, agregar la canasta, y recién ahí agregar gobeletes
+     * de a uno. Quien no llegaba al final dejaba las pajuelas y los embriones sin ubicación.
+     *
+     * Si no se declara capacidad no se crea ninguno: hay canastas que no tienen posiciones fijas, y
+     * en ese caso se cargan a mano como antes.
+     */
     const r = await this.db.query<any>(
       `INSERT INTO cryo_canisters (tenant_id, tank_id, code, color, goblet_capacity, notes, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, code, color, goblet_capacity, notes`,
       [this.db.tenant, tankId, input.code, input.color, input.goblet_capacity, input.notes, this.db.user],
     );
-    return { ...r[0], goblet_count: 0 };
+    const canisterId = r[0].id;
+    let creados = 0;
+    if (input.goblet_capacity && input.goblet_capacity > 0) {
+      await this.db.query(
+        `INSERT INTO cryo_goblets (tenant_id, canister_id, code, created_by)
+         SELECT $1, $2, n::text, $4 FROM generate_series(1, $3) AS n`,
+        [this.db.tenant, canisterId, input.goblet_capacity, this.db.user],
+      );
+      creados = input.goblet_capacity;
+    }
+    return { ...r[0], goblet_count: creados };
   }
 
   async updateCanister(id: string, body: any) {

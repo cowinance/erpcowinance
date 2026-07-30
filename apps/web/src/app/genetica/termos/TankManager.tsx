@@ -74,9 +74,12 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
   const [tankCap, setTankCap] = useState('');
   const [canCode, setCanCode] = useState('');
   const [canColor, setCanColor] = useState('');
+  const [canGob, setCanGob] = useState('');
   const [gobFor, setGobFor] = useState<string | null>(null);
   const [gobCode, setGobCode] = useState('');
   const [gobColor, setGobColor] = useState('');
+  // Plegado si ya hay termos: la primera vez es el paso obligado, después estorba.
+  const [nuevoAbierto, setNuevoAbierto] = useState(tanks.length === 0);
 
   async function call(method: string, path: string, data?: any, onOk?: () => void) {
     if (busy) return;
@@ -102,16 +105,38 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
   }
 
   return (
+    /*
+     * El ORDEN de la pantalla, que era el problema real.
+     *
+     * «Nuevo termo» estaba primero y ocupaba la pantalla entera en una ventana angosta: quien
+     * llegaba a ubicar una pajuela veía un formulario para crear OTRO termo —que ya tenía— y el
+     * panel donde se trabaja quedaba debajo del pliegue. Reportado desde producción: «no tengo la
+     * opción de registrar los gobeletes», con el arreglo anterior ya desplegado. Aquel fue de
+     * TEXTO, y el texto no se lee si está fuera de la pantalla.
+     *
+     * Ahora manda el trabajo: en angosto va primero el termo elegido con sus canastas, y crear un
+     * termo queda plegado — es algo que se hace una vez, no todos los días.
+     */
     <div className="grid grid-cols-3 gap-4 max-lg:grid-cols-1">
-      <div className="space-y-4 self-start">
+      <div className="space-y-4 self-start max-lg:order-2">
         <Card>
-          <CardTitle>Nuevo termo</CardTitle>
+          <CardTitle
+            action={
+              tanks.length > 0 ? (
+                <button onClick={() => setNuevoAbierto((v) => !v)} className="text-label font-medium text-brand hover:underline">
+                  {nuevoAbierto ? 'Cerrar' : 'Abrir'}
+                </button>
+              ) : undefined
+            }
+          >
+            Nuevo termo
+          </CardTitle>
           {error && (
             <p role="alert" className="mb-2 text-label text-danger">
               {error}
             </p>
           )}
-          <div className="space-y-2">
+          <div className={`space-y-2 ${nuevoAbierto ? '' : 'hidden'}`}>
             <Input
               value={tankCode}
               onChange={(e) => setTankCode(e.target.value)}
@@ -181,7 +206,7 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
         </Card>
       </div>
 
-      <div className="col-span-2 max-lg:col-span-1">
+      <div className="col-span-2 max-lg:order-1 max-lg:col-span-1">
         {!selected ? (
           <EmptyState
             title={tanks.length === 0 ? 'Empezá por cargar el termo' : 'Elegí un termo'}
@@ -231,13 +256,28 @@ export function TankManager({ tanks, selected }: { tanks: Tank[]; selected: Tank
                   </option>
                 ))}
               </Select>
+              {/*
+                Cuántos gobeletes entran. Se pide ACÁ porque el sistema los crea numerados del 1 en
+                adelante: son las posiciones físicas de la canasta, y cargarlas de a una era la
+                ceremonia que dejaba las pajuelas sin ubicar.
+              */}
+              <Input
+                value={canGob}
+                onChange={(e) => setCanGob(e.target.value)}
+                inputMode="numeric"
+                placeholder="Gobeletes"
+                aria-label="Cuántos gobeletes entran en la canasta"
+                controlSize="sm"
+                className="w-28"
+              />
               <Button
                 size="sm"
                 loading={busy}
                 disabled={!canCode.trim()}
                 onClick={() =>
-                  call('POST', `/genetics/cryo/tanks/${selected.id}/canisters`, { code: canCode, color: canColor }, () => {
+                  call('POST', `/genetics/cryo/tanks/${selected.id}/canisters`, { code: canCode, color: canColor, goblet_capacity: canGob ? Number(canGob) : null }, () => {
                     setCanCode('');
+                    setCanGob('');
                   })
                 }
               >

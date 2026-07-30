@@ -30,8 +30,20 @@ export default async function TanksPage({ searchParams }: { searchParams: Promis
         </p>
       </div>
       <GeneticsNav />
-      {nitrogen && <NitrogenPanel data={nitrogen} />}
+      {/*
+        La ESTRUCTURA primero, el nitrógeno después.
+        
+        Estaba al revés, y medido: con un termo elegido, las canastas quedaban a 1,4 pantallas de
+        scroll detrás del panel de nitrógeno completo —con sus dos formularios de medición y recarga—
+        aunque no hubiera ni una medición cargada. Quien entraba a ubicar una pajuela no llegaba
+        nunca: veía nitrógeno y concluía que no existía la opción.
+
+        El nitrógeno no pierde importancia por bajar un lugar: un termo que se seca ya tiene su propia
+        alerta en el motor, que es lo que de verdad avisa. La posición en la pantalla no es lo que
+        protege el semen; el aviso sí.
+      */}
       <TankManager tanks={tanks ?? []} selected={selected} />
+      {nitrogen && <NitrogenPanel data={nitrogen} />}
     </div>
   );
 }

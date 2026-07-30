@@ -111,11 +111,44 @@ describe('cryo storage — termo → canasta → gobelete', () => {
     await expect(cryo.updateTank(t.id, { code: 'CAP2', canister_capacity: 2 })).resolves.toBeTruthy();
   });
 
+  it('DECLARAR CUÁNTOS GOBELETES ENTRAN LOS CREA, numerados del 1 en adelante', async () => {
+    // Los gobeletes de una canasta son posiciones FÍSICAS: la canasta tiene diez huecos numerados,
+    // estén llenos o vacíos. Antes se guardaba solo el número —«entran 10»— y había que cargarlos de
+    // a uno; reportado desde producción, esa ceremonia era la razón por la que las pajuelas y los
+    // embriones quedaban sin ubicación: nadie llegaba al final de la cadena.
+    const t: any = await cryo.createTank({ code: 'AUTO' });
+    const c: any = await cryo.createCanister(t.id, { code: '1', goblet_capacity: 10 });
+    expect(c.goblet_count).toBe(10);
+
+    const d: any = await cryo.getTank(t.id);
+    const can = d.canisters.find((x: any) => x.code === '1');
+    expect(can.goblets).toHaveLength(10);
+    expect(can.goblets.map((g: any) => g.code), 'en orden natural, no 1-10-2-3').toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+  });
+
+  it('sin declarar capacidad no se crea ninguno: se cargan a mano, como antes', async () => {
+    // Hay canastas sin posiciones fijas. Crear gobeletes que nadie pidió sería inventar estructura.
+    const t: any = await cryo.createTank({ code: 'MANUAL' });
+    const c: any = await cryo.createCanister(t.id, { code: '1' });
+    expect(c.goblet_count).toBe(0);
+  });
+
   it('la capacidad de la canasta limita los gobeletes', async () => {
     const t: any = await cryo.createTank({ code: 'G1' });
+    // Declarar 1 ya crea el gobelete «1» — por eso acá no se crea a mano como antes.
     const c: any = await cryo.createCanister(t.id, { code: '1', goblet_capacity: 1 });
-    await cryo.createGoblet(c.id, { code: '1' });
+    expect(c.goblet_count).toBe(1);
     await expect(cryo.createGoblet(c.id, { code: '2' })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('los códigos con letra van DESPUÉS de los números, no mezclados', async () => {
+    // El código es libre. Ordenar todo como texto dejaba «1, 10, 2» y quien busca el 9 lo encuentra
+    // al final; ordenar todo como número rompería con una letra.
+    const t: any = await cryo.createTank({ code: 'ORD' });
+    const c: any = await cryo.createCanister(t.id, { code: '1' });
+    for (const code of ['10', '2', 'A', '1', 'B']) await cryo.createGoblet(c.id, { code });
+    const d: any = await cryo.getTank(t.id);
+    expect(d.canisters[0].goblets.map((g: any) => g.code)).toEqual(['1', '2', '10', 'A', 'B']);
   });
 
   // Borrar de arriba hacia abajo dejaría contenido que el sistema cree que existe y nadie encuentra.
