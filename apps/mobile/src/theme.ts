@@ -87,6 +87,44 @@ function rnShadow(e: Elevation | null) {
     // color/radio/tipografía). Claves estilo Tailwind: `space['2']`=8, `['6']`=24…
     // Solo layout (padding/margin/gap); NO dimensiones/alturas/touch targets.
     space,
+
+    /**
+     * El alto de una caja que lleva texto adentro. Es un MÍNIMO, nunca un alto fijo.
+     *
+     * **Por qué existe.** `space` dice explícitamente que no cubre alturas ni targets táctiles, así
+     * que no había de dónde sacarlas: cada pantalla escribía su propio `height: 44`. Terminaron
+     * siendo 19 números repartidos en 12 archivos, y con tres valores distintos —40, 44, 46— para
+     * la misma caja de campo. Esa duplicación no era solo desprolija: era la causa del bug.
+     *
+     * **El bug.** En iOS el usuario elige el tamaño del texto (Ajustes › Pantalla › Tamaño del
+     * texto, y más grande todavía en Accesibilidad). React Native lo respeta y agranda el texto,
+     * pero un `height` fijo no se entera: la letra crece y la caja no. Comprobado en el simulador a
+     * tamaño de accesibilidad: en el login el texto llena los campos de borde a borde y «Ingresar»
+     * queda pegado al campo de arriba, sin aire. En pantallas chicas directamente recorta.
+     *
+     * No es un caso de laboratorio: agrandar el texto es lo primero que toca cualquiera que ya no ve
+     * de cerca, y buena parte de los que van a usar esto en el campo están en esa.
+     *
+     * **Por qué mínimo y no fijo.** Con `minHeight` la caja mide lo que pida su contenido y nunca
+     * menos que esto, así que a tamaño normal queda EXACTAMENTE igual que antes —los números son
+     * los mismos— y solo crece cuando el texto crece. Es lo que hace que este cambio sea seguro: si
+     * a tamaño normal algo se movió, está mal.
+     *
+     * `padY` es el aire vertical alrededor del texto. A tamaño normal no cambia nada (el texto más
+     * su aire entra en el mínimo); a tamaño grande es lo que evita que la letra toque el borde.
+     */
+    control: {
+      /** Buscador compacto adentro de una lista. */
+      compact: 40,
+      /** Campo de texto y botón: el target táctil mínimo que recomienda Apple. */
+      base: 44,
+      /** Fila o botón destacado — el paso siguiente, no un número suelto. */
+      lg: 52,
+      /** Botón de manga: se aprieta con guantes, mirando al animal y no al teléfono. */
+      xl: 68,
+      /** El aire vertical mínimo entre el texto y el borde de su caja. */
+      padY: 10,
+    },
   };
 }
 

@@ -129,7 +129,16 @@ const makeStyles = (T: Theme) =>
   kpiLabel: { fontSize: T.type.label, color: T.ink2 },
   kpiValue: { fontSize: T.compat['26'], fontWeight: '700', color: T.ink, marginTop: T.space['1'], fontVariant: ['tabular-nums'] },
   kpiHint: { fontSize: T.type.caption, color: T.ink3, marginTop: T.space['0.5'] },
-  btn: { height: 44, borderRadius: T.radiusSm, alignItems: 'center', justifyContent: 'center', paddingHorizontal: T.space['4'] },
+  // `minHeight` y no `height`: el rótulo crece con el tamaño de texto del sistema y la caja tiene
+  // que acompañarlo. Ver `control` en el tema — la regla y el porqué están ahí.
+  btn: {
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
+    borderRadius: T.radiusSm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: T.space['4'],
+  },
   btnText: { color: '#fff', fontSize: T.type.input, fontWeight: '600' },
   dot: { width: 8, height: 8, borderRadius: 4 },
 });

@@ -215,6 +215,7 @@ const makeStyles = (T: Theme) =>
   },
   notifLabel: { flex: 1, fontSize: T.type.body, fontWeight: '600', color: T.ink },
   notifEmpty: { fontSize: T.type.label, color: T.ink3 },
-  notifBadge: { minWidth: 20, paddingHorizontal: 6, height: 20, borderRadius: 10, backgroundColor: T.warning, alignItems: 'center', justifyContent: 'center' },
+  // El contador lleva un número adentro: si el texto del sistema crece y el globo no, se recorta.
+  notifBadge: { minWidth: 20, paddingHorizontal: 6, minHeight: 20, paddingVertical: 2, borderRadius: 10, backgroundColor: T.warning, alignItems: 'center', justifyContent: 'center' },
   notifBadgeText: { fontSize: T.type.caption, fontWeight: '700', color: '#fff' },
 });

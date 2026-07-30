@@ -71,7 +71,8 @@ const makeStyles = (T: Theme) =>
   StyleSheet.create({
   input: {
     flex: 1,
-    height: 44,
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,
@@ -82,7 +83,8 @@ const makeStyles = (T: Theme) =>
     backgroundColor: T.surface,
   },
   searchBtn: {
-    height: 44,
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: T.borderStrong,

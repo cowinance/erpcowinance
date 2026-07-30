@@ -126,7 +126,8 @@ const makeStyles = (T: Theme) =>
   StyleSheet.create({
   label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: T.space['1.5'] },
   input: {
-    height: 44,
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,

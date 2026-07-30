@@ -246,7 +246,8 @@ const makeStyles = (T: Theme) =>
   label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2 },
   group: { fontSize: T.type.caption, fontWeight: '600', letterSpacing: 0.5, color: T.ink3, textTransform: 'uppercase' },
   input: {
-    height: 44,
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,

@@ -105,7 +105,7 @@ export default function MortalidadCapture() {
             placeholder="Opcional — ej. timpanismo, rayo…"
             placeholderTextColor={T.ink3}
             multiline
-            style={[styles.input, { height: 88, paddingTop: T.space['2.5'], textAlignVertical: 'top' }]}
+            style={[styles.input, { minHeight: 88, paddingTop: T.space['2.5'], textAlignVertical: 'top' }]}
           />
         </View>
 
@@ -129,7 +129,8 @@ const makeStyles = (T: Theme) =>
   StyleSheet.create({
   label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: T.space['1.5'] },
   input: {
-    height: 44,
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,

@@ -71,7 +71,13 @@ export function LoginScreen() {
       >
       <View style={styles.box}>
         <View style={styles.logo}>
-          <Text style={{ color: '#fff', fontSize: 20, fontWeight: '800' }}>C</Text>
+          {/*
+            La ÚNICA que no escala en toda la app, y a propósito: esta «C» no es texto que alguien
+            lea, es el logo dibujado con una letra. Su caja es un cuadrado de 56 con esquinas
+            redondeadas —una marca, no un contenedor— y agrandar la letra la desborda sin que nadie
+            gane nada. Todo lo demás de esta pantalla sí escala.
+          */}
+          <Text allowFontScaling={false} style={{ color: '#fff', fontSize: 20, fontWeight: '800' }}>C</Text>
         </View>
         <Text style={styles.title}>Cowinance</Text>
         <Text style={styles.subtitle}>El sistema operativo de tu finca</Text>
@@ -161,7 +167,9 @@ const makeStyles = (T: Theme) =>
   title: { fontSize: T.compat['22'], fontWeight: '700', color: T.ink },
   subtitle: { fontSize: T.type.body, color: T.ink3, marginTop: T.space['0.5'] },
   input: {
-    height: 46,
+    // 46 propio → el mismo mínimo que el resto de los campos de la app. Ver `control` en el tema.
+    minHeight: T.control.base,
+    paddingVertical: T.control.padY,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,

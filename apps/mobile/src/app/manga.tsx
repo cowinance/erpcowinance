@@ -644,8 +644,10 @@ const styles = StyleSheet.create({
   setupTitle: { color: '#fff', fontSize: 26, fontWeight: '800', textAlign: 'center' },
   muted: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center' },
   fieldLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '700', letterSpacing: 2, alignSelf: 'flex-start', marginTop: 6 },
+  // `minHeight` como su vecino `textInput`, que ya lo tenía: son el mismo campo y estaban escritos
+  // distinto. Con `height` el texto del sistema en grande desbordaba la caja.
   setupInput: {
-    width: '100%', height: 52, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 12,
+    width: '100%', minHeight: 52, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 12,
     paddingHorizontal: 14, color: '#fff', fontSize: 18, backgroundColor: 'rgba(255,255,255,0.04)',
   },
   textInput: {
@@ -659,11 +661,11 @@ const styles = StyleSheet.create({
   pillText: { color: 'rgba(255,255,255,0.85)', fontSize: 16, fontWeight: '700' },
   pillTextSm: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
   pillTextOn: { color: '#000' },
-  bigBtn: { height: 68, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  bigBtn: { minHeight: 68, paddingVertical: 12, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   bigBtnText: { fontSize: 20, fontWeight: '800' },
   link: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textDecorationLine: 'underline', marginTop: 8 },
   topBar: {
-    height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    minHeight: 56, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.2)', gap: 8,
   },
   dot: { width: 9, height: 9, borderRadius: 5 },
@@ -685,7 +687,7 @@ const styles = StyleSheet.create({
     fontSize: 48, fontWeight: '700', fontFamily: 'monospace', textAlign: 'center', paddingVertical: 4,
   },
   kgUnit: { color: 'rgba(255,255,255,0.5)', fontSize: 22, fontWeight: '700', paddingBottom: 10 },
-  ccBtn: { minWidth: 52, height: 52, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  ccBtn: { minWidth: 52, minHeight: 52, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   ccText: { color: 'rgba(255,255,255,0.8)', fontSize: 18, fontWeight: '700' },
   error: { color: RED, fontSize: 20, fontWeight: '700', textAlign: 'center' },
   warn: { color: AMBER, fontSize: 15, fontWeight: '700', textAlign: 'center' },

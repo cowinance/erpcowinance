@@ -85,7 +85,8 @@ const makeStyles = (T: Theme) =>
   StyleSheet.create({
   search: {
     marginTop: T.space['2.5'],
-    height: 40,
+    minHeight: T.control.compact,
+    paddingVertical: T.control.padY,
     borderWidth: 1,
     borderColor: T.borderStrong,
     borderRadius: T.radiusSm,

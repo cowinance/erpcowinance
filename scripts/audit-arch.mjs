@@ -145,6 +145,60 @@ gate('tests (vitest run)', testRun.ok, testsPassed ? `${testsPassed} passed` : '
   );
 }
 
+// Gate 2c: ninguna caja del móvil con alto FIJO.
+//
+// En iOS el usuario elige el tamaño del texto, y React Native lo respeta: la letra crece. Un `height`
+// fijo no se entera — la caja se queda del mismo alto y el texto la desborda o se recorta. A tamaño
+// de accesibilidad el login quedaba sin aire entre el campo y el botón, y en pantalla chica cortaba.
+//
+// La regla es `minHeight`, que deja crecer la caja y a tamaño normal mide exactamente lo mismo. Este
+// gate existe porque el arreglo tocó 19 lugares en 12 archivos: son demasiados para confiar en que la
+// próxima pantalla se acuerde. Es la misma historia del arreglo del teclado, donde la lista tenía
+// cinco pantallas y la sexta apareció recién al barrer todos los archivos.
+//
+// La EXCEPCIÓN es un cuadrado: un ícono o un logo con `width` y `height` iguales no lleva texto que
+// escale, y ahí el alto fijo es lo correcto. Se reconoce por eso mismo, no por una lista de nombres
+// que habría que mantener a mano.
+{
+  const ofensores = [];
+  const revisarMovil = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, f.name);
+      if (f.isDirectory()) {
+        if (!['node_modules', 'dist', '.expo'].includes(f.name)) revisarMovil(full);
+      } else if (f.name.endsWith('.tsx') || f.name.endsWith('.ts')) {
+        const texto = readFileSync(full, 'utf8');
+        const lineas = texto.split('\n');
+        lineas.forEach((linea, i) => {
+          // Un comentario que NOMBRA la regla no la viola — este mismo gate está documentado así.
+          if (/^\s*(\/\/|\*|\/\*)/.test(linea)) return;
+          const alto = /(?<!min)(?<!max)\bheight:\s*(\d+)/.exec(linea);
+          if (!alto) return;
+          // Una línea divisoria o un punto de color no llevan texto adentro.
+          if (Number(alto[1]) <= 12) return;
+          // Cuadrado (ícono/logo): `width: N` con el mismo N, en esta línea o en la anterior.
+          const contexto = `${lineas[i - 1] ?? ''} ${linea}`;
+          const ancho = /(?<!min)(?<!max)\bwidth:\s*(\d+)/.exec(contexto);
+          if (ancho && ancho[1] === alto[1]) return;
+          // La barra de pestañas la dimensiona el navegador, no la caja.
+          if (linea.includes('tabBarStyle')) return;
+          ofensores.push(`${full}:${i + 1}`);
+        });
+      }
+    }
+  };
+  try {
+    revisarMovil('apps/mobile/src');
+  } catch {
+    /* un directorio ausente no bloquea el gate */
+  }
+  gate(
+    'sin alto fijo en el móvil (Dynamic Type)',
+    ofensores.length === 0,
+    ofensores.length ? ofensores.slice(0, 3).join(' · ') : '',
+  );
+}
+
 // Gate 3: cero dependencias circulares (madge).
 const madge = trySh(`npx madge --extensions ts --circular --json ${LARGEST_DIR}`);
 let cycles = -1;
