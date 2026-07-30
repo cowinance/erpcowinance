@@ -15,6 +15,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync, TaskRow } from '@/sync/SyncContext';
 import { FormScroll, Button } from '@/components/ui';
+import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 import { farmToday, addFarmDays } from '../lib/date';
 
@@ -64,6 +65,9 @@ export default function TareasScreen() {
   const [tick, setTick] = useState(0); // fuerza re-lectura de sync.tasks() tras cada acción
 
   const refresh = () => setTick((n) => n + 1);
+  // Esta pantalla re-lee `sync.tasks()` por `tick`, así que después del sync hay que moverlo: sin
+  // eso bajarían tareas nuevas y la lista seguiría mostrando las de antes.
+  const refreshControl = useSyncRefresh(refresh);
   const all = sync.tasks();
   const myId = sync.userId;
   // Abiertas = pendientes + en curso (el estado in_progress llegó con la mejora de Tareas).
@@ -89,7 +93,7 @@ export default function TareasScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }} key={tick}>
-      <FormScroll contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
+      <FormScroll refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />

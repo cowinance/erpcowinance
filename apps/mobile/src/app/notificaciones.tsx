@@ -16,6 +16,7 @@ import { useSync, type CachedNotification } from '@/sync/SyncContext';
 import { notificationHref } from '@/sync/notification-nav';
 import { relativeTime } from '@/lib/relative-time';
 import { Button, Card } from '@/components/ui';
+import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 function icon(relatedType: string | null): keyof typeof Ionicons.glyphMap {
@@ -43,6 +44,10 @@ export default function Notificaciones() {
   const refresh = sync.refreshNotifications;
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // El gesto hace un sync COMPLETO, no solo releer el feed: `syncNow` ya llama adentro a
+  // `refreshNotifications`, y de paso sube lo que quedó en cola. El `refreshing` de acá sigue
+  // siendo el del refresco al enfocar, que es el que escribe «actualizando…» en el encabezado.
+  const refreshControl = useSyncRefresh();
 
   // Refresh best-effort al enfocar, con callback estable (evita refrescos por cada render).
   useFocusEffect(
@@ -83,7 +88,7 @@ export default function Notificaciones() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
+      <ScrollView refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
         {header(at ? (refreshing ? 'actualizando…' : `actualizado ${relativeTime(at)}`) : undefined)}
 
         {items.length === 0 ? (

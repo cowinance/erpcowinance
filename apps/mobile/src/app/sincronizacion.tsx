@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync, ServerConflict } from '@/sync/SyncContext';
 import { Button, Card } from '@/components/ui';
+import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const CONFLICT_LABEL: Record<string, string> = {
@@ -64,6 +65,9 @@ export default function SyncScreen() {
   const [conflicts, setConflicts] = useState<ServerConflict[] | null>(null);
   const [conflictsError, setConflictsError] = useState('');
   const pending = sync.pendingDetail();
+  // Sin `extra`: el efecto de abajo ya depende de `sync.lastSyncAt`, que el sync actualiza, así que
+  // los conflictos se recargan solos cuando el gesto termina.
+  const refreshControl = useSyncRefresh();
 
   const load = useCallback(async () => {
     setConflictsError('');
@@ -81,7 +85,7 @@ export default function SyncScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
+      <ScrollView refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
         <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
           <Ionicons name="chevron-back" size={16} color={T.ink2} />
           <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>

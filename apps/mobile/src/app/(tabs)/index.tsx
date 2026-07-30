@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -8,6 +8,7 @@ import { useAccount } from '@/account/AccountContext';
 import { Button, Card, Kpi, SyncDot } from '@/components/ui';
 import { EmptyHerd } from '@/components/EmptyHerd';
 import { AgendaToday } from '@/components/AgendaToday';
+import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 /**
@@ -42,18 +43,27 @@ export default function Home() {
   const [priority, setPriority] = useState<PriorityItem[]>([]);
 
   // Atención prioritaria (online, best-effort): compone /dashboard/home. Sin conexión → se oculta.
-  useEffect(() => {
+  //
+  // Vive en un callback y no suelta adentro del efecto porque tirar hacia abajo también tiene que
+  // recomponerla: este bloque NO viaja en el sync —es un endpoint aparte— así que un sync a secas
+  // dejaría el resto de la pantalla al día y la atención prioritaria vieja.
+  const cargarPrioridad = useCallback(async () => {
     if (sync.status !== 'ready') return;
-    let alive = true;
-    sync
-      .authFetch('/dashboard/home')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (alive && Array.isArray(d?.priority)) setPriority(d.priority); })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [sync.status]);
+    try {
+      const r = await sync.authFetch('/dashboard/home');
+      if (!r.ok) return;
+      const d = await r.json();
+      if (Array.isArray(d?.priority)) setPriority(d.priority);
+    } catch {
+      /* sin conexión: se conserva lo último que se pudo componer */
+    }
+  }, [sync.status, sync.authFetch]);
+
+  useEffect(() => {
+    cargarPrioridad();
+  }, [cargarPrioridad]);
+
+  const refreshControl = useSyncRefresh(cargarPrioridad);
 
   if (sync.status === 'boot') {
     return (
@@ -87,7 +97,7 @@ export default function Home() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
+      <ScrollView refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <View>
             <Text style={styles.h1}>{firstName ? `${greeting}, ${firstName}` : greeting}</Text>

@@ -6,6 +6,7 @@ import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { EmptyHerd } from '@/components/EmptyHerd';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 import { KEYBOARD_PROPS } from '@/components/ui';
+import { useSyncRefresh } from '@/components/refresh';
 
 function Row({ a }: { a: AnimalRow }) {
   const T = useTheme();
@@ -45,6 +46,7 @@ export default function Animales() {
   const sync = useSync();
   const [q, setQ] = useState('');
   const animals = sync.animals(q || undefined);
+  const refreshControl = useSyncRefresh();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -66,6 +68,7 @@ export default function Animales() {
         // `keyboardShouldPersistTaps` el primer toque sobre un animal se gastaba en cerrar el
         // teclado: se buscaba la caravana, se tocaba el resultado, y no pasaba nada.
         {...KEYBOARD_PROPS}
+        refreshControl={refreshControl}
         data={animals}
         keyExtractor={(a) => a.id}
         renderItem={({ item }) => <Row a={item} />}

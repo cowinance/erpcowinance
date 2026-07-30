@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable } from 'react-native';
 import { useSync } from '@/sync/SyncContext';
 import { Card } from '@/components/ui';
+import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const EVENT_LABELS: Record<string, string> = {
@@ -30,6 +31,8 @@ export default function AnimalDetail() {
   const animal = sync.animal(id);
   const events = sync.animalEvents(id);
   const pregnancy = sync.openPregnancy(id);
+  // Antes del early return: un hook no puede quedar detrás de un `if`.
+  const refreshControl = useSyncRefresh();
 
   if (!animal) {
     return (
@@ -41,7 +44,7 @@ export default function AnimalDetail() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <ScrollView contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
+      <ScrollView refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
         <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
           <Ionicons name="chevron-back" size={16} color={T.ink2} />
           <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
