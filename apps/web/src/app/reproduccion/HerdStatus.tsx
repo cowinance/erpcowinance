@@ -97,6 +97,20 @@ export function HerdStatus({ lots }: { lots: { id: string; name: string }[] }) {
         </div>
       )}
 
+      {/*
+        Los estados son EXCLUYENTES entre sí, y eso vale aclararlo donde se ve el conflicto.
+
+        Arriba, en la misma pantalla, el indicador de preñez dice «17 preñeces». Acá abajo la insignia
+        dice «Preñada 13», porque las 4 que están por parir viven en su propio estado. Los dos números
+        son ciertos —13 + 4 = 17— pero nada lo decía, y quien los compara concluye que uno está mal.
+      */}
+      {(counts.due_soon ?? 0) > 0 && (counts.pregnant ?? 0) > 0 && (
+        <p className="mb-3 text-caption text-ink-3">
+          Preñadas en total: <span className="tnum font-medium text-ink-2">{(counts.pregnant ?? 0) + (counts.due_soon ?? 0)}</span>
+          {' '}— {counts.pregnant} preñadas y {counts.due_soon} próximas a parir, que van aparte porque piden otro trabajo.
+        </p>
+      )}
+
       {loading ? (
         <p className="py-6 text-center text-body text-ink-3">Cargando…</p>
       ) : error ? (
