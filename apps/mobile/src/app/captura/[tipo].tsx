@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { AnimalPickerLocal } from '@/components/AnimalPickerLocal';
 import { FormScroll, Button } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 import * as haptics from '@/lib/haptics';
 
 const TITLES: Record<string, string> = {
@@ -40,6 +40,8 @@ function Segmented<V extends string>({
   value: V;
   onChange: (v: V) => void;
 }) {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <View style={{ flexDirection: 'row', gap: T.space['2'] }}>
       {options.map(([v, label]) => (
@@ -56,6 +58,8 @@ function Segmented<V extends string>({
 }
 
 export default function CaptureForm() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const { tipo } = useLocalSearchParams<{ tipo: string }>();
   const sync = useSync();
   const [animal, setAnimal] = useState<AnimalRow | null>(null);
@@ -323,7 +327,8 @@ export default function CaptureForm() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: T.space['1.5'] },
   input: {
     height: 44,

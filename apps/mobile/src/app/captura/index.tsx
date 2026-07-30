@@ -8,7 +8,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync } from '@/sync/SyncContext';
 import { EmptyHerd } from '@/components/EmptyHerd';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
   { tipo: 'pesar', label: 'Pesar (manga)', icon: 'speedometer-outline', href: '/manga' },
@@ -25,6 +25,8 @@ const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphM
 ];
 
 export default function CapturaMenu() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   // Todas las capturas requieren un animal ya existente. Con el store vacío no se
   // ofrece ninguna (pesaje/vacunación/tratamiento/celo/servicio/diagnóstico/parto):
@@ -70,7 +72,8 @@ export default function CapturaMenu() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: T.space['3'] },
   action: {
     width: '47%',

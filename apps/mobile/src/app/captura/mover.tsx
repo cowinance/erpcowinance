@@ -12,13 +12,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { AnimalPickerLocal } from '@/components/AnimalPickerLocal';
 import { FormScroll, Button } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 import * as haptics from '@/lib/haptics';
 
 const REASONS = ['Rotación', 'Destete', 'Sanitario', 'Venta'];
 const CLEAR = 'clear';
 
 export default function MoverCapture() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const lots = sync.lots();
   const [animal, setAnimal] = useState<AnimalRow | null>(null);
@@ -120,7 +122,8 @@ export default function MoverCapture() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2, marginBottom: T.space['1.5'] },
   input: {
     height: 44,

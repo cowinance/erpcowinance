@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 /** Selector de animal por caravana contra la base LOCAL (funciona sin señal). */
 export function AnimalPickerLocal({
@@ -15,6 +15,8 @@ export function AnimalPickerLocal({
   onlyFemales?: boolean;
 }) {
   const sync = useSync();
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const [tag, setTag] = useState('');
   const [error, setError] = useState('');
 
@@ -65,7 +67,8 @@ export function AnimalPickerLocal({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   input: {
     flex: 1,
     height: 44,
