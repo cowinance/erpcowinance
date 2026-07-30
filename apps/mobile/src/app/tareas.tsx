@@ -15,7 +15,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync, TaskRow } from '@/sync/SyncContext';
 import { FormScroll, Button } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 import { farmToday, addFarmDays } from '../lib/date';
 
 const PRIORITIES: [string, string][] = [
@@ -54,6 +54,8 @@ const RESCHEDULE: { label: string; days: number | null }[] = [
 const dateIn = (days: number) => addFarmDays(farmToday(), days);
 
 export default function TareasScreen() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState('normal');
@@ -239,7 +241,8 @@ export default function TareasScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   label: { fontSize: T.type.label, fontWeight: '600', color: T.ink2 },
   group: { fontSize: T.type.caption, fontWeight: '600', letterSpacing: 0.5, color: T.ink3, textTransform: 'uppercase' },
   input: {

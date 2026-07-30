@@ -1,9 +1,11 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 export default function Mapa() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <SafeAreaView style={styles.center}>
       <View style={styles.iconWrap}>
@@ -17,7 +19,8 @@ export default function Mapa() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas, padding: T.space['8'] },
   iconWrap: {
     width: 52,

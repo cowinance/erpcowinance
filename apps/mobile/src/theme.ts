@@ -95,13 +95,15 @@ export const themes = { light: buildTheme('light'), dark: buildTheme('dark') } a
 
 export type Theme = ReturnType<typeof buildTheme>;
 
-/**
- * El tema CLARO, estático.
+/*
+ * ACÁ VIVÍA `export const T = themes.light`, el tema estático.
  *
- * Sigue en pie a propósito: la conversión al tema reactivo va por pasos, y mientras dura, lo que
- * todavía no se convirtió tiene que seguir compilando y viéndose como hoy. Una app a medio convertir
- * con pantallas a medio color sería peor que una clara y consistente.
+ * Existió para que la conversión pudiera ir por pasos: mientras duró, lo no convertido seguía
+ * compilando y viéndose como siempre. Ya no queda nada que lo use, así que se va — y su ausencia es
+ * lo que ahora IMPIDE volver atrás.
  *
- * Todo lo NUEVO usa `useTheme()`. Esto se va a ir vaciando a medida que avancen los pasos.
+ * Es la diferencia entre una convención y una garantía. Con `T` disponible, una pantalla nueva podía
+ * importarlo, compilar perfecto y verse clara sobre fondo oscuro; el typechecker no tenía nada que
+ * decir y solo un barrido manual lo encontraba. Sin `T`, esa pantalla no compila: hay que pedir el
+ * tema con `useTheme()`, que es la única forma de obtenerlo.
  */
-export const T = themes.light;

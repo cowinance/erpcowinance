@@ -16,7 +16,7 @@ import { useSync, type CachedNotification } from '@/sync/SyncContext';
 import { notificationHref } from '@/sync/notification-nav';
 import { relativeTime } from '@/lib/relative-time';
 import { Button, Card } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 function icon(relatedType: string | null): keyof typeof Ionicons.glyphMap {
   if (relatedType === 'animal') return 'paw-outline';
@@ -37,6 +37,8 @@ function absoluteDate(iso: string): string {
 }
 
 export default function Notificaciones() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const refresh = sync.refreshNotifications;
   const [refreshing, setRefreshing] = useState(false);
@@ -149,7 +151,8 @@ export default function Notificaciones() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
   h1: { fontSize: T.type.title, fontWeight: '700', color: T.ink },
   muted: { fontSize: T.type.label, color: T.ink3 },

@@ -8,9 +8,11 @@ import { useAccount } from '@/account/AccountContext';
 import { Button, Card } from '@/components/ui';
 import { activatePush } from '@/push/native';
 import { pushStatusMessage, type PushRegistrationStatus } from '@/push/registration';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 export default function Menu() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const account = useAccount();
   const unread = sync.unreadNotifications(); // misma fuente única que el badge de la tab
@@ -195,7 +197,8 @@ export default function Menu() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   title: { fontSize: T.type.body, fontWeight: '600', color: T.ink },
   value: { fontSize: 14, color: T.ink2, marginTop: T.space['0.5'] },
   mono: { fontFamily: 'monospace', fontSize: T.type.label, color: T.ink2, marginTop: T.space['0.5'] },

@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import { Button } from '@/components/ui';
 import { WEB_URL, openWeb } from '@/lib/webUrl';
-import { T } from '@/theme';
+import { useTheme } from '@/useTheme';
 
 /**
  * Estado vacío del hato (P1.3.6): la finca aún no tiene animales en este
@@ -10,6 +10,7 @@ import { T } from '@/theme';
  * texto sin hardcodear dominios.
  */
 export function EmptyHerd() {
+  const T = useTheme();
   return (
     <View style={{ alignItems: 'center', paddingVertical: T.space['6'], paddingHorizontal: T.space['2'], gap: T.space['2'] }}>
       <Text style={{ fontSize: T.type.subheading, fontWeight: '700', color: T.ink, textAlign: 'center' }}>

@@ -11,7 +11,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSync, ServerConflict } from '@/sync/SyncContext';
 import { Button, Card } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const CONFLICT_LABEL: Record<string, string> = {
   semantic: 'Semántico',
@@ -20,6 +20,8 @@ const CONFLICT_LABEL: Record<string, string> = {
 };
 
 function ConflictRow({ c, onResolved }: { c: ServerConflict; onResolved: () => void }) {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,6 +58,8 @@ function ConflictRow({ c, onResolved }: { c: ServerConflict; onResolved: () => v
 }
 
 export default function SyncScreen() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const [conflicts, setConflicts] = useState<ServerConflict[] | null>(null);
   const [conflictsError, setConflictsError] = useState('');
@@ -137,7 +141,8 @@ export default function SyncScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   cardTitle: { fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: T.space['2'] },
   pendingRow: {
     flexDirection: 'row',

@@ -8,7 +8,7 @@ import { useAccount } from '@/account/AccountContext';
 import { Button, Card, Kpi, SyncDot } from '@/components/ui';
 import { EmptyHerd } from '@/components/EmptyHerd';
 import { AgendaToday } from '@/components/AgendaToday';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 /**
  * Home móvil como estación OPERATIVA de campo (Home E4). Lo primero es «qué hacer ahora»:
@@ -19,12 +19,23 @@ import { T } from '@/theme';
  */
 interface PriorityItem { code: string; label: string; count: number; severity: string }
 
-const SEV_COLOR: Record<string, string> = { critical: T.danger, warning: T.warning, info: T.info };
+/**
+ * El color de cada severidad, como FUNCIÓN del tema.
+ *
+ * Era una tabla a nivel de módulo (`{ critical: T.danger, … }`), y eso se evalúa al importar el
+ * archivo: los colores quedaban grabados con la paleta clara y ningún hook podía cambiarlos. Es la
+ * misma trampa que las hojas de estilo, en versión chica y más fácil de pasar por alto —el
+ * typechecker la marcó solo porque `T` dejó de existir a nivel de módulo.
+ */
+const sevColor = (T: Theme, severity: string) =>
+  ({ critical: T.danger, warning: T.warning, info: T.info })[severity];
 // Destino en móvil por código (las condiciones de sanidad/repro se materializan como tareas).
 const ROUTE: Record<string, string> = { no_recent_weighing: '/(tabs)/animales' };
 const routeFor = (code: string) => ROUTE[code] ?? '/tareas';
 
 export default function Home() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const account = useAccount();
   const firstName = account.name?.split(' ')[0];
@@ -100,9 +111,9 @@ export default function Home() {
               <Pressable
                 key={p.code}
                 onPress={() => router.push(routeFor(p.code) as any)}
-                style={[styles.priChip, { borderLeftColor: SEV_COLOR[p.severity] ?? T.info }]}
+                style={[styles.priChip, { borderLeftColor: sevColor(T, p.severity) ?? T.info }]}
               >
-                <Text style={[styles.priCount, { color: SEV_COLOR[p.severity] ?? T.ink }]}>{p.count}</Text>
+                <Text style={[styles.priCount, { color: sevColor(T, p.severity) ?? T.ink }]}>{p.count}</Text>
                 <Text style={styles.priLabel}>{p.label}</Text>
               </Pressable>
             ))}
@@ -162,7 +173,8 @@ export default function Home() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
   h1: { fontSize: T.type.title, fontWeight: '700', color: T.ink },
   offlineBanner: { backgroundColor: T.warning, borderRadius: T.radiusSm, paddingVertical: T.space['2'], paddingHorizontal: T.space['3'] },

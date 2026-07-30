@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Card } from './ui';
 import { useSync, type AgendaItem } from '@/sync/SyncContext';
 import { relativeTime } from '@/lib/relative-time';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 import { farmToday } from '../lib/date';
 
 const GROUPS: { key: 'overdue' | 'today' | 'upcoming'; label: string }[] = [
@@ -36,6 +36,8 @@ function urgency(item: AgendaItem, todayStr: string): 'overdue' | 'today' | 'upc
 }
 
 export function AgendaToday() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const [, setTick] = useState(0); // fuerza re-lectura tras completar una tarea offline
   const agendaAt = sync.agendaAt;
@@ -125,7 +127,8 @@ export function AgendaToday() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: T.space['1'] },
   title: { fontSize: T.type.body, fontWeight: '700', color: T.ink },
   muted: { fontSize: T.type.label, color: T.ink3 },

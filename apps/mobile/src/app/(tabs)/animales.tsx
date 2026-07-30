@@ -4,10 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { EmptyHerd } from '@/components/EmptyHerd';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 import { KEYBOARD_PROPS } from '@/components/ui';
 
 function Row({ a }: { a: AnimalRow }) {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <Pressable
       onPress={() => router.push(`/animal/${a.id}`)}
@@ -29,6 +31,7 @@ function Row({ a }: { a: AnimalRow }) {
 /** Empty-state que distingue carga/error de vacío real (no afirma "sin animales"
  *  mientras el primer bootstrap no terminó). */
 function HerdEmpty({ status, query }: { status: string; query: string }) {
+  const styles = useStyles(makeStyles);
   if (status === 'boot') return <Text style={styles.emptyNote}>Preparando tu hato…</Text>;
   if (status === 'error')
     return <Text style={styles.emptyNote}>No se pudo sincronizar. Revisá tu conexión y volvé a intentar.</Text>;
@@ -37,6 +40,8 @@ function HerdEmpty({ status, query }: { status: string; query: string }) {
 }
 
 export default function Animales() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const [q, setQ] = useState('');
   const animals = sync.animals(q || undefined);
@@ -76,7 +81,8 @@ export default function Animales() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   search: {
     marginTop: T.space['2.5'],
     height: 40,

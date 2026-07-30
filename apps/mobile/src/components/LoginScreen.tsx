@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSync, API_URL } from '@/sync/SyncContext';
 import { FormScroll, Button } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 type Mode = 'login' | 'forgot' | 'forgot-sent';
 
 export function LoginScreen() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const sync = useSync();
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
@@ -139,7 +141,8 @@ export function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   root: { flex: 1, backgroundColor: T.canvas },
   // `flexGrow` y `justifyContent` en el CONTENEDOR del scroll: así el formulario queda centrado
   // mientras sobra alto, y se vuelve desplazable cuando el teclado lo reduce. Centrarlo en el

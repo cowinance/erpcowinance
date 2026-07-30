@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable } from 'react-native';
 import { useSync } from '@/sync/SyncContext';
 import { Card } from '@/components/ui';
-import { T } from '@/theme';
+import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const EVENT_LABELS: Record<string, string> = {
   birth: 'Nacimiento',
@@ -23,6 +23,8 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function AnimalDetail() {
+  const T = useTheme();
+  const styles = useStyles(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const sync = useSync();
   const animal = sync.animal(id);
@@ -102,7 +104,8 @@ export default function AnimalDetail() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (T: Theme) =>
+  StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
   tag: { fontFamily: 'monospace', fontSize: 32, fontWeight: '700', color: T.ink },
   kpiLabel: { fontSize: T.type.label, color: T.ink2 },
