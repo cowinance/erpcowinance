@@ -135,7 +135,29 @@ export class ReproReportsService {
     return {
       from, to,
       services: { ai: svc?.ai ?? 0, natural: svc?.natural ?? 0, embryo: svc?.embryo ?? 0, total: services },
-      diagnoses: { pregnant, empty, conception_rate_pct: diagnosed > 0 ? +((pregnant / diagnosed) * 100).toFixed(1) : null },
+      /*
+       * TASA DE CONCEPCIÓN: preñeces logradas sobre SERVICIOS, no sobre diagnósticos.
+       *
+       * Estaba calculada como positivos/diagnósticos, y con eso la finca demo reportaba 100%
+       * mientras sus tres toros daban 90%, 50% y 66,7% —ponderado, 70,8%—. La misma pantalla decía
+       * dos cosas, y el reporte por toro ya advertía por qué eso no puede ser: «si contara distinto,
+       * dos pantallas mostrarían fertilidades diferentes del mismo toro y ninguna de las dos sería
+       * creíble».
+       *
+       * Positivos/diagnósticos no mide fertilidad: mide qué diagnósticos se anotaron. Una finca que
+       * registra solo los positivos —lo habitual, se anota lo que se encuentra— tiene 100% para
+       * siempre. Es un indicador que solo puede halagar.
+       *
+       * Y ahora cierra con el de al lado: la tasa es exactamente el inverso de los servicios por
+       * concepción. Antes decían 100% y 1,41 uno pegado al otro.
+       */
+      conception_rate_pct: services > 0 ? +((pregnant / services) * 100).toFixed(1) : null,
+      diagnoses: {
+        pregnant,
+        empty,
+        /** Qué proporción de los diagnósticos dio positiva. NO es fertilidad: es hábito de registro. */
+        positive_pct: diagnosed > 0 ? +((pregnant / diagnosed) * 100).toFixed(1) : null,
+      },
       services_per_conception: pregnant > 0 ? +(services / pregnant).toFixed(2) : null,
       calvings: { n: calv?.n ?? 0, live: calv?.live ?? 0, dead: calv?.dead ?? 0 },
       abortions: abort?.n ?? 0,
@@ -144,7 +166,18 @@ export class ReproReportsService {
       /** Cuántos intervalos entraron en el promedio y cuántos quedaron afuera por imposibles. */
       calving_interval_counted: intervalo.counted,
       calving_interval_excluded: intervalo.excluded,
-      avg_days_open: openAvg?.dias ?? null,
+      /*
+       * Días que llevan ABIERTAS las vacas que hoy no están preñadas.
+       *
+       * Se llamaba `avg_days_open`, y «días abiertos» en zootecnia es otra cosa: del parto a la
+       * CONCEPCIÓN. Con ese nombre, los 284 días contradecían el intervalo entre partos —284 más una
+       * gestación dan 567, no lo que mostraba el indicador de al lado— y no había forma de saber cuál
+       * de los dos estaba mal. Ninguno: medían cosas distintas con nombres que prometían lo mismo.
+       *
+       * Esto es un atraso, no un índice de fertilidad: cuánto hace que están sin preñar las que
+       * siguen abiertas. Sirve, y mucho, pero con su nombre.
+       */
+      avg_days_since_calving_open: openAvg?.dias ?? null,
     };
   }
 

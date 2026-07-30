@@ -91,11 +91,28 @@ describe('repro — reportes reproductivos (E5)', () => {
   it('summary: servicios, tasa de concepción, partos vivos/muertos, abortos, destete', async () => {
     const s: any = await reports.summary();
     expect(s.services.total).toBeGreaterThanOrEqual(2);
-    expect(s.diagnoses.conception_rate_pct).not.toBeNull(); // 1 preñada / (1+1) = 50
+    // La tasa sale de los SERVICIOS, no de los diagnósticos: es la definición de zootecnia y la
+    // misma que usa el reporte por toro. Contada sobre diagnósticos, una finca que registra solo los
+    // positivos —lo habitual— daba 100% para siempre.
+    // Se afirma la DEFINICIÓN, no una cifra: el resumen cuenta también lo que trae el seed, y atar
+    // el test a un número concreto lo haría frágil sin probar nada más.
+    expect(s.conception_rate_pct).toBe(+((s.diagnoses.pregnant / s.services.total) * 100).toFixed(1));
+    // Y las dos definiciones dan DISTINTO cuando faltan diagnósticos negativos, que es el caso que
+    // hacía que la finca demo reportara 100%.
+    expect(s.diagnoses.positive_pct).toBeGreaterThan(s.conception_rate_pct);
     expect(s.calvings.live).toBeGreaterThanOrEqual(1);
     expect(s.calvings.dead).toBeGreaterThanOrEqual(1);
     expect(s.abortions).toBeGreaterThanOrEqual(1);
-    expect(s.avg_days_open).toBeGreaterThan(0);
+    expect(s.avg_days_since_calving_open).toBeGreaterThan(0);
+  });
+
+  it('LA TASA Y LOS SERVICIOS POR CONCEPCIÓN SON EL MISMO NÚMERO, AL DERECHO Y AL REVÉS', async () => {
+    // Es lo que no cerraba: el resumen decía «100%» y «1,41 servicios por concepción» uno al lado del
+    // otro. Si la tasa se cuenta sobre servicios, es exactamente el inverso — y si algún día alguien
+    // vuelve a cambiar una de las dos cuentas, esto lo dice.
+    const s: any = await reports.summary();
+    if (s.conception_rate_pct == null || s.services_per_conception == null) return;
+    expect(+(100 / s.services_per_conception).toFixed(1)).toBeCloseTo(s.conception_rate_pct, 0);
   });
 
   it('desempeño por toro: servicios, concepciones y tasa', async () => {

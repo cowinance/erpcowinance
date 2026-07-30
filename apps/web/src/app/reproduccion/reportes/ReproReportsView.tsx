@@ -126,7 +126,16 @@ function Summary({ s }: { s: any }) {
   return (
     <div className="grid grid-cols-4 gap-5 max-md:grid-cols-2">
       <Kpi label="Servicios" value={s.services.total} hint={`${s.services.ai} IA · ${s.services.natural} monta · ${s.services.embryo} TE`} />
-      <Kpi label="Tasa de concepción" value={pct(s.diagnoses.conception_rate_pct)} hint={`${s.diagnoses.pregnant} preñadas / ${s.diagnoses.pregnant + s.diagnoses.empty} diag.`} />
+      {/*
+        La tasa sale de los SERVICIOS, no de los diagnósticos, y el pie lo dice: antes mostraba
+        «17 preñadas / 17 diag. → 100%» mientras los tres toros de la misma finca daban 90%, 50% y
+        66,7%. El pie ahora deja ver la cuenta, que es lo que permite discutirla.
+      */}
+      <Kpi
+        label="Tasa de concepción"
+        value={pct(s.conception_rate_pct)}
+        hint={`${s.diagnoses.pregnant} preñadas / ${s.services.total} servicios`}
+      />
       <Kpi label="Servicios / concepción" value={s.services_per_conception ?? '—'} />
       <Kpi label="Partos" value={s.calvings.n} hint={`${s.calvings.live} vivas · ${s.calvings.dead} muertas`} />
       <Kpi label="Abortos y pérdidas" value={s.abortions} />
@@ -146,7 +155,17 @@ function Summary({ s }: { s: any }) {
             : undefined
         }
       />
-      <Kpi label="Días abiertos (prom.)" value={s.avg_days_open != null ? `${s.avg_days_open} d` : '—'} />
+      {/*
+        «Días abiertos» en zootecnia es del parto a la CONCEPCIÓN. Esto mide otra cosa —cuánto hace
+        que están sin preñar las que HOY siguen abiertas— y con el nombre viejo contradecía al
+        intervalo entre partos sin que se pudiera saber cuál estaba mal. Ninguno: medían cosas
+        distintas con nombres que prometían lo mismo.
+      */}
+      <Kpi
+        label="Vacas abiertas: días desde el parto"
+        value={s.avg_days_since_calving_open != null ? `${s.avg_days_since_calving_open} d` : '—'}
+        hint="promedio de las que hoy no están preñadas"
+      />
     </div>
   );
 }
