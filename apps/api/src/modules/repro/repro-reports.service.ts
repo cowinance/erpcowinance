@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { addFarmDays } from '@cowinance/domain';
+import { averageCalvingInterval, addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
 import { computeSyncResponse } from '@cowinance/domain';
@@ -107,8 +107,11 @@ export class ReproReportsService {
         `SELECT count(*)::int AS n, round(avg(weaning_weight_kg))::int AS avg_kg FROM weanings WHERE tenant_id=$1 AND deleted_at IS NULL AND weaning_date BETWEEN $2 AND $3`,
         [t, from, to],
       ),
-      this.db.one<any>(
-        `SELECT round(avg(gap))::int AS dias FROM (
+      // Los intervalos SIN promediar: el promedio lo hace la regla del dominio, que descarta los
+      // imposibles y dice cuántos descartó. Un `avg()` acá publicaba «30 días» sobre cinco intervalos
+      // que eran todos menores a una gestación.
+      this.db.query<{ gap: number }>(
+        `SELECT gap FROM (
            SELECT (calving_date - LAG(calving_date) OVER (PARTITION BY dam_id ORDER BY calving_date, id)) AS gap, calving_date
            FROM calvings WHERE tenant_id=$1 AND deleted_at IS NULL
          ) g WHERE g.gap IS NOT NULL AND g.calving_date BETWEEN $2 AND $3`,
@@ -124,6 +127,7 @@ export class ReproReportsService {
         [t],
       ),
     ]);
+    const intervalo = averageCalvingInterval((iep as { gap: number }[]).map((r) => Number(r.gap)));
     const services = (svc?.ai ?? 0) + (svc?.natural ?? 0) + (svc?.embryo ?? 0);
     const pregnant = diag?.pregnant ?? 0;
     const empty = diag?.empty ?? 0;
@@ -136,7 +140,10 @@ export class ReproReportsService {
       calvings: { n: calv?.n ?? 0, live: calv?.live ?? 0, dead: calv?.dead ?? 0 },
       abortions: abort?.n ?? 0,
       weanings: { n: wean?.n ?? 0, avg_weight_kg: wean?.avg_kg ?? null, rate_pct: (calv?.n ?? 0) > 0 ? +(((wean?.n ?? 0) / calv.n) * 100).toFixed(1) : null },
-      avg_calving_interval_days: iep?.dias ?? null,
+      avg_calving_interval_days: intervalo.avgDays,
+      /** Cuántos intervalos entraron en el promedio y cuántos quedaron afuera por imposibles. */
+      calving_interval_counted: intervalo.counted,
+      calving_interval_excluded: intervalo.excluded,
       avg_days_open: openAvg?.dias ?? null,
     };
   }

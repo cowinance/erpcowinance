@@ -366,7 +366,15 @@ function ReproductionReport({ data }: { data: any }) {
             {ix.iep_dias != null ? ix.iep_dias : '—'}
             <span className="text-label text-ink-3"> días</span>
           </div>
-          <div className="mt-1 text-label text-ink-3">intervalo entre partos</div>
+          <div className="mt-1 text-label text-ink-3">
+            intervalo entre partos
+            {/* Lo descartado se DICE: sacar los imposibles en silencio cambiaría una mentira por otra. */}
+            {ix.iep_descartados ? (
+              <span className="block text-warning">
+                {ix.iep_descartados} {ix.iep_descartados === 1 ? 'imposible' : 'imposibles'} sin contar — revisá las fechas
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className={cardCls}>
           <div className="mb-2 text-body font-semibold">Servicios / preñez</div>

@@ -131,7 +131,21 @@ function Summary({ s }: { s: any }) {
       <Kpi label="Partos" value={s.calvings.n} hint={`${s.calvings.live} vivas · ${s.calvings.dead} muertas`} />
       <Kpi label="Abortos y pérdidas" value={s.abortions} />
       <Kpi label="Destetes" value={s.weanings.n} hint={`${s.weanings.avg_weight_kg ?? '—'} kg · tasa ${pct(s.weanings.rate_pct)}`} />
-      <Kpi label="Intervalo entre partos" value={s.avg_calving_interval_days != null ? `${s.avg_calving_interval_days} d` : '—'} />
+      {/*
+        El guion NO alcanza cuando hay historial cargado: si los intervalos se descartaron por
+        imposibles, el productor tiene que saberlo — es la señal de que hay fechas de parto mal y
+        dónde ir a arreglarlas. Antes se promediaban y salía «30 d», que se lee como una vaca
+        extraordinaria.
+      */}
+      <Kpi
+        label="Intervalo entre partos"
+        value={s.avg_calving_interval_days != null ? `${s.avg_calving_interval_days} d` : '—'}
+        hint={
+          s.calving_interval_excluded
+            ? `${s.calving_interval_excluded} ${s.calving_interval_excluded === 1 ? 'intervalo imposible' : 'intervalos imposibles'} sin contar — revisá las fechas de parto`
+            : undefined
+        }
+      />
       <Kpi label="Días abiertos (prom.)" value={s.avg_days_open != null ? `${s.avg_days_open} d` : '—'} />
     </div>
   );

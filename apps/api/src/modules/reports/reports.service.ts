@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { addFarmDays } from '@cowinance/domain';
+import { averageCalvingInterval, addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 // El resumen de la finca (Fase 5) COMPONE estos servicios, no repite sus consultas: cada número
 // tiene un solo dueño y acá se lo pide, para que el margen de este reporte y el de Costos no puedan
@@ -500,8 +500,11 @@ export class ReportsService {
       ),
       // IEP: días promedio entre partos consecutivos por vientre; intervalos cuyo parto POSTERIOR
       // cae en el período (LAG por dam_id, orden por fecha con desempate estable por id).
-      this.db.one<any>(
-        `SELECT round(avg(gap))::int AS dias FROM (
+      // Sin promediar: lo hace la regla del dominio, que descarta los intervalos imposibles y dice
+      // cuántos descartó. Este cálculo estaba DUPLICADO con el del módulo de reproducción, y los dos
+      // publicaban el promedio crudo — el mismo número mal, en dos pantallas.
+      this.db.query<{ gap: number }>(
+        `SELECT gap FROM (
            SELECT (calving_date - LAG(calving_date) OVER (PARTITION BY dam_id ORDER BY calving_date, id)) AS gap, calving_date
            FROM calvings WHERE tenant_id = $1 AND deleted_at IS NULL
          ) g WHERE g.gap IS NOT NULL AND g.calving_date BETWEEN $2::date AND $3::date`,
@@ -509,6 +512,7 @@ export class ReportsService {
       ),
     ]);
 
+    const intervaloEntrePartos = averageCalvingInterval((iep as { gap: number }[]).map((r) => Number(r.gap)));
     const positivos = diagnoses?.n ?? 0;
     const negativos = negatives?.n ?? 0;
     const totalDiag = positivos + negativos;
@@ -524,7 +528,9 @@ export class ReportsService {
       destetes: { n: weanings?.n ?? 0, peso_promedio: weanings?.peso_promedio ?? null },
       indices: {
         prenez_pct: totalDiag > 0 ? +((positivos / totalDiag) * 100).toFixed(1) : null,
-        iep_dias: iep?.dias ?? null,
+        iep_dias: intervaloEntrePartos.avgDays,
+        iep_contados: intervaloEntrePartos.counted,
+        iep_descartados: intervaloEntrePartos.excluded,
         servicios_por_prenez: positivos > 0 ? +(serviciosTotal / positivos).toFixed(2) : null,
       },
     };

@@ -91,3 +91,45 @@ export function impossibleCalvingIntervals(fechas: readonly string[]): { from: s
   }
   return problemas;
 }
+
+export interface CalvingIntervalAverage {
+  /** Días promedio entre partos, contando SOLO los intervalos que pueden ser ciertos. `null` si no queda ninguno. */
+  readonly avgDays: number | null;
+  /** Cuántos intervalos se contaron. */
+  readonly counted: number;
+  /** Cuántos se dejaron afuera por imposibles. Se informa: descartar en silencio sería igual de malo. */
+  readonly excluded: number;
+}
+
+/**
+ * El intervalo entre partos PROMEDIO, sobre los intervalos que pueden ser ciertos.
+ *
+ * **Por qué no es un `avg()` a secas.** Medido contra la app: la finca demo reportaba «30 días» de
+ * intervalo entre partos. Los cinco intervalos cargados eran 13, 18, 31, 36 y 54 días — todos por
+ * debajo de una gestación, o sea todos imposibles— y el sistema promediaba y publicaba el resultado
+ * como el indicador reproductivo de la finca.
+ *
+ * Un promedio así no chilla: 30 días se lee como una vaca extraordinaria, y encima de ese número se
+ * decide a quién retener y a quién descartar. Se retiene a la que tiene las fechas mal y se descarta
+ * a la buena.
+ *
+ * **Por qué se informa lo descartado.** Sacar los imposibles y mostrar el promedio de los que quedan,
+ * sin decir nada, sería cambiar una mentira por otra: el productor vería un número creíble sin saber
+ * que la mitad de su historial no se pudo usar. `excluded` es lo que convierte el recorte en
+ * información — y lo que le dice dónde tiene que ir a corregir fechas.
+ *
+ * **Por qué `null` y no cero.** Si NINGÚN intervalo puede ser cierto —como en el demo— no hay
+ * promedio que dar. Cero se leería como «paren sin parar», que es la peor lectura posible.
+ *
+ * El piso es el mismo que usa la guarda de carga: una gestación. Puro, sin IO.
+ */
+export function averageCalvingInterval(gaps: readonly number[]): CalvingIntervalAverage {
+  const validos = gaps.filter((d) => Number.isFinite(d) && d >= MIN_CALVING_INTERVAL_DAYS);
+  const excluded = gaps.filter((d) => Number.isFinite(d)).length - validos.length;
+  if (!validos.length) return { avgDays: null, counted: 0, excluded };
+  return {
+    avgDays: Math.round(validos.reduce((a, b) => a + b, 0) / validos.length),
+    counted: validos.length,
+    excluded,
+  };
+}

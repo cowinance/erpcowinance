@@ -11,7 +11,8 @@ export type { ReproStatus, ReproConfig, ReproFacts, ReproState } from './repro-s
 export { computeSyncResponse, MIN_SYNC_SAMPLE } from './synchronization';
 export type { SyncResponse, SyncResponseInput } from './synchronization';
 export { GESTATION_DAYS } from './gestation';
-export { calvingIntervalIssue, impossibleCalvingIntervals, MIN_CALVING_INTERVAL_DAYS } from './calving-interval';
+export { calvingIntervalIssue, impossibleCalvingIntervals, averageCalvingInterval, MIN_CALVING_INTERVAL_DAYS } from './calving-interval';
+export type { CalvingIntervalAverage } from './calving-interval';
 export type { CalvingIntervalIssue } from './calving-interval';
 export { parentageChronologyIssue } from './parentage-chronology';
 export type { ParentageChronologyIssue } from './parentage-chronology';

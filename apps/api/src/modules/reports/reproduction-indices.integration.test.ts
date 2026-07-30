@@ -80,7 +80,7 @@ describe('reports.reproduction — índices del período', () => {
     expect(r.servicios.total).toBe(4);
     expect(r.indices.servicios_por_prenez).toBe(2); // 4/2
     // no queda rastro del KPI retirado (opción 1)
-    expect(Object.keys(r.indices).sort()).toEqual(['iep_dias', 'prenez_pct', 'servicios_por_prenez']);
+    expect(Object.keys(r.indices).sort()).toEqual(['iep_contados', 'iep_descartados', 'iep_dias', 'prenez_pct', 'servicios_por_prenez']);
     expect('vientres_prenados_pct' in r.indices).toBe(false);
   });
 
@@ -92,18 +92,56 @@ describe('reports.reproduction — índices del período', () => {
   });
 
   it('casos 3, 4 y 5: IEP promedia intervalos (parto posterior en período); 1 parto no aporta', async () => {
+    // Los intervalos del fixture eran de 30 y 40 DÍAS, que ninguna vaca puede tener: una gestación
+    // son 283. El test pasaba porque el cálculo tampoco lo miraba — el fixture tenía el mismo
+    // problema que los datos, y por eso nadie notó que al indicador le faltaba la guarda.
+    // Ahora son intervalos reales: 380 y 400 días.
     const d1 = await mkAnimal();
     const d2 = await mkAnimal();
     const d3 = await mkAnimal();
-    await calving(d1, '2029-01-01');
-    await calving(d1, '2029-01-31'); // gap 30, posterior en ventana
-    await calving(d2, '2029-02-01');
-    await calving(d2, '2029-03-13'); // gap 40, posterior en ventana
-    await calving(d3, '2029-01-15'); // único parto → sin intervalo
+    await calving(d1, '2028-01-01');
+    await calving(d1, '2029-01-15'); // 380 días, posterior en ventana
+    await calving(d2, '2028-02-01');
+    await calving(d2, '2029-03-07'); // 400 días, posterior en ventana
+    await calving(d3, '2029-01-14'); // único parto → sin intervalo
 
-    const r = await reports.reproduction('2029-01-20', '2029-04-01');
-    expect(r.indices.iep_dias).toBe(35); // avg(30, 40); d3 excluido
-    expect(r.partos).toBe(3); // 3 partos caen en la ventana (01-31, 03-13, ... y 01-15? no: 01-15 < from 01-20)
+    const r = await reports.reproduction('2029-01-13', '2029-04-01');
+    expect(r.indices.iep_dias).toBe(390); // avg(380, 400)
+    expect(r.indices.iep_contados).toBe(2);
+    expect(r.indices.iep_descartados).toBe(0);
+    expect(r.partos).toBe(3);
+  });
+
+  it('UN INTERVALO IMPOSIBLE NO ENTRA AL PROMEDIO, Y SE DICE CUÁNTOS QUEDARON AFUERA', async () => {
+    // Medido contra la app: la finca demo reportaba «30 días» de intervalo entre partos, con los
+    // cinco intervalos por debajo de una gestación. Un promedio así se lee como una vaca
+    // extraordinaria, y encima de ese número se decide a quién retener y a quién descartar.
+    //
+    // Descartarlos EN SILENCIO sería cambiar una mentira por otra: el productor vería un número
+    // creíble sin saber que parte de su historial no se pudo usar, ni que tiene fechas que corregir.
+    // Ventana propia: los tests comparten base y los partos de los otros casos caerían adentro.
+    const d1 = await mkAnimal();
+    const d2 = await mkAnimal();
+    await calving(d1, '2030-01-01');
+    await calving(d1, '2031-01-16'); // 380 días: posible
+    await calving(d2, '2031-01-01');
+    await calving(d2, '2031-02-01'); // 31 días: imposible
+
+    const r = await reports.reproduction('2031-01-10', '2031-04-01');
+    expect(r.indices.iep_dias, 'solo el que puede ser cierto').toBe(380);
+    expect(r.indices.iep_contados).toBe(1);
+    expect(r.indices.iep_descartados).toBe(1);
+  });
+
+  it('si NINGUNO puede ser cierto, no hay promedio: null, no cero', async () => {
+    // Cero se leería como «paren sin parar», que es la peor lectura posible.
+    const d = await mkAnimal();
+    await calving(d, '2033-01-01');
+    await calving(d, '2033-02-01'); // 31 días
+
+    const r = await reports.reproduction('2033-01-15', '2033-04-01');
+    expect(r.indices.iep_dias).toBeNull();
+    expect(r.indices.iep_descartados).toBe(1);
   });
 
   it('caso 6 aislado: servicios sin ninguna preñez → servicios_por_prenez null', async () => {
