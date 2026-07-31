@@ -31,7 +31,11 @@ describe('commerce — maestro de socios', () => {
   });
 
   it('crea supplier: business_partner + satélite suppliers, sin customers; valida type y enums', async () => {
-    const p: any = await svc.createPartner({ type: 'supplier', name: '  Nutrición SA  ', supplier_category: 'feed', supplier_terms: 30, tax_id: '30-1' });
+    // `tax_id` es un RIF VÁLIDO y no un `'30-1'` cualquiera: la demo es venezolana, así que el alta
+    // pasa por `resolveFiscalId` y el dígito verificador se comprueba de verdad. Este test no es
+    // sobre identidad fiscal —eso vive en `fiscal-identity.integration.test.ts`— pero un socio se
+    // da de alta con su RIF, y el dato tiene que ser posible.
+    const p: any = await svc.createPartner({ type: 'supplier', name: '  Nutrición SA  ', supplier_category: 'feed', supplier_terms: 30, tax_id: 'J-31456789-6' });
     const full: any = await svc.getPartner(p.id);
     expect(full.name).toBe('Nutrición SA');
     expect(full.type).toBe('supplier');

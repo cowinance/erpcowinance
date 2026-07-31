@@ -82,17 +82,26 @@ describe('config — catálogos maestros', () => {
   });
 
   it('cambia la moneda operativa (organización + empresas) a un código del catálogo', async () => {
+    // La demo arranca en USD: es la moneda funcional de un tenant venezolano según
+    // `countryDefaults('VE')`, porque el productor descartó el bolívar. Antes arrancaba en ARS y
+    // este test cambiaba a USD — con la demo ya en dólares, esa versión no probaba ningún CAMBIO.
     const before: any = await svc.currencySettings();
-    expect(before.default_currency).toBe('ARS'); // demo argentino
-    expect(before.currencies.some((c: any) => c.code === 'USD')).toBe(true);
+    expect(before.default_currency).toBe('USD');
 
-    const after: any = await svc.setCurrency({ code: 'usd' }); // normaliza a mayúsculas
-    expect(after.default_currency).toBe('USD');
-    expect(after.companies.every((c: any) => c.functional_currency === 'USD')).toBe(true);
+    // Se cambia a VES, que existe en el catálogo justamente porque el comprobante fiscal puede
+    // necesitarlo. Que el setter FUNCIONE no cambia la decisión de producto: la moneda del negocio
+    // sigue siendo el dólar, y por eso el test la deja como la encontró.
+    expect(before.currencies.some((c: any) => c.code === 'VES')).toBe(true);
+    const after: any = await svc.setCurrency({ code: 'ves' }); // normaliza a mayúsculas
+    expect(after.default_currency).toBe('VES');
+    expect(after.companies.every((c: any) => c.functional_currency === 'VES')).toBe(true);
 
     // Persistió en la organización.
     const [org] = await db.query<{ default_currency: string }>(`SELECT default_currency FROM organizations WHERE id=$1`, [db.tenant]);
-    expect(org.default_currency).toBe('USD');
+    expect(org.default_currency).toBe('VES');
+
+    const vuelta: any = await svc.setCurrency({ code: 'USD' });
+    expect(vuelta.default_currency).toBe('USD');
   });
 
   it('rechaza moneda con formato inválido (400) y código desconocido (400)', async () => {

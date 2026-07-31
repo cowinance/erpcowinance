@@ -63,10 +63,17 @@ describe('platform — panel de administración global', () => {
     )[0].user_id;
 
     // Segunda organización con un usuario propio: sin ella, «ve todos los tenants» no prueba nada.
+    //
+    // Va en COLOMBIA, y el país importa: el filtro por país tiene que devolver esta y no las de la
+    // demo, así que su país tiene que ser distinto del de la demo. Estaba en Venezuela y funcionaba
+    // solo porque la demo era argentina; cuando la demo pasó a Venezuela —que es el país del
+    // producto— el filtro empezó a devolver las tres y el test dejó de discriminar. Un panel de
+    // plataforma es multi-país por definición: que las organizaciones de prueba estén todas en el
+    // mismo lugar es justo lo que no puede pasar acá.
     otherTenant = (
       await db.query<{ id: string }>(
         `INSERT INTO organizations (name, legal_name, country_code, default_currency, timezone, status)
-         VALUES ('Hacienda El Roble','El Roble C.A.','VE','USD','America/Caracas','suspended') RETURNING id`,
+         VALUES ('Hacienda El Roble','El Roble S.A.S.','CO','COP','America/Bogota','suspended') RETURNING id`,
       )
     )[0].id;
     const otherUser = (
@@ -247,8 +254,8 @@ describe('platform — panel de administración global', () => {
     const suspendidas = await platform.organizations({ status: 'suspended' });
     expect(suspendidas.data.map((o: any) => o.id)).toEqual([otherTenant]);
 
-    const venezolanas = await platform.organizations({ country: 've' });
-    expect(venezolanas.data.map((o: any) => o.id)).toEqual([otherTenant]);
+    const colombianas = await platform.organizations({ country: 'co' });
+    expect(colombianas.data.map((o: any) => o.id)).toEqual([otherTenant]);
 
     const busqueda = await platform.organizations({ q: 'Roble' });
     expect(busqueda.data.map((o: any) => o.id)).toEqual([otherTenant]);
@@ -258,8 +265,8 @@ describe('platform — panel de administración global', () => {
     expect(nada.total).toBe(0);
     // Las facetas salen del conjunto SIN filtrar: si salieran del resultado, filtrar por un país
     // dejaría ese país como única opción y el filtro se cerraría sobre sí mismo.
-    expect(nada.facets.countries).toEqual(expect.arrayContaining(['VE']));
-    expect(venezolanas.facets.countries.length).toBeGreaterThan(1);
+    expect(nada.facets.countries).toEqual(expect.arrayContaining(['VE', 'CO']));
+    expect(colombianas.facets.countries.length).toBeGreaterThan(1);
   });
 
   it('el detalle de una organización trae usuarios, fincas, uso y actividad', async () => {

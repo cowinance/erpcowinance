@@ -32,7 +32,8 @@ describe('SyncService.setPushToken · integración', () => {
     sync = new SyncService(db, new SyncHandlerRegistry(), new BillingService(db));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
-    otherUserId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'maria@elombu.com'`))[0].id;
+    // El segundo tenant de la demo (antes 'maria@elombu.com', cuando la finca era argentina).
+    otherUserId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'maria@elsaman.com'`))[0].id;
   }, 120_000);
 
   afterAll(() => {

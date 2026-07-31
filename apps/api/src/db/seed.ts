@@ -1,6 +1,7 @@
 import type { TxHandle } from './driver';
 import { hashPassword } from '../common/passwords';
 import { polygonAreaHa } from '@cowinance/domain';
+import { countryDefaults } from '../modules/identity/country-defaults';
 
 /** Lo único que el seed necesita de la base: correr consultas. Así sirve tanto sobre PGlite (dev)
  *  como sobre PostgreSQL real, sin acoplarse a un driver concreto. */
@@ -13,7 +14,7 @@ type Queryable = TxHandle;
  *   necesita (países, monedas, unidades, especies, razas, categorías, roles).
  *   Idempotente y siempre ejecutado — una finca que se registra self-service
  *   depende de que estos existan (p. ej. el rol `owner`).
- * - `seedDemo(db)`: la organización demo "Grupo La Esperanza" + "El Ombú" con
+ * - `seedDemo(db)`: la organización demo "Grupo La Esperanza" + "El Samán" con
  *   hato, pesajes, sanidad y reproducción. Solo se ejecuta bajo el flag
  *   `SEED_DEMO` (ON en dev, OFF en producción). Sin datos demo, el sistema
  *   arranca vacío y espera el registro real.
@@ -154,7 +155,11 @@ export async function bootstrapCatalogs(db: Queryable) {
   );
 
   // ── Diagnósticos base (tenant_id NULL: catálogo global; cada finca puede extenderlo) ──
-  // Se marcan como notificables las de denuncia obligatoria en Argentina (SENASA).
+  // Se marcan como notificables carbunclo, brucelosis, tuberculosis y aftosa. La autoridad que
+  // corresponde a este catálogo es el INSAI (la que ya declara `countries` para Venezuela); el
+  // comentario decía SENASA, de la etapa en que la demo era argentina. Las CUATRO son de denuncia
+  // obligatoria igual —están en la lista de la OMSA— así que cambia el nombre de la autoridad, no
+  // la lista. Si el productor quiere sumar alguna propia del llano, este es el lugar.
   await q(
     `INSERT INTO diagnoses (tenant_id, code, name, category, is_notifiable) VALUES
      (NULL,'neumonia','Neumonía','respiratoria',false),
@@ -191,7 +196,7 @@ export async function bootstrapCatalogs(db: Queryable) {
 }
 
 /**
- * Datos demo (organización "Grupo La Esperanza" + "El Ombú"). Depende de que
+ * Datos demo (organización "Grupo La Esperanza" + "El Samán"). Depende de que
  * `bootstrapCatalogs` ya haya corrido; resuelve por lookup las entidades base
  * que necesita (especie bovina, razas, categorías, rol owner) en vez de
  * recibirlas — así queda desacoplado del bootstrap. Solo corre bajo `SEED_DEMO`.
@@ -208,27 +213,52 @@ export async function seedDemo(db: Queryable) {
   const [{ id: ownerRole }] = await q(`SELECT id FROM roles WHERE code = 'owner' AND tenant_id IS NULL`);
 
   // ── Identidad y organización ──────────────────────────────────────────
+  //
+  // La demo es VENEZOLANA, que es el país del producto: el vertical fiscal se construyó sobre el
+  // SENIAT y el RIF, y el negocio es en dólares. Estaba cargada como Argentina, y eso no era solo
+  // sabor equivocado — dejaba incoherencias vivas: ventas emitidas en USD adentro de una empresa
+  // cuya moneda funcional decía ARS, y un cliente con RIF venezolano en una empresa argentina.
+  //
+  // Los valores salen de `countryDefaults('VE')` y no se escriben a mano: es la misma fuente que usa
+  // el alta de un tenant real, así que la demo no puede quedar distinta de lo que produce el
+  // registro. Da USD (no bolívares, decisión del productor), `es-VE` y `America/Caracas`.
+  const ve = countryDefaults('VE');
   const [{ id: userId }] = await q(
-    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-AR',$1) RETURNING id`,
-    [await hashPassword('cowinance')],
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla',$1,$2) RETURNING id`,
+    [ve.locale, await hashPassword('cowinance')],
   );
   const [{ id: org }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
-     VALUES ('Grupo La Esperanza','Grupo La Esperanza S.A.','AR','ARS','es-AR','America/Argentina/Buenos_Aires',$1) RETURNING id`,
-    [userId],
+     VALUES ('Grupo La Esperanza','Grupo La Esperanza, C.A.','VE',$1,$2,$3,$4) RETURNING id`,
+    [ve.currency, ve.locale, ve.timezone, userId],
   );
   // RLS: a partir de acá, las inserciones con tenant_id necesitan el GUC
   await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
   await q(`INSERT INTO user_role_assignments (tenant_id, user_id, role_id) VALUES ($1,$2,$3)`, [org, userId, ownerRole]);
+  // El RIF NO es decorativo: con el país en `VE` se le aplica el algoritmo del dígito verificador
+  // (`resolveFiscalId`) en toda alta que entre por la API, y de él sale la identidad del emisor en
+  // el comprobante fiscal. Antes había un CUIT, que con este país sería inválido. Los dígitos de
+  // todos los RIF de este archivo se calcularon con `isValidRif` del dominio, no a ojo.
+  // `tax_id_normalized` va escrito TAMBIÉN, y no es redundancia: es la columna sobre la que se apoya
+  // la unicidad del RIF —nunca sobre `tax_id`, porque `J-12345678-4` y `J123456784` pasarían como
+  // dos—. Como el seed inserta por SQL directo, no atraviesa `resolveFiscalId`, que es quien la
+  // llena en un alta real; sin esto la demo quedaba con la columna en NULL, o sea distinta de lo
+  // que produce el sistema y sin el guardarraíl de duplicados.
   const [{ id: company }] = await q(
-    `INSERT INTO companies (tenant_id, name, tax_id, country_code, functional_currency, created_by)
-     VALUES ($1,'La Esperanza S.A.','30-71234567-8','AR','ARS',$2) RETURNING id`,
-    [org, userId],
+    `INSERT INTO companies (tenant_id, name, tax_id, tax_id_normalized, country_code, functional_currency, created_by)
+     VALUES ($1,'La Esperanza, C.A.','J-12345678-4','J123456784','VE',$2,$3) RETURNING id`,
+    [org, ve.currency, userId],
   );
+  // «Hato» y no «Estancia»: es la palabra venezolana para el establecimiento ganadero.
+  //
+  // `official_code` queda en NULL A PROPÓSITO. El registro de explotaciones pecuarias lo lleva el
+  // INSAI —la autoridad que ya declara el catálogo de países— pero no tengo confirmado el formato
+  // real de ese número, e inventar uno con pinta de oficial es peor que no ponerlo: el productor lo
+  // leería como si fuera el suyo. Se completa cuando él lo diga.
   const [{ id: farm }] = await q(
     `INSERT INTO farms (tenant_id, company_id, name, official_code, total_area_ha, timezone, created_by)
-     VALUES ($1,$2,'Estancia La Esperanza','RENSPA 01.234.5.67890/01',850,'America/Argentina/Buenos_Aires',$3) RETURNING id`,
-    [org, company, userId],
+     VALUES ($1,$2,'Hato La Esperanza',NULL,850,$3,$4) RETURNING id`,
+    [org, company, ve.timezone, userId],
   );
 
   // ── Potreros y lotes ──────────────────────────────────────────────────
@@ -317,7 +347,7 @@ export async function seedDemo(db: Queryable) {
     { catCode: 'ternera', sex: 'F', n: 9, ageMo: [7, 11], kg: [130, 195], lot: 2 },
   ];
 
-  const names = ['Estrella', 'Malinche', 'Paloma', 'Golondrina', 'Margarita', 'Fortuna', 'Serena', 'Yerbabuena', 'Centella', 'Amapola', 'Curiosa', 'Morocha', 'Overita', 'Zaina', 'Pampa'];
+  const names = ['Estrella', 'Malinche', 'Paloma', 'Golondrina', 'Margarita', 'Fortuna', 'Serena', 'Yerbabuena', 'Centella', 'Amapola', 'Curiosa', 'Morocha', 'Overita', 'Zaina', 'Llanera'];
   const events: { animal: string; type: string; payload: Record<string, unknown>; at: Date }[] = [];
   let tag = 100;
   const animalIds: { id: string; sex: string; catCode: string; tag: string }[] = [];
@@ -326,7 +356,14 @@ export async function seedDemo(db: Queryable) {
     for (let i = 0; i < d.n; i++) {
       const ageMonths = between(d.ageMo[0], d.ageMo[1]);
       const birth = daysAgo(ageMonths * 30.4);
-      const breedCode = pick(['angus', 'angus', 'hereford', 'brangus', 'braford']);
+      // El rodeo entero era Angus y Hereford: razas de clima templado, imposibles de sostener en el
+      // trópico. Es lo que más se ve, porque la raza sale en la ficha de cada animal.
+      //
+      // La mezcla de ahora es la de una finca venezolana de verdad: Brahman como base —cebuína, que
+      // es lo que aguanta calor y garrapata—, mestizo y Girolando para el doble propósito, que es
+      // como produce la mayoría, y algo de Carora y Criollo Limonero del lado lechero. Las
+      // proporciones se repiten a propósito: `pick` toma uniforme, así que repetir es cómo se pesa.
+      const breedCode = pick(['brahman', 'brahman', 'brahman', 'mestizo', 'mestizo', 'girolando', 'carora', 'criollo_limonero', 'gyr']);
       // Genealogía: los terneros nacen de una vaca y un toro del rodeo
       const isCalf = d.catCode === 'ternero' || d.catCode === 'ternera';
       // El NOVILLO también lleva padre, aunque sin parto registrado: nació antes de que la finca
@@ -918,7 +955,10 @@ export async function seedDemo(db: Queryable) {
   // La venta queda en `draft` a propósito: el aviso existe para leerse ANTES de cerrarla.
   {
     const [{ id: socioExportador }] = await q(
-      `INSERT INTO business_partners (tenant_id, company_id, type, name, tax_id) VALUES ($1,$2,'customer','Exportadora del Llano','J-30158742-6') RETURNING id`,
+      // El RIF que había acá (`J-30158742-6`) NO cerraba el dígito verificador. No molestaba porque
+      // el país de la demo era `AR` y el validador no corría; con `VE` sí corre. Este es el mismo
+      // cuerpo con el dígito que calcula `isValidRif`.
+      `INSERT INTO business_partners (tenant_id, company_id, type, name, tax_id, tax_id_normalized) VALUES ($1,$2,'customer','Exportadora del Llano','J-30158742-1','J301587421') RETURNING id`,
       [org, company],
     );
     await q(`INSERT INTO customers (tenant_id, partner_id, segment) VALUES ($1,$2,'export')`, [org, socioExportador]);
@@ -977,7 +1017,7 @@ export async function seedDemo(db: Queryable) {
     );
     const [{ id: estacion }] = await q(
       `INSERT INTO devices (tenant_id, farm_id, device_type_id, serial_number, name, status, created_by)
-       VALUES ($1,$2,$3,'WS-0001','Estación El Ombú','active',$4) RETURNING id`,
+       VALUES ($1,$2,$3,'WS-0001','Estación El Samán','active',$4) RETURNING id`,
       [org, farm, tipoEstacion, userId],
     );
 
@@ -1186,24 +1226,27 @@ export async function seedDemo(db: Queryable) {
   }
 
   // ── Segundo tenant: prueba viviente del aislamiento RLS ───────────────
+  //
+  // «El Ombú» era un árbol de la pampa; el samán es el emblemático venezolano. La misma razón por
+  // la que la estancia pasó a hato: la demo tiene que sonar a donde se usa.
   const [{ id: mariaId }] = await q(
-    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('maria@elombu.com','María Fernández','es-AR',$1) RETURNING id`,
-    [await hashPassword('ombu1234')],
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('maria@elsaman.com','María Fernández',$1,$2) RETURNING id`,
+    [ve.locale, await hashPassword('saman1234')],
   );
   const [{ id: orgB }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
-     VALUES ('Agropecuaria El Ombú','El Ombú S.R.L.','AR','ARS','es-AR','America/Argentina/Buenos_Aires',$1) RETURNING id`,
-    [mariaId],
+     VALUES ('Agropecuaria El Samán','El Samán, C.A.','VE',$1,$2,$3,$4) RETURNING id`,
+    [ve.currency, ve.locale, ve.timezone, mariaId],
   );
   await q(`SELECT set_config('app.tenant_id', $1, false)`, [orgB]);
   await q(`INSERT INTO user_role_assignments (tenant_id, user_id, role_id) VALUES ($1,$2,$3)`, [orgB, mariaId, ownerRole]);
   const [{ id: companyB }] = await q(
-    `INSERT INTO companies (tenant_id, name, country_code, functional_currency, created_by)
-     VALUES ($1,'El Ombú S.R.L.','AR','ARS',$2) RETURNING id`,
-    [orgB, mariaId],
+    `INSERT INTO companies (tenant_id, name, tax_id, tax_id_normalized, country_code, functional_currency, created_by)
+     VALUES ($1,'El Samán, C.A.','J-29123456-8','J291234568','VE',$2,$3) RETURNING id`,
+    [orgB, ve.currency, mariaId],
   );
   const [{ id: farmB }] = await q(
-    `INSERT INTO farms (tenant_id, company_id, name, total_area_ha, created_by) VALUES ($1,$2,'Campo El Ombú',320,$3) RETURNING id`,
+    `INSERT INTO farms (tenant_id, company_id, name, total_area_ha, created_by) VALUES ($1,$2,'Fundo El Samán',320,$3) RETURNING id`,
     [orgB, companyB, mariaId],
   );
   for (let i = 0; i < 5; i++) {
@@ -1260,6 +1303,6 @@ export async function seedDemo(db: Queryable) {
   await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
 
   console.log(
-    `Seed: ${animalIds.length} animales (+5 de El Ombú), ${events.length} eventos, ${pregnant} preñeces. Usuarios: cowinance@gmail.com/cowinance · maria@elombu.com/ombu1234`,
+    `Seed: ${animalIds.length} animales (+5 de El Samán), ${events.length} eventos, ${pregnant} preñeces. Usuarios: cowinance@gmail.com/cowinance · maria@elsaman.com/saman1234`,
   );
 }

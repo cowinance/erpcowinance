@@ -480,7 +480,7 @@ se propagan por pull a dispositivos vía **changesets de origen servidor** ([ADR
   Keycloak/Auth0 cambiando solo la clave de verificación del interceptor).
 - **RLS activa y forzada** en 24 tablas de dominio: cada request corre en una transacción con
   `SET LOCAL app.tenant_id`; sin contexto, cero filas. Verificado con dos tenants
-  (`cowinance@gmail.com / cowinance` — Grupo La Esperanza; `maria@elombu.com / ombu1234` — El Ombú):
+  (`cowinance@gmail.com / cowinance` — Grupo La Esperanza; `maria@elsaman.com / saman1234` — El Samán):
   cada uno ve solo su hato y el acceso cruzado por id devuelve 404.
 - E2E: `node apps/api/scripts/auth-e2e.mjs` (15 checks).
 

@@ -35,11 +35,22 @@ describe('commerce — identidad fiscal del socio', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  describe('tenant NO venezolano (el demo es argentino)', () => {
+  describe('tenant NO venezolano', () => {
+    let svc: CommerceService;
+
+    beforeAll(async () => {
+      // El país se pone EXPLÍCITO. Este bloque decía «el demo es argentino» y se apoyaba en que el
+      // seed lo fuera: cuando la demo pasó a Venezuela —que es el país del producto—, el test dejó
+      // de probar lo que decía probar. Un test que depende de datos de demo se rompe cuando alguien
+      // los corrige, y peor: si la demo hubiera pasado a otro país sin regla, habría seguido en
+      // verde sin ejercitar nada.
+      await db.query(`UPDATE companies SET country_code='AR' WHERE tenant_id=$1`, [db.tenant]);
+      svc = nuevoServicio(); // el país va cacheado: hay que rehacer el servicio después de tocarlo
+    });
+
     it('guarda el identificador tal cual, sin aplicarle el algoritmo del RIF', async () => {
       // Un CUIT no cierra por el dígito verificador venezolano. Si acá saltara un 400, la
       // validación estaría aplicándose donde no corresponde.
-      const svc = nuevoServicio();
       const p: any = await svc.createPartner({ type: 'customer', name: 'Frigorífico Rosario', tax_id: '30-71234567-8' });
       const full: any = await svc.getPartner(p.id);
       expect(full.tax_id).toBe('30-71234567-8');
