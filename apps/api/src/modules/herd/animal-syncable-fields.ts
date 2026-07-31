@@ -7,6 +7,12 @@
  *
  * No incluye `visual_tag` ni `category_code`: son campos lógicos del cliente que
  * el handler resuelve aparte (identificador visual / category_id).
+ *
+ * `origin` entró con el alta rápida del móvil. El INSERT del handler lo pone en `'born'` fijo, que
+ * era verdad mientras lo único que creaba animales offline era el PARTO. Desde que el productor
+ * puede dar de alta a mano —y lo típico que se da de alta a mano es un animal COMPRADO— ese fijo
+ * pasó a ser una mentira silenciosa, y `origin` alimenta la tasa de reposición de los KPIs de cría:
+ * comprar veinte vaquillonas y que el sistema las cuente como propias da vuelta el indicador.
  */
 export const ANIMAL_SYNCABLE_FIELDS = new Set([
   'name',
@@ -19,4 +25,5 @@ export const ANIMAL_SYNCABLE_FIELDS = new Set([
   'coat_color',
   'dam_id',
   'sire_id',
+  'origin',
 ]);

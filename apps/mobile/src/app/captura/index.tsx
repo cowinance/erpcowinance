@@ -11,6 +11,8 @@ import { EmptyHerd } from '@/components/EmptyHerd';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
+  // Primero porque es el principio de todo: sin el animal cargado, ninguna de las otras diez sirve.
+  { tipo: 'nuevo', label: 'Nuevo animal', icon: 'add-outline', href: '/captura/nuevo' },
   { tipo: 'pesar', label: 'Pesar (manga)', icon: 'speedometer-outline', href: '/manga' },
   { tipo: 'vacunar', label: 'Vacunar', icon: 'shield-checkmark-outline', href: '/captura/vacunar' },
   { tipo: 'tratar', label: 'Tratar', icon: 'medkit-outline', href: '/captura/tratar' },

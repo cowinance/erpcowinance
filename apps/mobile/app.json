@@ -8,7 +8,11 @@
     "scheme": "cowinance",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.cowinance.app",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Cowinance se conecta al servidor de la finca en tu red local para sincronizar los datos del hato."
+      }
     },
     "android": {
       "adaptiveIcon": {

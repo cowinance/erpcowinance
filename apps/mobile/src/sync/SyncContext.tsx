@@ -215,6 +215,20 @@ interface SyncCtx {
   captureService: (animalId: string, method: 'ai' | 'natural', sireId?: string) => void;
   captureDiagnosis: (animalId: string, result: 'pregnant' | 'empty') => { expectedDue?: string };
   captureCalving: (damId: string, calf: { sex: 'F' | 'M'; tag?: string }) => { calfId: string };
+  /** Alta rápida en el corral: put sobre `animals` con id del dispositivo, igual que la cría de un
+   *  parto. El servidor (AnimalSyncHandler) resuelve category_code→category_id, inserta la caravana
+   *  visual y marca conflicto si ya existía. Las categorías salen del rodeo bajado, no de una lista
+   *  escrita en la app: son un catálogo editable por finca. */
+  captureNewAnimal: (a: {
+    tag: string;
+    sex: 'F' | 'M';
+    categoryCode: string;
+    categoryLabel: string;
+    origin: 'born' | 'purchased';
+    lotId?: string | null;
+  }) => { animalId: string };
+  /** Las categorías que la finca usa de verdad, para el selector del alta. */
+  categoriesInUse: () => { code: string; label: string }[];
   /** Mueve un animal a un lote (o lo saca: toLotId=null). Emite SOLO el event op de
    *  animal_movements (event-only, M-3.2.a); el servidor deriva el potrero y converge. */
   captureMovement: (animalId: string, toLotId: string | null, reason?: string) => void;
@@ -1067,6 +1081,65 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         bump();
         scheduleSync();
         return { calfId };
+      },
+
+      /**
+       * Alta rápida (corral). Mismo camino que la cría de un parto —un put sobre `animals` con id
+       * generado en el teléfono— porque es el único que el servidor ya sabe recibir: el handler
+       * contempla explícitamente la «creación de animal offline».
+       *
+       * `birth_date` va en null a propósito: en un alta rápida nadie sabe la fecha exacta, y poner
+       * hoy como nacimiento crearía animales recién nacidos de 400 kilos. Sin fecha el sistema
+       * simplemente no calcula edad, que es lo honesto; se completa después desde la web.
+       *
+       * `origin` viaja de verdad y no queda en el 'born' fijo del INSERT: lo que se da de alta a
+       * mano suele ser comprado, y ese campo alimenta la tasa de reposición.
+       */
+      captureNewAnimal: (a) => {
+        const d = deviceRef.current;
+        if (!d) return { animalId: '' };
+        const animalId = Crypto.randomUUID();
+        d.setFields('animals', animalId, {
+          visual_tag: a.tag,
+          name: null,
+          status: 'active',
+          sex: a.sex,
+          birth_date: null,
+          category: a.categoryLabel,
+          category_code: a.categoryCode,
+          origin: a.origin,
+          current_lot_id: a.lotId ?? null,
+          last_weight_kg: null,
+          last_weighed_at: null,
+        });
+        d.addEvent('animal_events', Crypto.randomUUID(), {
+          animal_id: animalId,
+          event_type: 'registered',
+          payload: { origin: a.origin, category: a.categoryCode, source: 'movil_alta_rapida' },
+          occurred_at: new Date().toISOString(),
+        });
+        d.commit();
+        bump();
+        scheduleSync();
+        return { animalId };
+      },
+
+      /**
+       * Las categorías se derivan del rodeo bajado y NO de una lista escrita en la app: son un
+       * catálogo que cada finca edita en Configuración, así que cualquier lista fija quedaría
+       * desactualizada sin que nadie se entere. El costo es que una categoría que la finca todavía
+       * no usa no aparece; para el alta rápida alcanza, y lo raro se carga desde la web.
+       */
+      categoriesInUse: () => {
+        const vistas = new Map<string, string>();
+        const am = store()?.rows.get('animals');
+        if (am)
+          for (const [, st] of am) {
+            const code = st.fields.category_code;
+            const label = st.fields.category;
+            if (typeof code === 'string' && code && !vistas.has(code)) vistas.set(code, typeof label === 'string' && label ? label : code);
+          }
+        return [...vistas].map(([code, label]) => ({ code, label })).sort((x, y) => x.label.localeCompare(y.label, 'es'));
       },
 
       // Movimiento offline (P3 M-3.3.a): emite SOLO el event op de intención. El
