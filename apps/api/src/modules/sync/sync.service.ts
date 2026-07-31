@@ -211,7 +211,20 @@ export class SyncService {
        WHERE a.tenant_id = $1 AND a.deleted_at IS NULL AND a.status = 'active'`,
       [this.db.tenant],
     );
-    const farm = await this.db.one<any>(`SELECT id, name FROM farms WHERE id = $1`, [await this.db.defaultFarm()]);
+    // La ZONA de la finca viaja con el bootstrap, que es el momento en que el teléfono adopta esta
+    // finca: queda persistida y por lo tanto disponible OFFLINE, que es cuando el móvil tiene que
+    // servir. Sin ella el teléfono fechaba con su propia zona, y el día de trabajo pertenece a la
+    // finca — un veterinario que carga desde otro país anota en el día de la finca, no en el suyo.
+    //
+    // Sale de `organizations` y no de `farms` porque ahí es donde vive (se deriva del país al
+    // registrar). Es la MISMA columna que ya leen la web y el servidor: una sola fuente.
+    const farm = await this.db.one<any>(
+      `SELECT f.id, f.name, o.timezone
+         FROM farms f
+         JOIN organizations o ON o.id = f.tenant_id
+        WHERE f.id = $1`,
+      [await this.db.defaultFarm()],
+    );
 
     const products = await this.db.query<any>(
       `SELECT id, name, type, withdrawal_meat_days, withdrawal_milk_hours, default_dose

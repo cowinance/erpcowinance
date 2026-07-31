@@ -41,6 +41,14 @@ export interface PersistedMeta {
   userId?: string;
   tenantId?: string;
   farmId?: string;
+  /**
+   * La zona horaria de la finca (`organizations.timezone`), traída por el bootstrap.
+   *
+   * Se PERSISTE a propósito: sin eso habría que pedirla por red, y este dispositivo tiene que poder
+   * fechar una carga parado en el potrero sin señal. Llega en el bootstrap, que es el momento en
+   * que el teléfono adopta la finca, así que para cuando se puede capturar algo ya está.
+   */
+  farmTimeZone?: string;
 }
 
 /**

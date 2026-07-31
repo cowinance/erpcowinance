@@ -89,6 +89,8 @@ export default function Menu() {
           <Text style={styles.value}>{sync.lastSyncAt ? new Date(sync.lastSyncAt).toLocaleString('es-AR') : 'nunca'}</Text>
           <Text style={[styles.title, { marginTop: T.space['3'] }]}>Almacenamiento local</Text>
           <Text style={styles.value}>{sync.storageEngine}</Text>
+          <Text style={[styles.title, { marginTop: T.space['3'] }]}>Zona de la finca</Text>
+          <Text style={styles.value}>{sync.farmTimeZone ?? 'la del dispositivo'}</Text>
         </Card>
 
         {account.emailVerified === false && (

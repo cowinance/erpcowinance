@@ -9,7 +9,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, Op, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
-import { farmToday } from '../lib/date';
+import { farmToday, setFarmTimeZone, getFarmTimeZone } from '../lib/date';
 import {
   computeWithdrawal,
   computeExpectedDueDateFromService,
@@ -149,6 +149,8 @@ interface SyncCtx {
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
   farmName?: string;
+  /** Zona con la que se fecha en este dispositivo. `null` = todavía la del teléfono. */
+  farmTimeZone: string | null;
   lastSyncAt?: string;
   lastSyncResult?: string;
   storageEngine: string;
@@ -518,6 +520,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       await storage.init();
       const [meta, saved] = await Promise.all([storage.loadMeta(), storage.loadDevice()]);
       metaRef.current = meta;
+      // Arranque en frío, quizá sin señal: la zona de la finca sale de lo persistido, no de la red.
+      setFarmTimeZone(meta?.farmTimeZone);
 
       if (!meta?.accessToken) {
         setStatus('login');
@@ -556,8 +560,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         serverDeviceId: device.id,
         farmName: snapshot.farm?.name,
         farmId: snapshot.farm?.id,
+        farmTimeZone: snapshot.farm?.timezone ?? undefined,
         lastSyncAt: new Date().toISOString(),
       };
+      // Antes de `setStatus('ready')`: a partir de ahí se puede capturar, y capturar FECHA.
+      setFarmTimeZone(metaRef.current.farmTimeZone);
       await storage.saveMeta(metaRef.current);
       setStatus('ready');
       bump();
@@ -649,6 +656,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     }
     metaRef.current = { ...metaRef.current, accessToken: undefined, refreshToken: undefined };
     await storageRef.current.saveMeta(metaRef.current!);
+    // La zona es de la finca que se está dejando: si entra otra cuenta, hasta su bootstrap se fecha
+    // con la del teléfono y no con la del tenant anterior. Mismo criterio que el resto del cierre.
+    setFarmTimeZone(null);
     setStatus('login');
   }, []);
 
@@ -686,6 +696,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       farmName: metaRef.current?.farmName,
+      // Del módulo de fecha y no de la meta: lo que importa mostrar es la zona que se está USANDO
+      // para fechar, no la que quedó guardada. Si difirieran, el diagnóstico mentiría.
+      farmTimeZone: getFarmTimeZone(),
       lastSyncAt: metaRef.current?.lastSyncAt,
       lastSyncResult,
       storageEngine: storageRef.current.engine,
