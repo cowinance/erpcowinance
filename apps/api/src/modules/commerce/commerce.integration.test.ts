@@ -31,7 +31,10 @@ describe('commerce — maestro de socios', () => {
   });
 
   it('crea supplier: business_partner + satélite suppliers, sin customers; valida type y enums', async () => {
-    const p: any = await svc.createPartner({ type: 'supplier', name: '  Nutrición SA  ', supplier_category: 'feed', supplier_terms: 30, tax_id: '30-1' });
+    // Sin `tax_id`: el demo es venezolano y ahí el identificador se valida como RIF, así que el
+    // `'30-1'` que viajaba antes —que no lo afirmaba ninguna aserción— daría un 400 por un motivo
+    // ajeno a lo que este test mira. La identidad fiscal tiene su propio archivo.
+    const p: any = await svc.createPartner({ type: 'supplier', name: '  Nutrición SA  ', supplier_category: 'feed', supplier_terms: 30 });
     const full: any = await svc.getPartner(p.id);
     expect(full.name).toBe('Nutrición SA');
     expect(full.type).toBe('supplier');

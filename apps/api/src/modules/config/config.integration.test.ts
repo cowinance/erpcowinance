@@ -83,16 +83,18 @@ describe('config — catálogos maestros', () => {
 
   it('cambia la moneda operativa (organización + empresas) a un código del catálogo', async () => {
     const before: any = await svc.currencySettings();
-    expect(before.default_currency).toBe('ARS'); // demo argentino
-    expect(before.currencies.some((c: any) => c.code === 'USD')).toBe(true);
+    expect(before.default_currency).toBe('USD'); // el demo es venezolano y lleva sus libros en dólares
+    expect(before.currencies.some((c: any) => c.code === 'ARS')).toBe(true);
 
-    const after: any = await svc.setCurrency({ code: 'usd' }); // normaliza a mayúsculas
-    expect(after.default_currency).toBe('USD');
-    expect(after.companies.every((c: any) => c.functional_currency === 'USD')).toBe(true);
+    // El destino tiene que ser DISTINTO del de partida: cambiar USD por USD no probaría que el
+    // cambio se propaga a las empresas ni que persiste.
+    const after: any = await svc.setCurrency({ code: 'ars' }); // normaliza a mayúsculas
+    expect(after.default_currency).toBe('ARS');
+    expect(after.companies.every((c: any) => c.functional_currency === 'ARS')).toBe(true);
 
     // Persistió en la organización.
     const [org] = await db.query<{ default_currency: string }>(`SELECT default_currency FROM organizations WHERE id=$1`, [db.tenant]);
-    expect(org.default_currency).toBe('USD');
+    expect(org.default_currency).toBe('ARS');
   });
 
   it('rechaza moneda con formato inválido (400) y código desconocido (400)', async () => {

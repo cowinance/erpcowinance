@@ -154,7 +154,8 @@ export async function bootstrapCatalogs(db: Queryable) {
   );
 
   // ── Diagnósticos base (tenant_id NULL: catálogo global; cada finca puede extenderlo) ──
-  // Se marcan como notificables las de denuncia obligatoria en Argentina (SENASA).
+  // Se marcan como notificables las de denuncia obligatoria ante la autoridad sanitaria (aftosa,
+  // brucelosis, tuberculosis y carbunclo lo son en todos los países del catálogo).
   await q(
     `INSERT INTO diagnoses (tenant_id, code, name, category, is_notifiable) VALUES
      (NULL,'neumonia','Neumonía','respiratoria',false),
@@ -208,26 +209,47 @@ export async function seedDemo(db: Queryable) {
   const [{ id: ownerRole }] = await q(`SELECT id FROM roles WHERE code = 'owner' AND tenant_id IS NULL`);
 
   // ── Identidad y organización ──────────────────────────────────────────
+  /*
+   * El tenant principal es VENEZOLANO y lleva sus libros en USD, que es el caso del producto: el
+   * vertical fiscal entero (G4) está construido sobre el SENIAT y el RIF, y el negocio se pacta y
+   * se costea en dólares. Antes el encabezado decía Argentina/ARS mientras TODAS las ventas que
+   * este mismo seed escribe estaban en USD, y ya había un socio con RIF venezolano: el demo se
+   * contradecía a sí mismo y mandaba a la app móvil la zona horaria equivocada.
+   *
+   * El segundo tenant ("El Ombú") queda argentino A PROPÓSITO — ver más abajo.
+   */
   const [{ id: userId }] = await q(
-    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-AR',$1) RETURNING id`,
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-VE',$1) RETURNING id`,
     [await hashPassword('cowinance')],
   );
   const [{ id: org }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
-     VALUES ('Grupo La Esperanza','Grupo La Esperanza S.A.','AR','ARS','es-AR','America/Argentina/Buenos_Aires',$1) RETURNING id`,
+     VALUES ('Grupo La Esperanza','Grupo La Esperanza, C.A.','VE','USD','es-VE','America/Caracas',$1) RETURNING id`,
     [userId],
   );
   // RLS: a partir de acá, las inserciones con tenant_id necesitan el GUC
   await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
   await q(`INSERT INTO user_role_assignments (tenant_id, user_id, role_id) VALUES ($1,$2,$3)`, [org, userId, ownerRole]);
+  /*
+   * RIF con dígito verificador VÁLIDO y las dos columnas juntas, igual que las escribe
+   * `IssuerService`: `tax_id` es lo que se imprime y `tax_id_normalized` es la clave con la que se
+   * compara. Sembrar solo una dejaría al emisor del demo con `can_issue: true` sobre un RIF que la
+   * app rechazaría si lo cargaran por la UI.
+   */
   const [{ id: company }] = await q(
-    `INSERT INTO companies (tenant_id, name, tax_id, country_code, functional_currency, created_by)
-     VALUES ($1,'La Esperanza S.A.','30-71234567-8','AR','ARS',$2) RETURNING id`,
+    `INSERT INTO companies (tenant_id, name, tax_id, tax_id_normalized, taxpayer_condition, country_code, functional_currency, created_by)
+     VALUES ($1,'Agropecuaria La Esperanza, C.A.','J-31234567-5','J312345675','ordinario','VE','USD',$2) RETURNING id`,
     [org, userId],
   );
+  /*
+   * `official_code` es el registro del predio ante el INSAI (la autoridad de trazabilidad de VE
+   * según el catálogo de países). NO conozco el formato oficial real, así que va un valor
+   * declaradamente de demo en vez de uno inventado con apariencia de oficial — antes acá había un
+   * RENSPA, que es de SENASA (Argentina).
+   */
   const [{ id: farm }] = await q(
     `INSERT INTO farms (tenant_id, company_id, name, official_code, total_area_ha, timezone, created_by)
-     VALUES ($1,$2,'Estancia La Esperanza','RENSPA 01.234.5.67890/01',850,'America/Argentina/Buenos_Aires',$3) RETURNING id`,
+     VALUES ($1,$2,'Hato La Esperanza','INSAI DEMO-000123',850,'America/Caracas',$3) RETURNING id`,
     [org, company, userId],
   );
 
@@ -917,8 +939,11 @@ export async function seedDemo(db: Queryable) {
   //
   // La venta queda en `draft` a propósito: el aviso existe para leerse ANTES de cerrarla.
   {
+    // El RIF va con el dígito verificador que le corresponde (era `-6`, y por el algoritmo cierra
+    // en `-1`) y con la columna normalizada cargada: en un tenant venezolano ésa es la clave de
+    // unicidad y de búsqueda, y en NULL el socio queda fuera del guardarraíl de duplicados.
     const [{ id: socioExportador }] = await q(
-      `INSERT INTO business_partners (tenant_id, company_id, type, name, tax_id) VALUES ($1,$2,'customer','Exportadora del Llano','J-30158742-6') RETURNING id`,
+      `INSERT INTO business_partners (tenant_id, company_id, type, name, tax_id, tax_id_normalized) VALUES ($1,$2,'customer','Exportadora del Llano','J-30158742-1','J301587421') RETURNING id`,
       [org, company],
     );
     await q(`INSERT INTO customers (tenant_id, partner_id, segment) VALUES ($1,$2,'export')`, [org, socioExportador]);
@@ -1185,7 +1210,14 @@ export async function seedDemo(db: Queryable) {
     );
   }
 
-  // ── Segundo tenant: prueba viviente del aislamiento RLS ───────────────
+  /*
+   * ── Segundo tenant: prueba viviente del aislamiento RLS ─────────────────
+   *
+   * Y ARGENTINO A PROPÓSITO, ahora que el primero es venezolano. La identidad fiscal se valida POR
+   * PAÍS —el algoritmo del RIF no se le puede aplicar a un CUIT— y esa bifurcación solo se ve con
+   * dos tenants de países distintos. Que el demo tenga uno de cada lado hace que el camino no-VE
+   * exista de verdad en la base y no solo en el `UPDATE` de preparación de un test.
+   */
   const [{ id: mariaId }] = await q(
     `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('maria@elombu.com','María Fernández','es-AR',$1) RETURNING id`,
     [await hashPassword('ombu1234')],

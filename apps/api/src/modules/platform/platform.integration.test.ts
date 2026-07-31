@@ -247,8 +247,14 @@ describe('platform — panel de administración global', () => {
     const suspendidas = await platform.organizations({ status: 'suspended' });
     expect(suspendidas.data.map((o: any) => o.id)).toEqual([otherTenant]);
 
+    // El demo TAMBIÉN es venezolano, así que el filtro por país no puede afirmarse como «devuelve
+    // exactamente una fila»: lo que tiene que probar es que acota, no que hay una sola cuenta en
+    // Venezuela. Se comprueba que trae la que buscamos, que todo lo que trae es de ese país, y que
+    // deja algo afuera — El Ombú es argentino y es lo que hace que este filtro signifique algo.
     const venezolanas = await platform.organizations({ country: 've' });
-    expect(venezolanas.data.map((o: any) => o.id)).toEqual([otherTenant]);
+    expect(venezolanas.data.map((o: any) => o.id)).toContain(otherTenant);
+    expect(venezolanas.data.every((o: any) => o.country_code === 'VE')).toBe(true);
+    expect(venezolanas.total).toBeLessThan((await platform.organizations({})).total);
 
     const busqueda = await platform.organizations({ q: 'Roble' });
     expect(busqueda.data.map((o: any) => o.id)).toEqual([otherTenant]);
