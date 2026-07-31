@@ -203,13 +203,25 @@ export class WeatherService {
     ).join(',\n              ');
 
     const rows = await this.db.query<Record<string, string | null>>(
-      `SELECT (r.recorded_at AT TIME ZONE 'UTC')::date::text AS date,
+      // El día es el de la FINCA, no el de Greenwich.
+      //
+      // Acá decía `AT TIME ZONE 'UTC'`, que PISA la zona de la sesión. Y la sesión ya trae la de la
+      // finca: `applyTenantContext` la fija en cada transacción justamente para que las fechas no
+      // corran en la del servidor. Al forzar UTC, una medición de las 21:00 en el campo —que en
+      // Venezuela es la 01:00 UTC del día siguiente— caía en el balde de mañana.
+      //
+      // No es cosmético: los bordes del rango vienen de `db.today()`, que SÍ es día de finca, así
+      // que se filtraba con un calendario y se agrupaba con otro. Cada día del año, las últimas
+      // horas de luz se contaban en el día equivocado, y el «hoy» del motor de alertas arrancaba
+      // con la noche de ayer adentro. Sacar el `AT TIME ZONE` alcanza: el `::date` de un
+      // `timestamptz` usa la zona de la sesión, que es la que corresponde.
+      `SELECT r.recorded_at::date::text AS date,
               ${agregados}
        FROM sensor_readings r
        JOIN devices d ON d.id = r.device_id AND d.tenant_id = r.tenant_id AND d.deleted_at IS NULL
        JOIN device_types t ON t.id = d.device_type_id AND t.category = 'environmental'
        WHERE r.tenant_id = $1
-         AND (r.recorded_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date
+         AND r.recorded_at::date BETWEEN $2::date AND $3::date
          AND ($4::uuid IS NULL OR r.device_id = $4::uuid)
        GROUP BY 1 ORDER BY 1`,
       [this.db.tenant, from, to, params.stationId ?? null],

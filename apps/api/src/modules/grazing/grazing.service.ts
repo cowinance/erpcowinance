@@ -212,7 +212,12 @@ export class GrazingService {
                 count(*) OVER (PARTITION BY c.id, w.animal_id) AS n
            FROM cerrados c
            JOIN weighings w ON w.tenant_id = $1 AND w.deleted_at IS NULL
-            AND (w.weighed_at AT TIME ZONE 'UTC')::date BETWEEN c.entry_date AND c.exit_date
+            -- Día de FINCA, no de Greenwich: entry_date y exit_date son fechas calendario de la
+            -- finca, así que comparar contra el día UTC mezcla dos calendarios. Un pesaje del
+            -- atardecer del último día caía al día siguiente y quedaba FUERA de la ventana, y ése
+            -- es el peso de salida: de él sale la ganancia de todo el pastoreo. La sesión ya trae
+            -- la zona correcta (applyTenantContext); forzar UTC era pisarla.
+            AND w.weighed_at::date BETWEEN c.entry_date AND c.exit_date
            JOIN animals a ON a.id = w.animal_id AND a.tenant_id = $1 AND a.deleted_at IS NULL
           WHERE COALESCE(
                   (SELECT m.to_lot_id FROM animal_movements m

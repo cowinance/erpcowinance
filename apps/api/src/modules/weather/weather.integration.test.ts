@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { toFarmDate } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { TEST_TIME_ZONE } from '../../db/test-today';
 import { WeatherService } from './weather.service';
 
 /**
@@ -161,6 +163,34 @@ describe('clima — estaciones, ingesta e índices (D4)', () => {
       status: 400,
       response: { code: 'weather.invalid_range' },
     });
+  });
+
+  it('una medición del ATARDECER cuenta en el día de la finca, no en el de Greenwich', async () => {
+    // El bug: la serie diaria agrupaba con `AT TIME ZONE 'UTC'`, que pisa la zona de la sesión —la
+    // de la finca, que `applyTenantContext` fija en cada transacción—. En Venezuela (UTC−4) una
+    // medición de las 22:00 en el campo es la 02:00 UTC del día siguiente, así que se contaba en el
+    // día equivocado. Los bordes del rango, en cambio, salen de `db.today()`, que SÍ es día de
+    // finca: se filtraba con un calendario y se agrupaba con otro.
+    //
+    // No era un caso raro de medianoche: pasaba TODAS las tardes del año. El «hoy» del motor de
+    // alertas arrancaba con la noche de ayer adentro y le faltaban sus últimas horas de luz.
+    //
+    // El instante es fijo y la fecha esperada se DERIVA de la zona de prueba en vez de escribirse:
+    // clavar '2026-05-10' haría de este test el próximo `test-today.ts`, que es el archivo que se
+    // quedó atrás por tener su zona a mano.
+    const instante = '2026-05-11T02:00:00Z';
+    const diaDeFinca = toFarmDate(new Date(instante), TEST_TIME_ZONE);
+    const diaUtc = instante.slice(0, 10);
+    expect(diaDeFinca, 'el fixture solo prueba algo si los dos calendarios difieren').not.toBe(diaUtc);
+
+    await svc.ingest({ station_id: stationId, readings: [{ metric: 'rain', value: 7, recorded_at: instante }] });
+
+    const enLaFinca = await svc.daily({ from: diaDeFinca, to: diaDeFinca });
+    expect(enLaFinca.map((d) => d.date), `debería contar el ${diaDeFinca}`).toEqual([diaDeFinca]);
+    expect(enLaFinca[0].rainMm).toBe(7);
+
+    // Y el par que discrimina: en el día UTC no tiene que haber nada.
+    expect(await svc.daily({ from: diaUtc, to: diaUtc }), `no va en el ${diaUtc}`).toEqual([]);
   });
 
   it('filtra por estación', async () => {

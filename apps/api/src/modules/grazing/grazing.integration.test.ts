@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { addFarmDays, toFarmDate } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
+import { TEST_TIME_ZONE } from '../../db/test-today';
 import { GrazingService } from './grazing.service';
 import { WeatherService } from '../weather/weather.service';
 import { LandService } from '../land/land.service';
@@ -202,6 +204,43 @@ describe('grazing — pastoreo', () => {
       const p = r.paddocks.find((x: any) => x.paddock_id === padP);
       expect(p.water).toBeNull();
       expect(p.days_without_weather).toBeGreaterThan(0);
+    });
+
+    it('el PESO DE SALIDA tomado al atardecer del último día sí cuenta', async () => {
+      // El bug: la ventana comparaba `(weighed_at AT TIME ZONE 'UTC')::date` contra `entry_date` y
+      // `exit_date`, que son fechas calendario de la FINCA. En Venezuela (UTC−4) un pesaje de las
+      // 20:00 del último día es medianoche UTC del siguiente, así que caía fuera de la ventana.
+      //
+      // Y el que cae es justo el que más importa: pesar al terminar la tarde, cuando se saca el
+      // lote del potrero, es lo normal. Sin ese peso el pastoreo mostraba la ganancia de un animal
+      // que «no se pudo medir», o peor, la de un pesaje anterior — y de ahí sale con qué potrero se
+      // rota. Los tests viejos pesaban siempre a mediodía UTC, lejos del borde, y nunca lo vieron.
+      const padR = (await db.query<any>(`INSERT INTO paddocks (tenant_id, farm_id, name, area_ha) VALUES ($1,$2,'Potrero R',10) RETURNING id`, [tenantId, farmId]))[0].id;
+      const lotR = (await db.query<any>(`INSERT INTO lots (tenant_id, farm_id, name) VALUES ($1,$2,'Lote R') RETURNING id`, [tenantId, farmId]))[0].id;
+      const speciesId = (await db.query<any>(`SELECT id FROM species WHERE code='bovine'`))[0].id;
+      const [{ id: bicho }] = await db.query<any>(
+        `INSERT INTO animals (tenant_id, farm_id, species_id, sex, status, current_lot_id) VALUES ($1,$2,$3,'M','active',$4) RETURNING id`,
+        [tenantId, farmId, speciesId, lotR],
+      );
+
+      const salida = '2032-06-30';
+      // Un instante que en UTC ya es el día siguiente pero en la finca todavía es de tarde. Se
+      // AFIRMA la precondición en vez de darla por hecha: si la zona de prueba cambiara y los dos
+      // calendarios coincidieran, este test pasaría sin discriminar nada, que es la forma más
+      // silenciosa de perder una prueba.
+      const atardecer = `${addFarmDays(salida, 1)}T02:00:00Z`;
+      expect(toFarmDate(new Date(atardecer), TEST_TIME_ZONE), 'en la finca sigue siendo el último día').toBe(salida);
+      expect(atardecer.slice(0, 10), 'en UTC ya es el día siguiente').not.toBe(salida);
+
+      const g: any = await svc.enter({ paddock_id: padR, lot_id: lotR, entry_date: '2032-06-01' });
+      await pesar(bicho, '2032-06-01', 300);
+      await db.query(`INSERT INTO weighings (tenant_id, animal_id, weighed_at, weight_kg, method) VALUES ($1,$2,$3,$4,'scale')`, [tenantId, bicho, atardecer, 345]);
+      await svc.exit(g.id, { exit_date: salida });
+
+      const r: any = await svc.performance({ from: '2032-01-01', to: '2032-12-31' });
+      const p = r.paddocks.find((x: any) => x.paddock_id === padR);
+      expect(p.animalsMeasured, 'el animal SÍ se pudo medir').toBe(1);
+      expect(p.gainKg).toBe(45);
     });
 
     it('ordena por kg/ha/día y manda al final a los que no se pudieron medir', async () => {
