@@ -1,6 +1,7 @@
 import type { TxHandle } from './driver';
 import { hashPassword } from '../common/passwords';
 import { polygonAreaHa } from '@cowinance/domain';
+import { countryDefaults } from '../modules/identity/country-defaults';
 
 /** Lo único que el seed necesita de la base: correr consultas. Así sirve tanto sobre PGlite (dev)
  *  como sobre PostgreSQL real, sin acoplarse a un driver concreto. */
@@ -217,15 +218,20 @@ export async function seedDemo(db: Queryable) {
    * contradecía a sí mismo y mandaba a la app móvil la zona horaria equivocada.
    *
    * El segundo tenant ("El Ombú") queda argentino A PROPÓSITO — ver más abajo.
+   *
+   * Moneda, locale y zona NO se escriben a mano: salen de `countryDefaults('VE')`, la misma fuente
+   * que usa el alta de un tenant real. Así la demo no puede quedar diciendo algo distinto de lo que
+   * produce un registro, que es exactamente cómo nació este desfasaje.
    */
+  const ve = countryDefaults('VE');
   const [{ id: userId }] = await q(
-    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla','es-VE',$1) RETURNING id`,
-    [await hashPassword('cowinance')],
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla',$1,$2) RETURNING id`,
+    [ve.locale, await hashPassword('cowinance')],
   );
   const [{ id: org }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
-     VALUES ('Grupo La Esperanza','Grupo La Esperanza, C.A.','VE','USD','es-VE','America/Caracas',$1) RETURNING id`,
-    [userId],
+     VALUES ('Grupo La Esperanza','Grupo La Esperanza, C.A.','VE',$1,$2,$3,$4) RETURNING id`,
+    [ve.currency, ve.locale, ve.timezone, userId],
   );
   // RLS: a partir de acá, las inserciones con tenant_id necesitan el GUC
   await q(`SELECT set_config('app.tenant_id', $1, false)`, [org]);
@@ -238,8 +244,8 @@ export async function seedDemo(db: Queryable) {
    */
   const [{ id: company }] = await q(
     `INSERT INTO companies (tenant_id, name, tax_id, tax_id_normalized, taxpayer_condition, country_code, functional_currency, created_by)
-     VALUES ($1,'Agropecuaria La Esperanza, C.A.','J-31234567-5','J312345675','ordinario','VE','USD',$2) RETURNING id`,
-    [org, userId],
+     VALUES ($1,'Agropecuaria La Esperanza, C.A.','J-31234567-5','J312345675','ordinario','VE',$2,$3) RETURNING id`,
+    [org, ve.currency, userId],
   );
   /*
    * `official_code` es el registro del predio ante el INSAI (la autoridad de trazabilidad de VE
@@ -249,8 +255,8 @@ export async function seedDemo(db: Queryable) {
    */
   const [{ id: farm }] = await q(
     `INSERT INTO farms (tenant_id, company_id, name, official_code, total_area_ha, timezone, created_by)
-     VALUES ($1,$2,'Hato La Esperanza','INSAI DEMO-000123',850,'America/Caracas',$3) RETURNING id`,
-    [org, company, userId],
+     VALUES ($1,$2,'Hato La Esperanza','INSAI DEMO-000123',850,$3,$4) RETURNING id`,
+    [org, company, ve.timezone, userId],
   );
 
   // ── Potreros y lotes ──────────────────────────────────────────────────
@@ -348,7 +354,16 @@ export async function seedDemo(db: Queryable) {
     for (let i = 0; i < d.n; i++) {
       const ageMonths = between(d.ageMo[0], d.ageMo[1]);
       const birth = daysAgo(ageMonths * 30.4);
-      const breedCode = pick(['angus', 'angus', 'hereford', 'brangus', 'braford']);
+      /*
+       * Rodeo TROPICAL, que es lo que se para en una finca venezolana: cebuínas de base más los
+       * cruces de doble propósito y las criollas del país. Antes eran Angus, Hereford, Brangus y
+       * Braford —de clima templado— y era el error MÁS VISIBLE de todos, porque la raza sale en la
+       * ficha de cada animal. Las razas del Cono Sur siguen en el catálogo a propósito: lo que
+       * cambia es qué se le asigna al rodeo de demo, no qué razas existen.
+       *
+       * Brahman repetido: es la base real del rodeo de carne, no una raza más de la lista.
+       */
+      const breedCode = pick(['brahman', 'brahman', 'brahman', 'mestizo', 'mestizo', 'girolando', 'carora', 'criollo_limonero', 'gyr']);
       // Genealogía: los terneros nacen de una vaca y un toro del rodeo
       const isCalf = d.catCode === 'ternero' || d.catCode === 'ternera';
       // El NOVILLO también lleva padre, aunque sin parto registrado: nació antes de que la finca
