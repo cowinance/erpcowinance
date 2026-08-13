@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "description": "Cowinance — Plataforma ERP para ganadería, agricultura y administración de fincas",
   "workspaces": [
+    "packages/*",
     "apps/api",
-    "apps/web",
-    "packages/*"
+    "apps/web"
   ],
   "scripts": {
     "api": "npm run start:dev --workspace @cowinance/api",
