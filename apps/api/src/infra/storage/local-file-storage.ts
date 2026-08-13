@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 import type { FileStorage } from '../../application/ports/file-storage.port';
 
 /**
@@ -38,7 +38,7 @@ export class LocalFileStorage implements FileStorage {
    */
   private pathFor(key: string): string {
     const path = resolve(this.root, key);
-    if (path !== this.root && !path.startsWith(this.root + '/'))
+    if (path !== this.root && !path.startsWith(this.root + sep))
       throw new Error(`Clave de archivo fuera de la raíz de almacenamiento: ${key}`);
     return path;
   }
