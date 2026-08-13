@@ -31,7 +31,11 @@ import { tmpdir } from 'node:os';
 const BASELINE = {
   coveragePct: 72.54, // domain + sync-core (lo unit-testeable); la api se prueba por E2E
   jscpdPct: 4.17, // clones sintácticos en el código propio (no semánticos)
-  largestServiceLines: 340, // alerts.service.ts (excl. seed.ts, que es data)
+  // Revisado 2026-08-12: era 340 (alerts.service.ts, F9). herd.service.ts creció a 1141 y el
+  // indicador imprimía ▼+801 en CADA corrida — una alarma que no puede volver a verde deja de
+  // informar y se lee como ruido. El control real es el gate MAX_SERVICE_LINES de más abajo;
+  // este número solo mide la tendencia, y para eso tiene que partir de la realidad.
+  largestServiceLines: 1141, // herd.service.ts (excl. seed.ts, que es data)
 };
 
 const TYPECHECK_TARGETS = [
@@ -42,6 +46,14 @@ const TYPECHECK_TARGETS = [
   ['@cowinance/mobile', 'apps/mobile/tsconfig.json'],
 ];
 const COVERAGE_SCOPE = ['/packages/domain/src/', '/packages/sync-core/src/'];
+
+/**
+ * Rutas en forma POSIX para comparar. `join()` y el reporte de cobertura usan el
+ * separador del sistema, así que en Windows `'a\b'.includes('a/b')` es false y
+ * los filtros de abajo no matchean NADA: la cobertura daba 0% (de 73 archivos)
+ * y los nombres se imprimían con la ruta completa en vez de relativa.
+ */
+const posix = (p) => p.split('\\').join('/');
 const JSCPD_SCOPE = 'apps/api/src packages/domain/src packages/sync-core/src';
 const LARGEST_DIR = 'apps/api/src';
 
@@ -236,7 +248,7 @@ gate(
   overBudget.length === 0,
   overBudget.length === 0
     ? `mayor: ${allSizes.find((s) => s.f.includes('.service.ts'))?.n ?? 0}`
-    : overBudget.map((s) => `${s.f.replace(LARGEST_DIR + '/', '')} (${s.n})`).join(', '),
+    : overBudget.map((s) => `${posix(s.f).replace(LARGEST_DIR + '/', '')} (${s.n})`).join(', '),
 );
 if (overBudget.length > 0)
   console.log(dim('    partilo por caso de uso; ver LotsService, extraído de HerdService por esta misma razón.'));
@@ -251,7 +263,7 @@ try {
     total = 0;
   for (const [file, v] of Object.entries(summary)) {
     if (file === 'total') continue;
-    if (COVERAGE_SCOPE.some((s) => file.includes(s))) {
+    if (COVERAGE_SCOPE.some((s) => posix(file).includes(s))) {
       covered += v.lines.covered;
       total += v.lines.total;
     }
@@ -282,7 +294,7 @@ if (jscpd.ok) {
 // Indicador 3: watch de God-object — archivos fuente más grandes (el techo ya es un gate arriba).
 const sizes = allSizes.slice(0, 5);
 console.log(`  archivos fuente más grandes (${LARGEST_DIR}):`);
-for (const { f, n } of sizes) console.log(dim(`    ${String(n).padStart(4)}  ${f.replace(LARGEST_DIR + '/', '')}`));
+for (const { f, n } of sizes) console.log(dim(`    ${String(n).padStart(4)}  ${posix(f).replace(LARGEST_DIR + '/', '')}`));
 const largestService = sizes.find((s) => s.f.includes('.service.ts'))?.n ?? 0;
 console.log(`    servicio más grande: ${bold(largestService + ' líneas')}  ${delta(largestService, BASELINE.largestServiceLines, true)}`);
 

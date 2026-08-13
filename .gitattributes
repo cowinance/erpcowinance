@@ -1,0 +1,19 @@
+# Finales de línea: LF en el árbol de trabajo de TODAS las plataformas.
+#
+# POR QUÉ: sin esto, en Windows `core.autocrlf=true` deja CRLF al hacer checkout
+# y cualquier chequeo byte a byte falla sobre un árbol recién clonado. Pasaba con
+# `tokens:check`, que comparaba el CSS generado (LF, lo escribe el generador)
+# contra el del disco (CRLF, lo dejó git): contenido idéntico, `git status`
+# limpio, y el gate de arquitectura bloqueando igual.
+#
+# `text=auto` deja que git detecte qué es texto; `eol=lf` fija el final de línea
+# del working tree sin depender de la config local de cada quien.
+* text=auto eol=lf
+
+# Los scripts de deploy se ejecutan dentro del contenedor: con CRLF, el shell
+# no encuentra el intérprete del shebang y fallan con "bad interpreter".
+*.sh text eol=lf
+
+# Binarios: git no debe normalizar nada acá.
+*.png  binary
+*.docx binary

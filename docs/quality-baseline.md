@@ -35,6 +35,15 @@ cuando un número cambia a propósito — nunca automáticamente.
 | **Duplicación** | `jscpd` (`api/src` + packages) | **4.17%** (16 clones) | Subió respecto al 0.89% de F0 por los 5 handlers de eventos de F6 (INSERTs de forma casi idéntica → clones **sintácticos**, no semánticos). jscpd **no** ve la duplicación que importa (reglas de negocio en varios lugares) — esa la enforcea la revisión y la Regla Permanente 1, no el tool. Vigilar tendencia, no perseguir el número. |
 | **Tamaño de archivos** (God-object watch) | conteo de líneas (`apps/api/src`) | servicio más grande **340** (`alerts.service.ts`); `sync.service` **272** (era 581 pre-F6) | Detecta reaparición de God-objects — lo que detectó el problema fue el tamaño, no la complejidad ciclomática. Alertar si algo crece anómalamente. (`seed.ts` 453 es data, no un servicio.) |
 
+## Revisiones del baseline
+
+La tabla de arriba es la foto de cierre de F9 y se deja como registro histórico. Acá se anota
+cada vez que el número **vivo** de `scripts/audit-arch.mjs` cambia, y por qué.
+
+| Fecha | Indicador | De → a | Motivo |
+|---|---|---|---|
+| 2026-08-12 | `largestServiceLines` | 340 → **1141** | `herd.service.ts` creció hasta 1141 líneas y el indicador imprimía `▼ +801 vs baseline` en cada corrida. Una alarma que no puede volver a verde se lee como ruido y deja de informar. El control que efectivamente frena el crecimiento es el gate `MAX_SERVICE_LINES` (1150), no este indicador; el indicador mide **tendencia**, y para eso tiene que partir de la realidad. Nota: quedan 9 líneas de margen contra el gate — el próximo cambio en ese archivo debería ser partirlo, no agrandarlo. |
+
 ## Cómo correr
 
 ```bash
