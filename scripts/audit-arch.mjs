@@ -35,7 +35,10 @@ const BASELINE = {
   // indicador imprimía ▼+801 en CADA corrida — una alarma que no puede volver a verde deja de
   // informar y se lee como ruido. El control real es el gate MAX_SERVICE_LINES de más abajo;
   // este número solo mide la tendencia, y para eso tiene que partir de la realidad.
-  largestServiceLines: 1141, // herd.service.ts (excl. seed.ts, que es data)
+  // Revisado 2026-08-15: herd.service.ts bajó a 940 al extraer identificación y calidad, así que
+  // el mayor pasa a ser alerts.service.ts. El techo NO se movió: con el peor caso en 1094, 1150
+  // sigue siendo "apenas por encima", que es lo que el trinquete pide.
+  largestServiceLines: 1094, // alerts.service.ts (excl. seed.ts, que es data)
 };
 
 const TYPECHECK_TARGETS = [

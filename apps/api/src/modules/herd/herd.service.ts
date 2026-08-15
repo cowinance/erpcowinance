@@ -5,6 +5,7 @@ import { DbService, Q } from '../../db/db.service';
 import { signFileToken } from '../../common/file-token';
 import { AnimalWriteService } from './animal-write.service';
 import { BillingService } from '../billing/billing.service';
+import { assertAnimal } from './assert-animal';
 
 /** Referencia de foto (id + token firmado) para renderizar desde el navegador. */
 function photoRef(db: DbService, fileId?: string | null, mime?: string | null) {
@@ -386,7 +387,7 @@ export class HerdService {
   }
 
   async timeline(id: string) {
-    await this.assertAnimal(id);
+    await assertAnimal(this.db, id);
     return this.db.query(
       `SELECT e.id,
               e.event_type,
@@ -528,7 +529,7 @@ export class HerdService {
    * getAnimal. La ficha compone estas fuentes.
    */
   async animalOverview(id: string) {
-    await this.assertAnimal(id);
+    await assertAnimal(this.db, id);
     const t = this.db.tenant;
     const base = await this.db.one<any>(
       `SELECT current_lot_id, created_at FROM animals WHERE id = $1 AND tenant_id = $2`,
@@ -617,200 +618,6 @@ export class HerdService {
     };
   }
 
-  // ──────────────────── Calidad de datos + genealogía (A360 E6) ────────────────────
-
-  /**
-   * Reporte de CALIDAD DE DATOS del hato (A360 E6): banderas de completitud y coherencia por animal
-   * activo, agregadas por tipo de problema con muestra de animales. Una sola pasada SQL. NO duplica las
-   * alertas reproductivas/sanitarias (esas viven en sus módulos); acá solo datos faltantes/incoherentes:
-   * sin lote/caravana/ID oficial/foto/pesaje reciente/raza, genealogía incompleta y sexo/edad↔categoría.
-   */
-  async qualityReport(opts?: { noWeighingDays?: number }) {
-    const t = this.db.tenant;
-    const days = opts?.noWeighingDays ?? 120;
-    const rows = await this.db.query<any>(
-      `SELECT a.id, ai.value AS tag,
-              (a.current_lot_id IS NULL) AS no_lot,
-              (ai.value IS NULL) AS no_tag,
-              (a.photo_file_id IS NULL) AS no_photo,
-              NOT EXISTS (SELECT 1 FROM animal_identifiers o WHERE o.animal_id = a.id AND o.is_official = true AND o.deleted_at IS NULL AND o.retired_at IS NULL) AS no_official_id,
-              (lw.weighed_at IS NULL OR lw.weighed_at < now() - ($2::int * INTERVAL '1 day')) AS no_recent_weighing,
-              NOT EXISTS (SELECT 1 FROM animal_breeds ab WHERE ab.animal_id = a.id AND ab.deleted_at IS NULL) AS no_breed,
-              (a.dam_id IS NULL AND a.sire_id IS NULL) AS incomplete_genealogy,
-              (c.sex IS NOT NULL AND c.sex <> 'any' AND c.sex <> a.sex) AS sex_category_mismatch,
-              (a.birth_date IS NOT NULL AND (
-                 (c.min_age_months IS NOT NULL AND ((CURRENT_DATE - a.birth_date) / 30.44) < c.min_age_months) OR
-                 (c.max_age_months IS NOT NULL AND ((CURRENT_DATE - a.birth_date) / 30.44) > c.max_age_months)
-              )) AS age_category_mismatch
-       FROM animals a
-       LEFT JOIN animal_categories c ON c.id = a.category_id
-       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
-       LEFT JOIN LATERAL (SELECT weighed_at FROM v_weighings w WHERE w.animal_id = a.id AND w.deleted_at IS NULL ORDER BY weighed_at DESC, created_at DESC, id DESC LIMIT 1) lw ON true
-       WHERE a.tenant_id = $1 AND a.status = 'active' AND a.deleted_at IS NULL`,
-      [t, days],
-    );
-
-    const DEFS: { code: string; label: string; filter?: string }[] = [
-      { code: 'no_lot', label: 'Sin lote asignado', filter: 'with_lot=false' },
-      { code: 'no_tag', label: 'Sin caravana visual' },
-      { code: 'no_official_id', label: 'Sin identificador oficial', filter: 'with_official_id=false' },
-      { code: 'no_photo', label: 'Sin foto', filter: 'with_photo=false' },
-      { code: 'no_recent_weighing', label: `Sin pesaje en ${days} días`, filter: `no_recent_weighing=${days}` },
-      { code: 'no_breed', label: 'Sin raza cargada' },
-      { code: 'incomplete_genealogy', label: 'Genealogía incompleta (sin padres)' },
-      { code: 'sex_category_mismatch', label: 'Sexo incoherente con la categoría' },
-      { code: 'age_category_mismatch', label: 'Edad fuera del rango de la categoría' },
-    ];
-
-    const issues = DEFS.map((d) => {
-      const hits = rows.filter((r) => r[d.code]);
-      return {
-        code: d.code,
-        label: d.label,
-        filter: d.filter ?? null,
-        count: hits.length,
-        animals: hits.slice(0, 50).map((r) => ({ id: r.id, tag: r.tag ?? null })),
-      };
-    });
-
-    return { total: rows.length, issues };
-  }
-
-  /**
-   * Genealogía extendida (A360 E6): ancestros hasta `depth` generaciones (madre/padre recursivo) +
-   * descendencia directa. Para el árbol de la ficha. CTE recursiva acotada (defensa de profundidad).
-   */
-  async animalGenealogy(id: string, depth = 3) {
-    await this.assertAnimal(id);
-    const t = this.db.tenant;
-    const d = Math.min(Math.max(depth, 1), 4);
-    const ancestors = await this.db.query<any>(
-      `WITH RECURSIVE anc(id, relation, generation, path) AS (
-         -- Término base ÚNICO: padres directos (madre y padre) vía VALUES lateral.
-         SELECT parent.pid, parent.rel::text, 1, ARRAY[a.id, parent.pid]
-         FROM animals a
-         CROSS JOIN LATERAL (VALUES (a.dam_id, 'dam'), (a.sire_id, 'sire')) AS parent(pid, rel)
-         WHERE a.id = $1 AND parent.pid IS NOT NULL
-         UNION ALL
-         -- Término recursivo ÚNICO: padres de cada ancestro.
-         SELECT gp.pid, anc.relation || '.' || gp.rel, anc.generation + 1, anc.path || gp.pid
-         FROM anc JOIN animals p ON p.id = anc.id
-         CROSS JOIN LATERAL (VALUES (p.dam_id, 'dam'), (p.sire_id, 'sire')) AS gp(pid, rel)
-         WHERE gp.pid IS NOT NULL AND anc.generation < $3 AND NOT (gp.pid = ANY(anc.path))
-       )
-       SELECT anc.id, anc.relation, anc.generation, a.sex, ai.value AS tag, a.name, a.status
-       FROM anc JOIN animals a ON a.id = anc.id AND a.tenant_id = $2
-       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
-       ORDER BY anc.generation, anc.relation`,
-      [id, t, d],
-    );
-    const offspring = await this.db.query<any>(
-      `SELECT a.id, ai.value AS tag, a.sex, a.birth_date, a.status,
-              (a.dam_id = $1) AS via_dam
-       FROM animals a
-       LEFT JOIN LATERAL (SELECT value FROM animal_identifiers x WHERE x.animal_id = a.id AND x.type='visual' AND x.deleted_at IS NULL AND x.retired_at IS NULL ORDER BY x.created_at DESC LIMIT 1) ai ON true
-       WHERE (a.dam_id = $1 OR a.sire_id = $1) AND a.tenant_id = $2 AND a.deleted_at IS NULL
-       ORDER BY a.birth_date DESC NULLS LAST`,
-      [id, t],
-    );
-    return { ancestors, offspring };
-  }
-
-  // ──────────────────── Identificación avanzada (A360 E4) ────────────────────
-
-  private static readonly IDENTIFIER_TYPES = ['visual', 'rfid', 'tattoo', 'bolus', 'brand', 'biometric', 'official'];
-
-  /** Proyecta al sync el visual ACTIVO vigente de un animal (o null si no queda ninguno). */
-  private async syncVisualTag(q: Q, animalId: string) {
-    const cur = await q.one<{ value: string }>(
-      `SELECT value FROM animal_identifiers WHERE animal_id = $1 AND type = 'visual' AND deleted_at IS NULL AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-      [animalId],
-    );
-    const op = await this.writer.projectAnimalUpdate(q, animalId, { visual_tag: cur?.value ?? null });
-    if (op) await this.writer.emitServerOrigin(q, [op], `rest:animal:identifier:${animalId}:${op.hlc}`);
-  }
-
-  /**
-   * Agrega un identificador (A360 E4): visual/RFID/tatuaje/bolo/marca/biométrico/oficial.
-   * Evita duplicados ACTIVOS del MISMO tipo (namespace por tipo). `is_official` es único por
-   * animal (desmarca los demás). Un cambio de visual se propaga al canal de sync.
-   */
-  async addIdentifier(animalId: string, body: { type?: string; value?: string; is_official?: boolean }) {
-    await this.assertAnimal(animalId);
-    const t = this.db.tenant;
-    const type = String(body?.type ?? '').trim();
-    const rawValue = String(body?.value ?? '').trim();
-    if (!HerdService.IDENTIFIER_TYPES.includes(type))
-      throw new BadRequestException({ code: 'identifier.invalid_type', title: 'Tipo de identificador inválido' });
-    if (!rawValue) throw new BadRequestException({ code: 'identifier.missing_value', title: 'El valor del identificador es obligatorio' });
-    const value = type === 'visual' && TagNumber.isValid(rawValue) ? TagNumber.of(rawValue) : rawValue;
-    const isOfficial = !!body?.is_official || type === 'official';
-
-    await this.db.tx(async (q) => {
-      const dup = await q.one(
-        `SELECT 1 FROM animal_identifiers ai JOIN animals a ON a.id = ai.animal_id
-         WHERE ai.tenant_id = $1 AND ai.type = $2 AND ai.value = $3 AND ai.deleted_at IS NULL AND ai.retired_at IS NULL AND a.status = 'active'`,
-        [t, type, value],
-      );
-      if (dup) throw new BadRequestException({ code: 'identifier.duplicate', title: `Ya hay un animal activo con ${type} ${value}` });
-      if (isOfficial)
-        await q.query(`UPDATE animal_identifiers SET is_official = false, updated_at = now() WHERE animal_id = $1 AND is_official = true AND deleted_at IS NULL`, [animalId]);
-      await q.query(
-        `INSERT INTO animal_identifiers (tenant_id, animal_id, type, value, is_official, issued_at) VALUES ($1,$2,$3,$4,$5,CURRENT_DATE)`,
-        [t, animalId, type, value, isOfficial],
-      );
-      if (type === 'visual') await this.syncVisualTag(q, animalId);
-      await q.query(
-        `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
-         VALUES ($1,$2,'identifier_added',$3,now(),now(),'manual')`,
-        [t, animalId, JSON.stringify({ type, value, is_official: isOfficial })],
-      );
-    });
-    return this.getAnimal(animalId);
-  }
-
-  /** Retira un identificador (A360 E4): queda en el historial (retired_at) pero deja de ser activo. */
-  async retireIdentifier(animalId: string, idfId: string) {
-    await this.assertAnimal(animalId);
-    const t = this.db.tenant;
-    await this.db.tx(async (q) => {
-      const idf = await q.one<{ type: string; value: string }>(
-        `SELECT type, value FROM animal_identifiers WHERE id = $1 AND animal_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AND retired_at IS NULL`,
-        [idfId, animalId, t],
-      );
-      if (!idf) throw new NotFoundException({ code: 'identifier.not_found', title: 'Identificador no encontrado o ya retirado' });
-      await q.query(`UPDATE animal_identifiers SET retired_at = CURRENT_DATE, is_official = false, updated_at = now() WHERE id = $1`, [idfId]);
-      if (idf.type === 'visual') await this.syncVisualTag(q, animalId);
-      await q.query(
-        `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
-         VALUES ($1,$2,'identifier_retired',$3,now(),now(),'manual')`,
-        [t, animalId, JSON.stringify({ type: idf.type, value: idf.value })],
-      );
-    });
-    return this.getAnimal(animalId);
-  }
-
-  /** Marca un identificador como oficial (A360 E4): único por animal (desmarca los demás). */
-  async makeOfficialIdentifier(animalId: string, idfId: string) {
-    await this.assertAnimal(animalId);
-    const t = this.db.tenant;
-    await this.db.tx(async (q) => {
-      const idf = await q.one<{ value: string }>(
-        `SELECT value FROM animal_identifiers WHERE id = $1 AND animal_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AND retired_at IS NULL`,
-        [idfId, animalId, t],
-      );
-      if (!idf) throw new NotFoundException({ code: 'identifier.not_found', title: 'Identificador no encontrado' });
-      await q.query(`UPDATE animal_identifiers SET is_official = false, updated_at = now() WHERE animal_id = $1 AND deleted_at IS NULL`, [animalId]);
-      await q.query(`UPDATE animal_identifiers SET is_official = true, updated_at = now() WHERE id = $1`, [idfId]);
-      await q.query(
-        `INSERT INTO animal_events (tenant_id, animal_id, event_type, payload, occurred_at, recorded_at, source)
-         VALUES ($1,$2,'identifier_official',$3,now(),now(),'manual')`,
-        [t, animalId, JSON.stringify({ value: idf.value })],
-      );
-    });
-    return this.getAnimal(animalId);
-  }
-
   /**
    * Cambio de categoría MASIVO (A360 E5): valida species + sexo↔categoría por animal; los que no
    * encajan (o no están activos) se omiten. Versiona category_code y propaga por sync. Idempotente.
@@ -851,7 +658,7 @@ export class HerdService {
 
   /** Reemplaza la composición racial (A360 E4). Fracciones normalizadas si no vienen. */
   async setBreeds(animalId: string, breeds: { breed_id: string; fraction?: number }[]) {
-    await this.assertAnimal(animalId);
+    await assertAnimal(this.db, animalId);
     const t = this.db.tenant;
     await this.db.tx(async (q) => {
       await this.setBreedsInTx(q, animalId, breeds);
@@ -1062,7 +869,7 @@ export class HerdService {
 
   /** Evento polimórfico (POST /animals/:id/events) — como en el doc de APIs. */
   async registerEvent(id: string, body: any) {
-    await this.assertAnimal(id);
+    await assertAnimal(this.db, id);
     const occurredAt = body.occurred_at ?? new Date().toISOString();
 
     if (body.type === 'weighing') {
@@ -1128,13 +935,5 @@ export class HerdService {
       [this.db.tenant, animalId, type, JSON.stringify(payload), occurredAt],
     );
     return row;
-  }
-
-  private async assertAnimal(id: string) {
-    const found = await this.db.one(`SELECT id FROM animals WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [
-      id,
-      this.db.tenant,
-    ]);
-    if (!found) throw new NotFoundException({ code: 'animal.not_found', title: 'Animal no encontrado' });
   }
 }

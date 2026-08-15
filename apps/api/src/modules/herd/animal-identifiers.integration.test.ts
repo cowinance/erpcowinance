@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { BillingService } from '../billing/billing.service';
 import { HerdService } from './herd.service';
+import { AnimalIdentifiersService } from './animal-identifiers.service';
 import { AnimalWriteService } from './animal-write.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
@@ -20,6 +21,7 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
   let db: DbService;
   let herd: HerdService;
   let lots: LotsService;
+  let identifiers: AnimalIdentifiersService;
   let originalCwd: string;
   let tmp: string;
   let animalId: string;
@@ -35,6 +37,7 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
     const writer = new AnimalWriteService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
     herd = new HerdService(db, writer, new BillingService(db));
     lots = new LotsService(db);
+    identifiers = new AnimalIdentifiersService(db, writer, herd);
     const created: any = await herd.createAnimal({ tag: 'IDF-1', sex: 'F', category_code: 'vaca' });
     animalId = created.id;
     breedId = (await db.query<{ id: string }>(`SELECT id FROM breeds LIMIT 1`))[0].id;
@@ -46,11 +49,11 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
   });
 
   it('agrega RFID y lo marca oficial (único por animal)', async () => {
-    let res: any = await herd.addIdentifier(animalId, { type: 'rfid', value: '9820001', is_official: true });
+    let res: any = await identifiers.addIdentifier(animalId, { type: 'rfid', value: '9820001', is_official: true });
     const rfid = res.identifiers.find((i: any) => i.type === 'rfid');
     expect(rfid.is_official).toBe(true);
     // Agregar un oficial distinto desmarca al anterior.
-    res = await herd.addIdentifier(animalId, { type: 'official', value: 'AR-XYZ', is_official: true });
+    res = await identifiers.addIdentifier(animalId, { type: 'official', value: 'AR-XYZ', is_official: true });
     const officials = res.identifiers.filter((i: any) => i.is_official && i.active);
     expect(officials).toHaveLength(1);
     expect(officials[0].type).toBe('official');
@@ -58,28 +61,28 @@ describe('HerdService — identificadores + razas + alta mejorada (E4)', () => {
 
   it('rechaza duplicado activo del mismo tipo', async () => {
     const other: any = await herd.createAnimal({ tag: 'IDF-2', sex: 'F', category_code: 'vaca' });
-    await expect(herd.addIdentifier(other.id, { type: 'rfid', value: '9820001' })).rejects.toThrow();
+    await expect(identifiers.addIdentifier(other.id, { type: 'rfid', value: '9820001' })).rejects.toThrow();
     // Distinto tipo con el mismo string sí se permite (namespace por tipo).
-    const ok: any = await herd.addIdentifier(other.id, { type: 'tattoo', value: '9820001' });
+    const ok: any = await identifiers.addIdentifier(other.id, { type: 'tattoo', value: '9820001' });
     expect(ok.identifiers.some((i: any) => i.type === 'tattoo' && i.value === '9820001')).toBe(true);
   });
 
   it('retira un identificador (queda en historial, no activo) y libera el valor', async () => {
-    const a: any = await herd.addIdentifier(animalId, { type: 'brand', value: 'MARCA-1' });
+    const a: any = await identifiers.addIdentifier(animalId, { type: 'brand', value: 'MARCA-1' });
     const brand = a.identifiers.find((i: any) => i.type === 'brand');
-    const res: any = await herd.retireIdentifier(animalId, brand.id);
+    const res: any = await identifiers.retireIdentifier(animalId, brand.id);
     const still = res.identifiers.find((i: any) => i.id === brand.id);
     expect(still.active).toBe(false);
     expect(still.retired_at).toBeTruthy();
     // El valor retirado se puede reutilizar en otro animal.
     const other: any = await herd.createAnimal({ tag: 'IDF-3', sex: 'F', category_code: 'vaca' });
-    const reuse: any = await herd.addIdentifier(other.id, { type: 'brand', value: 'MARCA-1' });
+    const reuse: any = await identifiers.addIdentifier(other.id, { type: 'brand', value: 'MARCA-1' });
     expect(reuse.identifiers.some((i: any) => i.type === 'brand' && i.value === 'MARCA-1')).toBe(true);
   });
 
   it('valida tipo de identificador', async () => {
-    await expect(herd.addIdentifier(animalId, { type: 'nope', value: 'x' })).rejects.toThrow();
-    await expect(herd.addIdentifier(animalId, { type: 'rfid', value: '' })).rejects.toThrow();
+    await expect(identifiers.addIdentifier(animalId, { type: 'nope', value: 'x' })).rejects.toThrow();
+    await expect(identifiers.addIdentifier(animalId, { type: 'rfid', value: '' })).rejects.toThrow();
   });
 
   it('reemplaza la composición racial', async () => {

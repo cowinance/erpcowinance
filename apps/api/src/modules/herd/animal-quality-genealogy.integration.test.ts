@@ -3,17 +3,15 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
-import { BillingService } from '../billing/billing.service';
-import { HerdService } from './herd.service';
-import type { AnimalWriteService } from './animal-write.service';
+import { AnimalQualityService } from './animal-quality.service';
 
 /**
  * Animales E6 — calidad de datos (banderas de completitud/coherencia) y genealogía extendida
  * (ancestros hasta N generaciones + descendencia). No duplica alertas repro/sanidad.
  */
-describe('HerdService — calidad de datos + genealogía (E6)', () => {
+describe('AnimalQualityService — calidad de datos + genealogía (E6)', () => {
   let db: DbService;
-  let herd: HerdService;
+  let quality: AnimalQualityService;
   let originalCwd: string;
   let tmp: string;
   let farmId: string;
@@ -39,7 +37,7 @@ describe('HerdService — calidad de datos + genealogía (E6)', () => {
     process.env.SEED_DEMO = 'on'; // el seed crea la finca; asserts con >= y tags únicos en genealogía
     db = new DbService();
     await db.onModuleInit();
-    herd = new HerdService(db, {} as AnimalWriteService, new BillingService(db));
+    quality = new AnimalQualityService(db);
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;
     catVaca = (await db.query<{ id: string }>(`SELECT id FROM animal_categories WHERE code='vaca' LIMIT 1`))[0].id;
@@ -53,7 +51,7 @@ describe('HerdService — calidad de datos + genealogía (E6)', () => {
   it('detecta datos faltantes (sin lote, sin caravana, sin foto)', async () => {
     await mk('F', catVaca, { tag: 'Q-1' }); // sin lote, sin foto, con caravana
     await mk('F', catVaca, {}); // sin lote, sin caravana, sin foto
-    const rep: any = await herd.qualityReport();
+    const rep: any = await quality.qualityReport();
     const by = Object.fromEntries(rep.issues.map((i: any) => [i.code, i.count]));
     expect(by.no_lot).toBeGreaterThanOrEqual(2);
     expect(by.no_tag).toBeGreaterThanOrEqual(1);
@@ -66,7 +64,7 @@ describe('HerdService — calidad de datos + genealogía (E6)', () => {
 
   it('detecta sexo incoherente con la categoría', async () => {
     await mk('M', catVaca, { tag: 'Q-M' }); // macho en categoría 'vaca' (sex F)
-    const rep: any = await herd.qualityReport();
+    const rep: any = await quality.qualityReport();
     const mismatch = rep.issues.find((i: any) => i.code === 'sex_category_mismatch');
     expect(mismatch.count).toBeGreaterThanOrEqual(1);
   });
@@ -75,7 +73,7 @@ describe('HerdService — calidad de datos + genealogía (E6)', () => {
     const granddam = await mk('F', catVaca, { tag: 'GD' });
     const dam = await mk('F', catVaca, { tag: 'DAM', dam: granddam });
     const calf = await mk('F', catVaca, { tag: 'CALF', dam });
-    const g: any = await herd.animalGenealogy(calf, 3);
+    const g: any = await quality.animalGenealogy(calf, 3);
     const tags = g.ancestors.map((a: any) => a.tag);
     expect(tags).toContain('DAM'); // madre (gen 1)
     expect(tags).toContain('GD'); // abuela materna (gen 2)
@@ -83,7 +81,7 @@ describe('HerdService — calidad de datos + genealogía (E6)', () => {
     expect(genOf['DAM']).toBe(1);
     expect(genOf['GD']).toBe(2);
     // La descendencia de la madre incluye al ternero.
-    const gd: any = await herd.animalGenealogy(dam);
+    const gd: any = await quality.animalGenealogy(dam);
     expect(gd.offspring.map((o: any) => o.tag)).toContain('CALF');
   });
 });

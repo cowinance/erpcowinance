@@ -43,6 +43,7 @@ cada vez que el número **vivo** de `scripts/audit-arch.mjs` cambia, y por qué.
 | Fecha | Indicador | De → a | Motivo |
 |---|---|---|---|
 | 2026-08-12 | `largestServiceLines` | 340 → **1141** | `herd.service.ts` creció hasta 1141 líneas y el indicador imprimía `▼ +801 vs baseline` en cada corrida. Una alarma que no puede volver a verde se lee como ruido y deja de informar. El control que efectivamente frena el crecimiento es el gate `MAX_SERVICE_LINES` (1150), no este indicador; el indicador mide **tendencia**, y para eso tiene que partir de la realidad. Nota: quedan 9 líneas de margen contra el gate — el próximo cambio en ese archivo debería ser partirlo, no agrandarlo. |
+| 2026-08-15 | `largestServiceLines` | 1141 → **1094** | Se partió `herd.service.ts` (1141 → 940) extrayendo `AnimalIdentifiersService` y `AnimalQualityService`. El servicio más grande pasa a ser `alerts.service.ts` (1094), que queda como el próximo candidato a partir. **El techo `MAX_SERVICE_LINES` no se movió**: el trinquete pide estar "apenas por encima del peor caso actual", y 1150 sobre 1094 lo cumple. Bajarlo a ~1100 dejaría a `alerts.service.ts` con 6 líneas de margen, o sea mudaría el problema en vez de resolverlo; corresponde bajarlo junto con esa partición, no antes. |
 
 ## Cómo correr
 

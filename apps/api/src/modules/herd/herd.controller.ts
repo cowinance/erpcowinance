@@ -2,6 +2,8 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/
 import { LotsService } from './lots.service';
 import { HerdService } from './herd.service';
 import { AnimalStatusService } from './animal-status.service';
+import { AnimalIdentifiersService } from './animal-identifiers.service';
+import { AnimalQualityService } from './animal-quality.service';
 
 @Controller()
 export class HerdController {
@@ -9,6 +11,8 @@ export class HerdController {
     private readonly herd: HerdService,
     private readonly lotsService: LotsService,
     private readonly status: AnimalStatusService,
+    private readonly identifiers: AnimalIdentifiersService,
+    private readonly qualityService: AnimalQualityService,
   ) {}
 
   @Get('animals')
@@ -63,7 +67,7 @@ export class HerdController {
   // Ruta estática ANTES de la paramétrica `animals/:id` (si no, `quality` cae en :id).
   @Get('animals/quality')
   quality(@Query('no_weighing_days') days?: string) {
-    return this.herd.qualityReport({ noWeighingDays: days ? Number(days) : undefined });
+    return this.qualityService.qualityReport({ noWeighingDays: days ? Number(days) : undefined });
   }
 
   @Get('animals/:id')
@@ -88,7 +92,7 @@ export class HerdController {
 
   @Get('animals/:id/genealogy')
   genealogy(@Param('id') id: string, @Query('depth') depth?: string) {
-    return this.herd.animalGenealogy(id, depth ? Number(depth) : undefined);
+    return this.qualityService.animalGenealogy(id, depth ? Number(depth) : undefined);
   }
 
   @Post('animals/:id/events')
@@ -103,17 +107,17 @@ export class HerdController {
 
   @Post('animals/:id/identifiers')
   addIdentifier(@Param('id') id: string, @Body() body: any) {
-    return this.herd.addIdentifier(id, body);
+    return this.identifiers.addIdentifier(id, body);
   }
 
   @Post('animals/:id/identifiers/:idfId/retire')
   retireIdentifier(@Param('id') id: string, @Param('idfId') idfId: string) {
-    return this.herd.retireIdentifier(id, idfId);
+    return this.identifiers.retireIdentifier(id, idfId);
   }
 
   @Post('animals/:id/identifiers/:idfId/make-official')
   makeOfficial(@Param('id') id: string, @Param('idfId') idfId: string) {
-    return this.herd.makeOfficialIdentifier(id, idfId);
+    return this.identifiers.makeOfficialIdentifier(id, idfId);
   }
 
   @Put('animals/:id/breeds')
