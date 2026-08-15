@@ -48,12 +48,22 @@ export class BillingService {
        WHERE s.tenant_id = $1 AND s.deleted_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
       [t],
     );
-    const usage = await this.db.one<any>(
-      `SELECT (SELECT count(*)::int FROM animals WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL) AS animals,
-              (SELECT count(DISTINCT user_id)::int FROM user_role_assignments WHERE tenant_id=$1) AS users,
-              (SELECT count(*)::int FROM sync_devices WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL) AS devices`,
-      [t],
-    );
+    /**
+     * El consumo se cuenta con `contar()`, el MISMO que decide si algo entra o no.
+     *
+     * Iba en un SELECT aparte y los usuarios se contaban sin filtrar `deleted_at` —a diferencia de
+     * animales y dispositivos, ahí nomás en la misma consulta—. No molestaba porque hasta que
+     * existieron las invitaciones ninguna asignación se borraba nunca; al revocarle el acceso a
+     * alguien, la pantalla seguía contándolo y decía «3 de 5» con un solo usuario adentro.
+     *
+     * Con una sola definición, lo que se MUESTRA y lo que BLOQUEA no pueden volver a discrepar.
+     */
+    const [animals, users, devices] = await Promise.all([
+      this.contar('animals', t),
+      this.contar('users', t),
+      this.contar('devices', t),
+    ]);
+    const usage = { animals, users, devices };
     return {
       status: sub.status,
       billing_currency: sub.billing_currency,
