@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from './alerts.service';
+import { AlertRulesService } from './alert-rules.service';
 import { NitrogenService } from '../genetics/nitrogen.service';
 import { InventoryService } from '../inventory/inventory.service';
 
@@ -30,7 +31,7 @@ describe('AlertsService.agenda · integración', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
+    alerts = new AlertsService(db, new AlertRulesService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db))));
     tenantId = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [tenantId]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;

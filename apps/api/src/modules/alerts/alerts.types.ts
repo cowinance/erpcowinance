@@ -30,6 +30,15 @@ export interface Desired {
   group_title?: string | null;
 }
 
+/**
+ * Config de reglas resuelta para un tenant: por cada código, si está activa y con qué umbral.
+ *
+ * La arma `AlertsService` (mezcla los defaults del registro con los overrides guardados) y la
+ * consume `AlertRulesService`. Va acá y no en cualquiera de los dos para que el motor no tenga que
+ * importar al servicio ni al revés — el mismo motivo por el que `Desired` vive en este archivo.
+ */
+export type RuleConfig = Map<string, { active: boolean; days: number }>;
+
 /** Ítem de la agenda diaria (P4-1): hecho accionable estructurado del hato. */
 export interface AgendaItemDto {
   code: string;

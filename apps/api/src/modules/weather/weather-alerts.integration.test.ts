@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { AlertsService } from '../alerts/alerts.service';
+import { AlertRulesService } from '../alerts/alert-rules.service';
 import { WeatherService } from './weather.service';
 import { NitrogenService } from '../genetics/nitrogen.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -35,7 +36,7 @@ describe('alertas de clima (D4 · E2)', () => {
     await db.onModuleInit();
     await db.defaultFarm();
     weather = new WeatherService(db);
-    alerts = new AlertsService(db, { statusAlerts: async () => [] } as any, weather, new NitrogenService(db, new InventoryService(db)));
+    alerts = new AlertsService(db, new AlertRulesService(db, { statusAlerts: async () => [] } as any, weather, new NitrogenService(db, new InventoryService(db))));
     // El demo trae estación y un año de mediciones (Fase 3.2). Esta suite afirma sobre el conjunto
     // de alertas de clima, así que arranca siendo dueña del fixture: suponer la base vacía la hacía
     // romperse cada vez que el seed se enriquecía, sin que nada estuviera realmente mal.

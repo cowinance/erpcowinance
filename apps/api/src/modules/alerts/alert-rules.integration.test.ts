@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from './alerts.service';
+import { AlertRulesService } from './alert-rules.service';
 import { NitrogenService } from '../genetics/nitrogen.service';
 import { InventoryService } from '../inventory/inventory.service';
 
@@ -35,7 +36,7 @@ describe('alerts — motor de reglas configurable', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    svc = new AlertsService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
+    svc = new AlertsService(db, new AlertRulesService(db, { statusAlerts: async () => [] } as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db))));
     const t = db.tenant;
     const farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [t]))[0].id;
     const speciesId = (await db.query<{ id: string }>(`SELECT id FROM species LIMIT 1`))[0].id;

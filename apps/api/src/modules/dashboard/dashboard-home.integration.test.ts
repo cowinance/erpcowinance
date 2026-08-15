@@ -9,6 +9,7 @@ import { DashboardHomeService } from './dashboard-home.service';
 import { TaskService } from '../tasks/task.service';
 import { WeatherService } from '../weather/weather.service';
 import { AlertsService } from '../alerts/alerts.service';
+import { AlertRulesService } from '../alerts/alert-rules.service';
 import { HealthService } from '../health/health.service';
 import { ReproService } from '../repro/repro.service';
 import { ServicePlanService } from '../repro/service-plan.service';
@@ -30,6 +31,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
   let home: DashboardHomeService;
   let tasks: TaskService;
   let alerts: AlertsService;
+  let rulesEngine: AlertRulesService; // se espía para contar corridas del cómputo caro
   let health: HealthService;
   let userId: string;
   let farmId: string;
@@ -46,7 +48,8 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     await db.onModuleInit();
     tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
     const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
-    alerts = new AlertsService(db, repro as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
+    rulesEngine = new AlertRulesService(db, repro as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
+    alerts = new AlertsService(db, rulesEngine);
     health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
     home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);
     userId = (await db.query<{ id: string }>(`SELECT id FROM users WHERE email = 'cowinance@gmail.com'`))[0].id;
@@ -296,12 +299,12 @@ describe('DashboardHomeService · home agregado (E1)', () => {
       // una más en CADA otra pantalla, porque el encabezado vive en el layout. Medido: 40-60 ms por
       // corrida con 65 animales, y crece con el hato.
       const hoy = await db.today();
-      const espia = alerts as any;
-      const real = espia.computeDesiredFresh.bind(espia);
+      const espia = rulesEngine as any;
+      const real = espia.compute.bind(espia);
       let corridas = 0;
-      espia.computeDesiredFresh = async () => {
+      espia.compute = async (cfg: any) => {
         corridas++;
-        return real();
+        return real(cfg);
       };
       try {
         // Se arranca desde una ESCRITURA para no medir sobre una caché que dejó tibia otro test: así
@@ -313,7 +316,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
         await home.home();
         expect(corridas, 'tres consultas seguidas tienen que compartir UN cómputo').toBe(1);
       } finally {
-        espia.computeDesiredFresh = real;
+        espia.compute = real;
       }
     }, 60_000);
 
@@ -324,12 +327,12 @@ describe('DashboardHomeService · home agregado (E1)', () => {
       // escribió es PostgreSQL (`pg_current_xact_id_if_assigned`), no una heurística por método HTTP
       // — que habría fallado, porque en este sistema varios GET escriben.
       const hoy = await db.today();
-      const espia = alerts as any;
-      const real = espia.computeDesiredFresh.bind(espia);
+      const espia = rulesEngine as any;
+      const real = espia.compute.bind(espia);
       let corridas = 0;
-      espia.computeDesiredFresh = async () => {
+      espia.compute = async (cfg: any) => {
         corridas++;
-        return real();
+        return real(cfg);
       };
       try {
         await db.tx((q) => tasks.createTask(q, { title: 'punto de partida 2', dueDate: hoy, farmId }, ctx()));
@@ -344,7 +347,7 @@ describe('DashboardHomeService · home agregado (E1)', () => {
         expect(corridas, 'después de escribir TIENE que recalcular').toBe(2);
         expect(h.agenda.some((a: any) => a.title === 'tarea que invalida')).toBe(true);
       } finally {
-        espia.computeDesiredFresh = real;
+        espia.compute = real;
       }
     }, 60_000);
 

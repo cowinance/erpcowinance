@@ -35,10 +35,9 @@ const BASELINE = {
   // indicador imprimía ▼+801 en CADA corrida — una alarma que no puede volver a verde deja de
   // informar y se lee como ruido. El control real es el gate MAX_SERVICE_LINES de más abajo;
   // este número solo mide la tendencia, y para eso tiene que partir de la realidad.
-  // Revisado 2026-08-15: herd.service.ts bajó a 940 al extraer identificación y calidad, así que
-  // el mayor pasa a ser alerts.service.ts. El techo NO se movió: con el peor caso en 1094, 1150
-  // sigue siendo "apenas por encima", que es lo que el trinquete pide.
-  largestServiceLines: 1094, // alerts.service.ts (excl. seed.ts, que es data)
+  // Revisado 2026-08-15: herd.service.ts bajó a 940 al extraer identificación y calidad, y
+  // alerts.service.ts a 477 al extraer el motor de reglas. El mayor pasa a ser repro.service.ts.
+  largestServiceLines: 978, // repro.service.ts (excl. seed.ts, que es data)
 };
 
 const TYPECHECK_TARGETS = [
@@ -63,9 +62,11 @@ const LARGEST_DIR = 'apps/api/src';
 /**
  * Techo de líneas por servicio (gate). Trinquete: bajarlo es una decisión explícita, subirlo
  * debería costar una discusión. Historial: 1417 (herd.service.ts, sin techo) → 1150 al extraer
- * LotsService.
+ * LotsService → 1000 al extraer AnimalIdentifiers/AnimalQuality de herd y AlertRules de alerts.
+ *
+ * El peor caso quedó en 978 (repro.service.ts), el próximo candidato a partir.
  */
-const MAX_SERVICE_LINES = 1150;
+const MAX_SERVICE_LINES = 1000;
 
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
 const red = (s) => `\x1b[31m${s}\x1b[0m`;
