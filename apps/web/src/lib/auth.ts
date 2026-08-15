@@ -61,12 +61,17 @@ export async function clearSession(): Promise<void> {
  * resend). Distingue fallo de red de error HTTP y expone el `code` estructurado
  * del backend (P1.3.4) — las páginas ramifican por `code`, no por texto exacto.
  */
-export type PublicPostResult =
-  | { ok: true }
+export type PublicPostResult<T = unknown> =
+  | { ok: true; data: T | null }
   | { ok: false; kind: 'network' }
   | { ok: false; kind: 'http'; status: number; code?: string; title?: string };
 
-export async function postPublic(path: string, body: unknown): Promise<PublicPostResult> {
+/**
+ * `data` se agregó para la previsualización de invitaciones, que necesita el cuerpo de la
+ * respuesta —a qué finca y con qué rol te invitaron— y no solo si salió bien. Es aditivo: los
+ * llamadores que solo miran `ok` no se enteran.
+ */
+export async function postPublic<T = unknown>(path: string, body: unknown): Promise<PublicPostResult<T>> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
@@ -77,7 +82,7 @@ export async function postPublic(path: string, body: unknown): Promise<PublicPos
   } catch {
     return { ok: false, kind: 'network' };
   }
-  if (res.ok) return { ok: true };
+  if (res.ok) return { ok: true, data: ((await res.json().catch(() => null)) as T | null) };
   const data = (await res.json().catch(() => null)) as { code?: string; title?: string } | null;
   return { ok: false, kind: 'http', status: res.status, code: data?.code, title: data?.title };
 }
