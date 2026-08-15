@@ -1,4 +1,29 @@
 import { defineConfig } from 'vitest/config';
+import { availableParallelism, totalmem } from 'node:os';
+
+const GB = 1024 ** 3;
+
+/**
+ * Techo de workers en paralelo — el límite es la MEMORIA, no los cores.
+ *
+ * Casi toda prueba de integración levanta su PROPIA PGlite y le carga el DDL completo más el seed
+ * demo. Con el default de vitest (un worker por core, menos uno), una máquina de 16 cores y 11 GB
+ * abría 15 workers, se quedaba sin RAM y el runner los mataba: la corrida terminaba **sin reportar
+ * un solo test en rojo**. Esa es la peor forma de fallar — se lee como si el código estuviera roto
+ * y manda a buscar el problema donde no está. El CI nunca lo vio porque `ubuntu-latest` tiene 4
+ * cores y el default ya le daba 3.
+ *
+ * Medido sobre la suite completa (agosto 2026): pico de 0.48 GB por worker. Se presupuestan 0.75
+ * —50% de margen para que el seed pueda crecer sin que esto vuelva a morder— sobre la MITAD de la
+ * RAM física; la otra mitad es del sistema, el editor y los servidores de desarrollo.
+ *
+ * Donde sobra memoria manda el término de cores, así que en CI el número NO cambia.
+ */
+const MEMORIA_POR_WORKER_GB = 0.75;
+const maxWorkers = Math.max(
+  1,
+  Math.min(availableParallelism() - 1, Math.floor(totalmem() / GB / 2 / MEMORIA_POR_WORKER_GB)),
+);
 
 /**
  * Vitest a nivel workspace — pruebas de lógica pura y de servidor (entorno
@@ -32,6 +57,7 @@ export default defineConfig({
      * falle rápido en vez de esperar dos minutos.
      */
     hookTimeout: 120_000,
+    maxWorkers,
     coverage: {
       provider: 'v8',
       reportsDirectory: './coverage',
