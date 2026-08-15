@@ -22,6 +22,7 @@
     "audit:arch": "node scripts/audit-arch.mjs",
     "verify:rls": "node scripts/verify-rls.mjs",
     "verify:pg": "node scripts/verify-app-postgres.mjs",
+    "verify:permisos": "node scripts/verify-permissions.mjs",
     "verify:backup": "node scripts/verify-backup.mjs",
     "e2e:web": "npm run build -w @cowinance/api && npm run e2e --workspace @cowinance/web",
     "tokens:build": "npm run build -w @cowinance/design-tokens && node packages/design-tokens/scripts/gen-web-css.mjs",

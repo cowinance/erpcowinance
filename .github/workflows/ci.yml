@@ -53,6 +53,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # La matriz de permisos EJERCIDA por HTTP. Va después del build porque levanta el binario.
+      # Los tests unitarios prueban la matriz; esto prueba que el interceptor esté cableado y en
+      # el orden correcto — sacarlo del array de providers deja los 16 tests en verde y la API
+      # abierta. No necesita PostgreSQL: corre sobre PGlite.
+      - name: La matriz de permisos se aplica de verdad
+        run: npm run verify:permisos
+
   # Aislamiento multi-tenant contra PostgreSQL REAL. No lo cubre ningún otro job: la suite corre
   # sobre PGlite, que conecta como superusuario y SALTEA la RLS — o sea, en dev las políticas se
   # crean pero nunca se ejercen y una fuga cross-tenant recién aparecería en producción.
