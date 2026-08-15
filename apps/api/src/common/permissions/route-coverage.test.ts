@@ -166,11 +166,35 @@ describe('matriz de permisos — invariantes de los roles', () => {
     expect(permite('', 'hato', 'read')).toBe(false);
   });
 
-  it('todos los roles conservan lo transversal (sesión, alertas, sync)', () => {
+  it('todos los roles conservan lo transversal (sesión, inicio, alertas, sync)', () => {
     for (const rol of ROLES) {
       expect(permite(rol, 'sesion', 'read'), `${rol} sin sesión`).toBe(true);
+      expect(permite(rol, 'inicio', 'read'), `${rol} sin inicio`).toBe(true);
       expect(permite(rol, 'alertas', 'read'), `${rol} sin alertas`).toBe(true);
       expect(permite(rol, 'sincronizacion', 'write'), `${rol} sin sync`).toBe(true);
+    }
+  });
+
+  /**
+   * REGRESIÓN: el operario recibía 403 en `/dashboard/home` —la pantalla con la que abre el
+   * móvil— porque esa ruta caía en `reportes`, que no tiene a propósito. La app no le arrancaba
+   * al rol que más la usa, y no lo agarró ningún test: los de permisos probaban la matriz y los
+   * del móvil no pasan por la API.
+   *
+   * Se afirma sobre las RUTAS que las apps piden para arrancar, no sobre la capacidad: si mañana
+   * el Inicio se mueve de prefijo, este test tiene que seguir hablando de la puerta de entrada.
+   */
+  it('toda ruta con la que ABREN las apps es alcanzable por TODOS los roles', () => {
+    // apps/mobile/src/app/(tabs)/index.tsx y SyncContext piden estas al arrancar.
+    const PUERTA_DE_ENTRADA = ['dashboard/home', 'agenda', 'notifications', 'auth/me'];
+    for (const path of PUERTA_DE_ENTRADA) {
+      const rule = ruleFor(path);
+      expect(rule, `«${path}» no tiene capacidad asignada`).not.toBeNull();
+      for (const rol of ROLES)
+        expect(
+          permite(rol, rule!.cap, 'read'),
+          `${rol} recibe 403 en «${path}»: es la pantalla con la que abre la app`,
+        ).toBe(true);
     }
   });
 

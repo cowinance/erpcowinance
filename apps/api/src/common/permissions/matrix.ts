@@ -28,9 +28,17 @@ export const ROLES: Role[] = ['owner', 'admin', 'veterinarian', 'foreman', 'work
 
 type Permisos = Partial<Record<Capability, Access>>;
 
-/** Las tiene todo el mundo: su sesión, sus alertas y el canal de sincronización. */
+/**
+ * Las tiene todo el mundo: su sesión, la pantalla de Inicio, sus alertas y el canal de sync.
+ *
+ * `inicio` está acá y no en cada rol por una regla que salió de romperla: **la pantalla con la que
+ * abre la aplicación tiene que ser alcanzable por todos**. Estaba bajo `reportes`, que el operario
+ * no tiene a propósito, y el móvil —donde el operario vive— no le arrancaba. Un permiso que deja a
+ * un rol afuera de su propia puerta de entrada no está restringiendo: está rompiendo.
+ */
 const TRANSVERSALES: Permisos = {
   sesion: 'read',
+  inicio: 'read',
   alertas: 'read',
   sincronizacion: 'write',
 };

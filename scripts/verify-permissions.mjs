@@ -75,9 +75,13 @@ const CASOS = [
   ['foreman', 'GET', '/hr/employees', 403],
   ['foreman', 'GET', '/finance/accounts', 403],
 
-  // El operario captura; no consulta.
+  // El operario captura; no consulta. Pero SÍ abre la app: `/dashboard/home` es su pantalla de
+  // inicio en el móvil y estuvo devolviendo 403 — la app no le arrancaba al rol que más la usa.
   ['worker', 'GET', '/animals?limit=1', 'ok'],
   ['worker', 'GET', '/tasks', 'ok'],
+  ['worker', 'GET', '/dashboard/home', 'ok'],
+  ['worker', 'GET', '/agenda', 'ok'],
+  ['worker', 'GET', '/dashboard/kpis', 403], // el agregado crudo sí es un reporte
   ['worker', 'GET', '/reports/herd-inventory', 403],
   ['worker', 'GET', '/finance/accounts', 403],
   ['worker', 'GET', '/genetics/cryo/tanks', 403],

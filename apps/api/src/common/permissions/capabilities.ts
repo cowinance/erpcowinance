@@ -57,6 +57,7 @@ export type Capability =
   | 'suscripcion'
   // — transversales: las tiene todo el mundo —
   | 'sesion'
+  | 'inicio'
   | 'alertas'
   | 'sincronizacion';
 
@@ -155,6 +156,15 @@ export const ROUTE_RULES: RouteRule[] = [
 
   // ── Gobierno ────────────────────────────────────────────────────────────────
   { prefix: 'reports', cap: 'reportes', access: 'read' },
+  // El Inicio NO es un reporte: es la pantalla con la que ABREN las dos apps, y en el móvil es lo
+  // primero que ve el operario. Estaba bajo `reportes` —que el operario no tiene a propósito, no
+  // consulta reportes— y le devolvía 403 al rol que más usa el móvil: la app no le arrancaba.
+  //
+  // Se separa en vez de darle `reportes` al operario, que además le abriría `/reports/*`. Se
+  // revisó lo que devuelve antes de abrirlo: 24 KPIs de animales, pesos, preñez, tareas, alertas y
+  // sanidad. Ni un campo de plata. `/dashboard/kpis` se queda en `reportes` — ese sí es el agregado
+  // crudo, y no lo pide ninguna de las dos apps para arrancar.
+  { prefix: 'dashboard/home', cap: 'inicio', access: 'read' },
   { prefix: 'dashboard', cap: 'reportes', access: 'read' },
   { prefix: 'config', cap: 'configuracion' },
   { prefix: 'onboarding', cap: 'configuracion' },
