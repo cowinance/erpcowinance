@@ -159,6 +159,11 @@ export const ROUTE_RULES: RouteRule[] = [
   { prefix: 'config', cap: 'configuracion' },
   { prefix: 'onboarding', cap: 'configuracion' },
   { prefix: 'billing', cap: 'suscripcion' },
+  // Invitar y sacar gente son la misma capacidad: quien puede dar acceso puede quitarlo. Las
+  // rutas públicas del flujo de aceptación (`preview`, `accept`) no pasan por acá —son `@Public`,
+  // las protege el token—, así que no necesitan regla.
+  { prefix: 'invitations', cap: 'usuarios' },
+  { prefix: 'members', cap: 'usuarios' },
 
   // ── Transversales ───────────────────────────────────────────────────────────
   // `alerts` y `notifications` incluyen GET que ESCRIBEN (evaluación read-through, ledger de
@@ -183,7 +188,9 @@ export const ROUTE_RULES: RouteRule[] = [
  * test de coherencia las tolere SIN dejar de detectar una capacidad inventada por error.
  */
 export const CAPACIDADES_SIN_RUTA: Capability[] = [
-  'usuarios', // el módulo de invitaciones todavía no existe; `invitations` está en el esquema
+  // Vacía: `usuarios` salió de acá al construirse el módulo de invitaciones. Se deja declarada
+  // —y el test la sigue verificando— porque la próxima capacidad que se decida antes de existir
+  // va a necesitar el mismo lugar.
 ];
 
 /**

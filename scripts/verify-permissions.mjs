@@ -93,6 +93,18 @@ const CASOS = [
   ['admin', 'GET', '/finance/accounts', 'ok'],
   ['admin', 'GET', '/billing/subscription', 403],
 
+  // Sumar y sacar gente: solo el dueño y el administrador. Que un veterinario pudiera invitar
+  // sería la escalada de privilegios más directa que existe — se invita a sí mismo como dueño.
+  ['owner', 'GET', '/invitations', 'ok'],
+  ['owner', 'GET', '/members', 'ok'],
+  ['admin', 'GET', '/invitations', 'ok'],
+  ['admin', 'GET', '/members', 'ok'],
+  ['veterinarian', 'GET', '/invitations', 403],
+  ['veterinarian', 'POST', '/invitations', 403],
+  ['foreman', 'GET', '/members', 403],
+  ['worker', 'POST', '/invitations', 403],
+  ['accountant', 'GET', '/invitations', 403],
+
   // Denegar por defecto: un rol que no está en la matriz no puede NADA.
   ['intruso', 'GET', '/animals?limit=1', 403],
 ];

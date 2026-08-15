@@ -68,26 +68,50 @@ export class BillingService {
   /**
    * Enforcement de límites del plan (B-2): lanza 403 `plan.limit_reached` si crear un recurso más
    * superaría el límite del plan. `null` = sin límite. Regla única, invocada por los create-paths
-   * (animales, dispositivos). La importación masiva se difiere (flujo propio).
+   * (animales, dispositivos, usuarios). La importación masiva se difiere (flujo propio).
+   *
+   * `users` se sumó con las invitaciones: `max_users` existía en `plans` y se contaba como consumo
+   * —el panel de plataforma ya marcaba las cuentas pasadas de límite— pero no lo hacía cumplir
+   * nadie, porque hasta ahora no había forma de agregar un segundo usuario.
    */
-  async assertWithinLimit(resource: 'animals' | 'devices'): Promise<void> {
+  async assertWithinLimit(resource: 'animals' | 'devices' | 'users'): Promise<void> {
     await this.ensureSubscription();
     const t = this.db.tenant;
-    const plan = await this.db.one<{ max_animals: number | null; max_devices: number | null }>(
-      `SELECT p.max_animals, p.max_devices FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+    const plan = await this.db.one<{ max_animals: number | null; max_devices: number | null; max_users: number | null }>(
+      `SELECT p.max_animals, p.max_devices, p.max_users FROM subscriptions s JOIN plans p ON p.id = s.plan_id
        WHERE s.tenant_id = $1 AND s.deleted_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
       [t],
     );
-    const limit = resource === 'animals' ? plan?.max_animals : plan?.max_devices;
+    const limit = resource === 'animals' ? plan?.max_animals : resource === 'devices' ? plan?.max_devices : plan?.max_users;
     if (limit == null) return; // sin límite → no bloquea
-    const count =
-      resource === 'animals'
-        ? (await this.db.one<{ n: number }>(`SELECT count(*)::int AS n FROM animals WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL`, [t]))?.n ?? 0
-        : (await this.db.one<{ n: number }>(`SELECT count(*)::int AS n FROM sync_devices WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL`, [t]))?.n ?? 0;
+    const count = await this.contar(resource, t);
     if (count >= limit) {
-      const noun = resource === 'animals' ? 'animales' : 'dispositivos';
+      const noun = resource === 'animals' ? 'animales' : resource === 'devices' ? 'dispositivos' : 'usuarios';
       throw new ForbiddenException({ code: 'plan.limit_reached', title: `Alcanzaste el límite de ${limit} ${noun} de tu plan. Cambiá de plan para agregar más.` });
     }
+  }
+
+  /**
+   * Consumo actual del recurso.
+   *
+   * Los usuarios cuentan las asignaciones vigentes MÁS las invitaciones pendientes: una invitación
+   * sin aceptar es un lugar ya reservado. Sin eso, mandar seis invitaciones con el plan en cinco
+   * pasa el chequeo seis veces —cada una ve cinco usuarios— y el límite se supera igual, solo que
+   * el error le aparece al invitado al aceptar, que es a quien menos le sirve.
+   */
+  private async contar(resource: 'animals' | 'devices' | 'users', t: string): Promise<number> {
+    const sql =
+      resource === 'animals'
+        ? `SELECT count(*)::int AS n FROM animals WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL`
+        : resource === 'devices'
+          ? `SELECT count(*)::int AS n FROM sync_devices WHERE tenant_id=$1 AND status='active' AND deleted_at IS NULL`
+          : `SELECT (SELECT count(DISTINCT user_id) FROM user_role_assignments
+                      WHERE tenant_id=$1 AND deleted_at IS NULL
+                        AND (valid_until IS NULL OR valid_until >= CURRENT_DATE))
+                  + (SELECT count(*) FROM invitations
+                      WHERE tenant_id=$1 AND deleted_at IS NULL
+                        AND accepted_at IS NULL AND expires_at > now()) AS n`;
+    return (await this.db.one<{ n: number }>(sql, [t]))?.n ?? 0;
   }
 
   /** Cambio ADMINISTRATIVO de plan (NO cobra). Gated a owner/admin. No altera el estado del cobro. */

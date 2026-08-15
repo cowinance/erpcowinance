@@ -43,6 +43,7 @@ import { OpsModule } from './modules/ops/ops.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { WeatherModule } from './modules/weather/weather.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 
 /**
  * Monolito modular (Fase 0-1 del roadmap): cada módulo se alinea 1:1 con un
@@ -50,6 +51,6 @@ import { PlatformModule } from './modules/platform/platform.module';
  * interno; la extracción futura a microservicios preserva estos límites.
  */
 @Module({
-  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule, WeatherModule, TaxModule, PlatformModule, OnboardingModule],
+  imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule, WeatherModule, TaxModule, PlatformModule, OnboardingModule, InvitationsModule],
 })
 export class AppModule {}

@@ -6,20 +6,9 @@ import { EmailActionTokenService } from './email-action-token.service';
 import { EMAIL_SENDER, type EmailSender } from '../../application/ports/email-sender.port';
 import { AuthService } from '../auth/auth.service';
 import { bootstrapTenant } from './tenant-bootstrap';
+import { appBaseUrl, avisarSiFaltaAppBaseUrl } from '../../common/app-base-url';
 
-/** Base URL del front para armar los links de email (dev: localhost del web). */
-function appBaseUrl(): string {
-  return (process.env.APP_BASE_URL?.trim().replace(/\/$/, '')) || 'http://localhost:3000';
-}
-
-// Sin APP_BASE_URL, el enlace apunta a `localhost:3000`: en el server funciona el envío pero el
-// enlace muere en el teléfono de quien lo recibe, que es el síntoma más difícil de diagnosticar
-// (el correo llegó, así que el problema no parece del servidor). Se avisa al arrancar.
-if (process.env.NODE_ENV === 'production' && !process.env.APP_BASE_URL?.trim())
-  new Logger('identity').warn(
-    'APP_BASE_URL sin definir en producción: los enlaces de verificación y de reset apuntan a ' +
-      'http://localhost:3000 y no van a funcionar fuera del servidor. Configurala con tu dominio.',
-  );
+avisarSiFaltaAppBaseUrl('identity');
 
 /**
  * Provisioning self-service de tenant (P1.1, ADR-0010).
