@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { ReproReportsService } from './repro-reports.service';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
@@ -53,6 +54,7 @@ describe('repro — respuesta a la sincronización', () => {
     await db.onModuleInit();
     straws = new StrawsService(db);
     embryos = new EmbryosService(db, straws);
+    const status = new ReproStatusService(db);
     repro = new ReproService(
       db,
       new WeaningService(db),
@@ -63,8 +65,9 @@ describe('repro — respuesta a la sincronización', () => {
       new ServicePlanService(db, straws),
       new InbreedingService(db),
       new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)),
+      status,
     );
-    reports = new ReproReportsService(db, repro);
+    reports = new ReproReportsService(db, status);
     farmId = (await db.query<any>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<any>(`SELECT id FROM species LIMIT 1`))[0].id;
 

@@ -9,6 +9,7 @@ import { EmbryosService } from '../genetics/embryos.service';
 import { StrawsService } from '../genetics/straws.service';
 import { ServicePlanService } from './service-plan.service';
 import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { InbreedingService } from '../genetics/inbreeding.service';
@@ -90,7 +91,7 @@ describe('plan de servicio — reserva, liberación y lista de retiro', () => {
     // El diagnóstico agenda tareas (recontrol / nuevo servicio); acá se stubean porque lo que se
     // prueba es el cierre de la campaña, no la agenda —que ya tiene sus propios tests—.
     const tareas = { createTask: async () => ({ id: 'stub' }) } as unknown as TaskService;
-    repro = new ReproService(db, {} as WeaningService, tareas, semen, embryos, straws, plans, new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
+    repro = new ReproService(db, {} as WeaningService, tareas, semen, embryos, straws, plans, new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), new ReproStatusService(db));
 
     const t: any = await cryo.createTank({ code: '207' });
     const c1: any = await cryo.createCanister(t.id, { code: '1', color: 'azul' });

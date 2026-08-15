@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { computeStockRotation, nitrogenAlertMessage, seriesStatus } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
 import type { Desired, RuleConfig } from './alerts.types';
-import { ReproService } from '../repro/repro.service';
+import { ReproStatusService } from '../repro/repro-status.service';
 import { WeatherService } from '../weather/weather.service';
 import { NitrogenService } from '../genetics/nitrogen.service';
 
@@ -41,7 +41,7 @@ const iso = (d: string | Date | null | undefined) => (d ? new Date(d).toISOStrin
 export class AlertRulesService {
   constructor(
     private readonly db: DbService,
-    private readonly repro: ReproService,
+    private readonly repro: ReproStatusService,
     private readonly weather: WeatherService,
     private readonly nitrogen: NitrogenService,
   ) {}
@@ -216,7 +216,7 @@ export class AlertRulesService {
     }
 
     // Alertas de estado reproductivo (VWP, diagnóstico pendiente, abierta, repetidora, próximas a
-    // preparar) — DERIVADAS de la regla única `computeReproStatus` en ReproService (no se re-implementa
+    // preparar) — DERIVADAS de la regla única `computeReproStatus` en ReproStatusService (no se re-implementa
     // el estado en SQL acá). El motor filtra por regla activa/umbral configurable.
     const reproAlerts = await this.repro.statusAlerts();
     for (const a of reproAlerts) if (cfg.get(a.code)?.active) out.push(a);

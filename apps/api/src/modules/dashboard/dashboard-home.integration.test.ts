@@ -12,6 +12,7 @@ import { AlertsService } from '../alerts/alerts.service';
 import { AlertRulesService } from '../alerts/alert-rules.service';
 import { HealthService } from '../health/health.service';
 import { ReproService } from '../repro/repro.service';
+import { ReproStatusService } from '../repro/repro-status.service';
 import { ServicePlanService } from '../repro/service-plan.service';
 import { SyncVersionStore } from '../sync/registry/sync-version.store';
 import { ServerOriginChangesetWriter } from '../sync/registry/server-origin-changeset.writer';
@@ -47,8 +48,10 @@ describe('DashboardHomeService · home agregado (E1)', () => {
     db = new DbService();
     await db.onModuleInit();
     tasks = new TaskService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db));
-    const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
-    rulesEngine = new AlertRulesService(db, repro as any, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
+    const reproStatus = new ReproStatusService(db);
+    const repro = new ReproService(db, {} as any, tasks as any, {} as any, {} as any, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), reproStatus);
+    // El motor de alertas pide las alertas reproductivas al servicio de ESTADO, no a ReproService.
+    rulesEngine = new AlertRulesService(db, reproStatus, new WeatherService(db), new NitrogenService(db, new InventoryService(db)));
     alerts = new AlertsService(db, rulesEngine);
     health = new HealthService(db, {} as any, {} as any, {} as any, {} as any);
     home = new DashboardHomeService(db, new DashboardService(db), tasks, alerts, health, repro);

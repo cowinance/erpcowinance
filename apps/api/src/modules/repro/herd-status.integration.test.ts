@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { ServicePlanService } from './service-plan.service';
 import { SemenService } from '../genetics/semen.service';
 import { StrawsService } from '../genetics/straws.service';
@@ -23,9 +24,10 @@ import { ServerOriginChangesetWriter } from '../../modules/sync/registry/server-
  * diagnóstico), calculando días postparto/abiertos. Prueba también `toPrepare` (próximas a preparar)
  * y `statusAlerts` (alertas derivadas). Config por defecto (VWP 60, diag 45, abierta 90, repet. 3).
  */
-describe('repro.herdStatus — estado rico + días abiertos', () => {
+describe('ReproStatusService.herdStatus — estado rico + días abiertos', () => {
   let db: DbService;
   let repro: ReproService;
+  let status: ReproStatusService;
   let panel: ReproDashboardService;
   let t: string;
   let farmId: string;
@@ -59,8 +61,9 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
     process.env.SEED_DEMO = 'on';
     db = new DbService();
     await db.onModuleInit();
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
-    panel = new ReproDashboardService(repro, new ProtocolService(db, {} as TaskService, new ServicePlanService(db, new StrawsService(db)), repro));
+    status = new ReproStatusService(db);
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), new EmbryosService(db, new StrawsService(db)), new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), status);
+    panel = new ReproDashboardService(repro, status, new ProtocolService(db, {} as TaskService, new ServicePlanService(db, new StrawsService(db)), repro));
     t = (await db.query<{ id: string }>(`SELECT id FROM organizations ORDER BY created_at LIMIT 1`))[0].id;
     farmId = (await db.query<{ id: string }>(`SELECT id FROM farms WHERE tenant_id = $1 LIMIT 1`, [t]))[0].id;
     speciesId = (await db.query<{ id: string }>(`SELECT id FROM species WHERE code = 'bovine'`))[0].id;
@@ -86,7 +89,7 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
     const vHeifer = await mkAnimal(vaquillona);
     await mkAnimal(novillo, 'M'); // no-vientre → excluido
 
-    const res = await repro.herdStatus(lot);
+    const res = await status.herdStatus(lot);
     const by = new Map(res.rows.map((r: any) => [r.animal_id, r]));
 
     expect(by.get(vPreg).status).toBe('pregnant');
@@ -109,7 +112,7 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
     await calving(v, 100);
     await service(v, 80); await service(v, 60); await service(v, 40);
     await negative(v, 30);
-    const res = await repro.herdStatus(lot);
+    const res = await status.herdStatus(lot);
     const row = res.rows.find((r: any) => r.animal_id === v)!;
     expect(row.status).toBe('repeat_breeder');
   });
@@ -117,13 +120,13 @@ describe('repro.herdStatus — estado rico + días abiertos', () => {
   it('toPrepare lista las vacas próximas a cumplir el VWP', async () => {
     const v = await mkAnimal(vaca);
     await calving(v, 55); // VWP 60 → faltan 5 días (≤ 7)
-    const res = await repro.toPrepare(7);
+    const res = await status.toPrepare(7);
     expect(res.vwp_days).toBe(60);
     expect(res.rows.some((r: any) => r.animal_id === v && r.days_to_vwp === 5)).toBe(true);
   });
 
   it('statusAlerts genera alertas derivadas (diagnóstico pendiente, abierta, listas)', async () => {
-    const alerts = await repro.statusAlerts();
+    const alerts = await status.statusAlerts();
     const codes = new Set(alerts.map((a: any) => a.code));
     expect(codes.has('diagnosis_due')).toBe(true);
     expect(codes.has('open_too_long')).toBe(true);

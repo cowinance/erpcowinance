@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { ProtocolService } from './protocol.service';
 
 /**
@@ -17,6 +18,7 @@ import { ProtocolService } from './protocol.service';
 export class ReproDashboardService {
   constructor(
     private readonly repro: ReproService,
+    private readonly status: ReproStatusService,
     private readonly protocols: ProtocolService,
   ) {}
 
@@ -29,8 +31,8 @@ export class ReproDashboardService {
   async reproDashboard() {
     const [kpis, herd, prepare, calvings, assignments] = await Promise.all([
       this.repro.kpis(),
-      this.repro.herdStatus(),
-      this.repro.toPrepare(14),
+      this.status.herdStatus(),
+      this.status.toPrepare(14),
       this.repro.upcomingCalvings(30),
       this.protocols.listAssignments(),
     ]);

@@ -1,21 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { averageCalvingInterval, addFarmDays } from '@cowinance/domain';
 import { DbService } from '../../db/db.service';
-import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { computeSyncResponse } from '@cowinance/domain';
 
 /**
  * Reportes reproductivos (Reproducción E5). KPIs de período (concepción, servicios/concepción,
  * intervalos), desempeño por toro/semen, y listas accionables (abiertas, repetidoras, diagnósticos
  * pendientes, abortos). Las listas derivadas del ESTADO reusan la regla única `computeReproStatus`
- * vía `ReproService.herdStatus` (no re-implementan el estado en SQL). Complementa el reporte de índices
+ * vía `ReproStatusService.herdStatus` (no re-implementan el estado en SQL). Complementa el reporte de índices
  * de P9 (`reports.service.reproduction`) sin duplicarlo.
  */
 @Injectable()
 export class ReproReportsService {
   constructor(
     private readonly db: DbService,
-    private readonly repro: ReproService,
+    private readonly status: ReproStatusService,
   ) {}
 
   /** Rango por defecto contado desde HOY EN LA FINCA, sobre el calendario (sin husos ni verano). */
@@ -230,7 +230,7 @@ export class ReproReportsService {
 
   /** Listas derivadas del estado (regla única): abiertas, repetidoras, diagnósticos pendientes. */
   private async byStatus(...statuses: string[]) {
-    const herd = await this.repro.herdStatus();
+    const herd = await this.status.herdStatus();
     return herd.rows.filter((r: any) => statuses.includes(r.status));
   }
   openCows() { return this.byStatus('open'); }

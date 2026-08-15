@@ -35,9 +35,10 @@ const BASELINE = {
   // indicador imprimía ▼+801 en CADA corrida — una alarma que no puede volver a verde deja de
   // informar y se lee como ruido. El control real es el gate MAX_SERVICE_LINES de más abajo;
   // este número solo mide la tendencia, y para eso tiene que partir de la realidad.
-  // Revisado 2026-08-15: herd.service.ts bajó a 940 al extraer identificación y calidad, y
-  // alerts.service.ts a 477 al extraer el motor de reglas. El mayor pasa a ser repro.service.ts.
-  largestServiceLines: 978, // repro.service.ts (excl. seed.ts, que es data)
+  // Revisado 2026-08-15: tres particiones seguidas —herd (1141→940), alerts (1094→477) y repro
+  // (978→795)—. El mayor vuelve a ser herd.service.ts, y ahí la campaña de partir el más grande
+  // llegó a su límite útil: lo que le queda es el CRUD del animal, que es UNA cosa.
+  largestServiceLines: 940, // herd.service.ts (excl. seed.ts, que es data)
 };
 
 const TYPECHECK_TARGETS = [
@@ -64,7 +65,10 @@ const LARGEST_DIR = 'apps/api/src';
  * debería costar una discusión. Historial: 1417 (herd.service.ts, sin techo) → 1150 al extraer
  * LotsService → 1000 al extraer AnimalIdentifiers/AnimalQuality de herd y AlertRules de alerts.
  *
- * El peor caso quedó en 978 (repro.service.ts), el próximo candidato a partir.
+ * El peor caso quedó en 940 (herd.service.ts). NO se bajó a ~950 a propósito: herd acaba de
+ * partirse y lo que le queda —listar, ver, crear y editar el animal— es un solo caso de uso. El
+ * próximo recorte tendría que cortar contra la veta, y un techo que obliga a eso deja de proteger
+ * el diseño para empezar a deformarlo.
  */
 const MAX_SERVICE_LINES = 1000;
 

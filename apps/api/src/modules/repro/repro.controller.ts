@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { ProtocolService } from './protocol.service';
 import { ReproDashboardService } from './repro-dashboard.service';
 
@@ -7,6 +8,7 @@ import { ReproDashboardService } from './repro-dashboard.service';
 export class ReproController {
   constructor(
     private readonly repro: ReproService,
+    private readonly status: ReproStatusService,
     private readonly protocols: ProtocolService,
     private readonly panel: ReproDashboardService,
   ) {}
@@ -85,17 +87,17 @@ export class ReproController {
 
   @Get('reproduction/herd-status')
   herdStatus(@Query('lot_id') lotId?: string) {
-    return this.repro.herdStatus(lotId);
+    return this.status.herdStatus(lotId);
   }
 
   @Get('reproduction/animals/:id/status')
   animalStatus(@Param('id') id: string) {
-    return this.repro.animalStatus(id);
+    return this.status.animalStatus(id);
   }
 
   @Get('reproduction/to-prepare')
   toPrepare(@Query('days') days?: string) {
-    return this.repro.toPrepare(days ? Number(days) : undefined);
+    return this.status.toPrepare(days ? Number(days) : undefined);
   }
 
   @Get('reproduction/by-lot')

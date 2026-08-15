@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DbService } from '../../db/db.service';
 import { ReproService } from './repro.service';
+import { ReproStatusService } from './repro-status.service';
 import { WeaningService } from './weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { SemenService } from '../genetics/semen.service';
@@ -70,6 +71,7 @@ describe('transferencia de embrión — quién aporta los genes y quién el vien
       new ServicePlanService(db, straws),
       inbreeding,
       new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)),
+      new ReproStatusService(db),
     );
     farmId = (await db.query<any>(`SELECT id FROM farms WHERE tenant_id=$1 LIMIT 1`, [db.tenant]))[0].id;
     speciesId = (await db.query<any>(`SELECT id FROM species LIMIT 1`))[0].id;

@@ -10,6 +10,7 @@ import { StrawsService } from './straws.service';
 import { WeaningService } from '../repro/weaning.service';
 import { TaskService } from '../tasks/task.service';
 import { ReproService } from '../repro/repro.service';
+import { ReproStatusService } from '../repro/repro-status.service';
 import { ServicePlanService } from '../repro/service-plan.service';
 import { InbreedingService } from './inbreeding.service';
 import { MovementService } from '../../modules/land/movement.service';
@@ -37,7 +38,7 @@ describe('genetics — embriones y evaluaciones', () => {
     await db.onModuleInit();
     embryos = new EmbryosService(db, new StrawsService(db));
     evaluations = new EvaluationsService(db);
-    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), embryos, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)));
+    repro = new ReproService(db, {} as WeaningService, {} as TaskService, new SemenService(db, new StrawsService(db)), embryos, new StrawsService(db), new ServicePlanService(db, new StrawsService(db)), new InbreedingService(db), new MovementService(db, new SyncVersionStore(db), new ServerOriginChangesetWriter(db)), new ReproStatusService(db));
     hembraId = (await db.query<{ id: string }>(`SELECT id FROM animals WHERE tenant_id=$1 AND sex='F' AND status='active' AND deleted_at IS NULL LIMIT 1`, [db.tenant]))[0].id;
   }, 120_000);
 
