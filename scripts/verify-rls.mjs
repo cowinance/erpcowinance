@@ -20,10 +20,21 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import pg from 'pg';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+/**
+ * Módulo compilado a URL `file://` para poder importarlo.
+ *
+ * `import()` acepta un especificador, no una ruta del sistema. En POSIX una ruta absoluta empieza
+ * con `/` y el cargador la tolera; en Windows empieza con `C:\`, y ahí `C:` se lee como ESQUEMA de
+ * URL: `ERR_UNSUPPORTED_ESM_URL_SCHEME`. O sea que este script no corría en Windows — el CI no lo
+ * vio porque solo tiene runners Linux, y el job de Windows que se agregó tampoco, porque `verify:rls`
+ * necesita PostgreSQL y ese job no levanta ninguno.
+ */
+const comoUrl = (ruta) => pathToFileURL(ruta).href;
 // Cliente `pg` en vez de `docker exec psql`: así corre igual en local (docker-compose) y en CI
 // (service container), donde el contenedor no es accesible por nombre. PG_URL lo parametriza.
 const PG_URL = process.env.PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5434/postgres';
@@ -74,7 +85,7 @@ const tables = await run(dbUrl(DBT), `select count(*) from information_schema.ta
 console.log(`  esquema canónico cargado (${tables} tablas, PostGIS activo)`);
 
 // ── 2. Políticas: MISMA fuente que la app ──────────────────────────────────────
-const { rlsMigration, RLS_TABLES } = await import(join(ROOT, 'apps/api/dist/db/rls.js'));
+const { rlsMigration, RLS_TABLES } = await import(comoUrl(join(ROOT, 'apps/api/dist/db/rls.js')));
 
 // El DDL canónico NO trae las tablas que la app crea en sus migraciones de arranque
 // (task_events, repro_protocol_assignments, clinical_cases, sync_row_state…). Se verifica sobre
@@ -225,7 +236,7 @@ else bad('RLS sin FORCE', notForced);
 // tenga la forma exacta que se diseñó y ni un milímetro más.
 console.log('\n\x1b[1m── Plano de plataforma (lectura global acotada)\x1b[0m');
 
-const { platformMigration, PLATFORM_READ_TABLES } = await import(join(ROOT, 'apps/api/dist/db/rls.js'));
+const { platformMigration, PLATFORM_READ_TABLES } = await import(comoUrl(join(ROOT, 'apps/api/dist/db/rls.js')));
 // Las tablas propias del plano (platform_admins/platform_audit_logs) nacen en la migración 0027,
 // que este script no corre: se crean acá con la forma mínima para poder ejercer su policy.
 await sqlT(`

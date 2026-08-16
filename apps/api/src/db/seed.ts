@@ -201,6 +201,25 @@ export async function bootstrapCatalogs(db: Queryable) {
  * que necesita (especie bovina, razas, categorías, rol owner) en vez de
  * recibirlas — así queda desacoplado del bootstrap. Solo corre bajo `SEED_DEMO`.
  */
+/**
+ * Las dos cuentas del seed demo, como FUENTE ÚNICA.
+ *
+ * Existen acá y no sueltas en cada consumidor por una razón concreta: el commit que volvió
+ * venezolana la finca de ejemplo renombró la segunda organización de «El Ombú» a «El Samán» y
+ * cambió su email y su contraseña, pero no tocó `scripts/verify-app-postgres.mjs`, que seguía
+ * autenticándose como `maria@elombu.com`. Ese login empezó a dar 401 y el job de aislamiento
+ * multi-tenant quedó en rojo tres semanas.
+ *
+ * Cualquier cosa que necesite entrar como el seed importa esto del `dist`; si mañana cambian, no
+ * hay una segunda copia que se olvide de cambiar.
+ */
+export const DEMO_ACCOUNTS = {
+  /** Grupo La Esperanza — la organización principal del demo. */
+  a: { email: 'cowinance@gmail.com', password: 'cowinance', org: 'Grupo La Esperanza' },
+  /** Fundo El Samán — la SEGUNDA organización, la que hace posible probar el aislamiento. */
+  b: { email: 'maria@elsaman.com', password: 'saman1234', org: 'Fundo El Samán' },
+} as const;
+
 export async function seedDemo(db: Queryable) {
   const q = async (sql: string, params?: unknown[]) => (await db.query(sql, params)).rows as any[];
 
@@ -224,8 +243,8 @@ export async function seedDemo(db: Queryable) {
   // registro. Da USD (no bolívares, decisión del productor), `es-VE` y `America/Caracas`.
   const ve = countryDefaults('VE');
   const [{ id: userId }] = await q(
-    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('cowinance@gmail.com','Jose Montilla',$1,$2) RETURNING id`,
-    [ve.locale, await hashPassword('cowinance')],
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ($3,'Jose Montilla',$1,$2) RETURNING id`,
+    [ve.locale, await hashPassword(DEMO_ACCOUNTS.a.password), DEMO_ACCOUNTS.a.email],
   );
   const [{ id: org }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)
@@ -1230,8 +1249,8 @@ export async function seedDemo(db: Queryable) {
   // «El Ombú» era un árbol de la pampa; el samán es el emblemático venezolano. La misma razón por
   // la que la estancia pasó a hato: la demo tiene que sonar a donde se usa.
   const [{ id: mariaId }] = await q(
-    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ('maria@elsaman.com','María Fernández',$1,$2) RETURNING id`,
-    [ve.locale, await hashPassword('saman1234')],
+    `INSERT INTO users (email, full_name, locale, password_hash) VALUES ($3,'María Fernández',$1,$2) RETURNING id`,
+    [ve.locale, await hashPassword(DEMO_ACCOUNTS.b.password), DEMO_ACCOUNTS.b.email],
   );
   const [{ id: orgB }] = await q(
     `INSERT INTO organizations (name, legal_name, country_code, default_currency, default_locale, timezone, created_by)

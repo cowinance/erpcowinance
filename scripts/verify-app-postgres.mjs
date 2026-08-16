@@ -16,8 +16,17 @@
  */
 import { execFileSync, spawn } from 'child_process';
 import { join } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import pg from 'pg';
+
+/**
+ * Ruta del sistema → URL `file://` para poder importarla.
+ *
+ * `import()` espera un especificador, no una ruta: en Windows `C:\…` se interpreta como esquema de
+ * URL y falla con `ERR_UNSUPPORTED_ESM_URL_SCHEME`. Mismo motivo y misma solución que en
+ * `verify-rls.mjs`.
+ */
+const comoUrl = (ruta) => pathToFileURL(ruta).href;
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 // Conexión al Postgres de pruebas. Por defecto el del docker-compose; en CI se apunta al service
@@ -106,7 +115,9 @@ await psql(
   DB,
 );
 
-execFileSync('npm', ['run', 'build', '-w', '@cowinance/api'], { cwd: ROOT, stdio: 'pipe' });
+// `shell: true` porque en Windows `npm` es `npm.cmd`: sin shell, `execFileSync` busca un
+// ejecutable llamado exactamente «npm», no lo encuentra y tira ENOENT. En POSIX no cambia nada.
+execFileSync('npm', ['run', 'build', '-w', '@cowinance/api'], { cwd: ROOT, stdio: 'pipe', shell: true });
 
 const api_proc = spawn(process.execPath, [join(ROOT, 'apps/api/dist/main.js')], {
   cwd: ROOT,
@@ -160,23 +171,37 @@ try {
   if (rls) ok(`esquema + migraciones + seed aplicados (RLS en ${rls[1]} tablas)`);
   else bad('no se completó el arranque de la base', bootLog.slice(-600));
 
-  // Dos tenants distintos del seed demo.
-  const a = await api('/auth/login', { method: 'POST', body: { email: 'cowinance@gmail.com', password: 'cowinance' } });
-  const b = await api('/auth/login', { method: 'POST', body: { email: 'maria@elombu.com', password: 'ombu1234' } });
+  // Dos tenants distintos del seed demo. Las credenciales se IMPORTAN del seed compilado, igual
+  // que `rls.js`: escritas a mano acá, se separaron del seed cuando la finca de ejemplo pasó a ser
+  // venezolana y este script quedó autenticándose contra un usuario inexistente.
+  const { DEMO_ACCOUNTS } = await import(comoUrl(join(ROOT, 'apps/api/dist/db/seed.js')));
+  const a = await api('/auth/login', { method: 'POST', body: { email: DEMO_ACCOUNTS.a.email, password: DEMO_ACCOUNTS.a.password } });
+  const b = await api('/auth/login', { method: 'POST', body: { email: DEMO_ACCOUNTS.b.email, password: DEMO_ACCOUNTS.b.password } });
   const TA = a.json?.access_token;
   const TB = b.json?.access_token;
   if (TA && TB) ok('login de dos tenants distintos');
-  else bad('no se pudo autenticar', `A=${a.status} B=${b.status}`);
+  else bad('no se pudo autenticar', `A=${a.status} (${DEMO_ACCOUNTS.a.email}) B=${b.status} (${DEMO_ACCOUNTS.b.email})`);
 
   const listA = await api('/animals?limit=500', { token: TA });
   const listB = await api('/animals?limit=500', { token: TB });
   const idsA = new Set((listA.json?.data ?? []).map((x) => x.id));
   const idsB = new Set((listB.json?.data ?? []).map((x) => x.id));
-  if (idsA.size > 0 && idsB.size > 0) ok(`cada tenant ve su hato (A=${idsA.size}, B=${idsB.size})`);
+  const hayDatos = idsA.size > 0 && idsB.size > 0;
+  if (hayDatos) ok(`cada tenant ve su hato (A=${idsA.size}, B=${idsB.size})`);
   else bad('alguna lista vino vacía', `A=${idsA.size} B=${idsB.size}`);
 
+  /**
+   * La aserción MÁS IMPORTANTE del script, y la que estuvo pasando en verde por el motivo
+   * equivocado durante tres semanas: con el login de B roto su lista venía vacía, y la
+   * intersección de 66 ids contra un conjunto vacío da cero — «sin fuga» ✓, sin haber comparado
+   * nada. Un control que no puede fallar cuando su preparación se rompe es peor que no tenerlo,
+   * porque además tranquiliza.
+   *
+   * Por eso ahora exige tener los dos hatos: sin datos de ambos lados no hay veredicto.
+   */
   const overlap = [...idsA].filter((id) => idsB.has(id));
-  if (overlap.length === 0) ok('los hatos no se solapan (sin fuga en el listado)');
+  if (!hayDatos) bad('no se pudo comparar el solapamiento', 'una de las dos listas vino vacía: sin los dos hatos esta prueba no significa nada');
+  else if (overlap.length === 0) ok(`los hatos no se solapan (sin fuga en el listado; ${idsA.size} vs ${idsB.size} comparados)`);
   else bad('fuga cross-tenant en el listado', `${overlap.length} ids compartidos`);
 
   // La prueba fuerte: B conoce el id de A y aun así no lo alcanza.
