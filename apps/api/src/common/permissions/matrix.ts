@@ -160,6 +160,21 @@ export const LIMITES_ADMIN = {
   noPuedeRevocar: ['owner'] as Role[],
 } as const;
 
+/**
+ * Los permisos de un rol, para MANDÁRSELOS a un cliente.
+ *
+ * Lo usa el bootstrap del móvil: la app tiene que saber qué puede hacer estando SIN SEÑAL, y sin
+ * esto ofrecería botones que guardan una captura offline que el servidor va a rechazar al
+ * sincronizar — el operario se enteraría al volver la señal, con el trabajo del día ya hecho.
+ *
+ * Viaja la matriz resuelta y no el nombre del rol a propósito: si el cliente tuviera que traducir
+ * rol → permisos, esa tabla sería una segunda copia de este archivo, y las dos copias se separan.
+ * Devuelve un objeto nuevo para que nadie mute la matriz por accidente.
+ */
+export function capacidadesDe(role: string): Permisos {
+  return { ...(MATRIX[role as Role] ?? {}) };
+}
+
 /** ¿El rol tiene la capacidad con AL MENOS este nivel? `write` implica `read`. */
 export function permite(role: string, cap: Capability, access: Access): boolean {
   const permisos = MATRIX[role as Role];

@@ -202,6 +202,18 @@ interface SyncCtx {
   scheduleNotificationsRefresh: () => void;
   openPregnancy: (animalId: string) => LocalPregnancy | null;
   /**
+   * ¿Este usuario puede hacerlo? Resuelto con la matriz que trajo el bootstrap, así que contesta
+   * SIN SEÑAL — que es cuando la app tiene que decidir qué ofrecer.
+   *
+   * No es un control de seguridad: el servidor revalida cada push contra la misma matriz. Sirve
+   * para no ofrecer un botón que guarda una captura offline destinada a ser rechazada.
+   *
+   * Sin capacidades conocidas (bootstrap viejo, guardado antes de que esto existiera) devuelve
+   * `true`: es preferible ofrecer de más y que el servidor rechace, a dejar una app instalada sin
+   * ningún botón después de actualizar.
+   */
+  puede: (cap: string, access?: 'read' | 'write') => boolean;
+  /**
    * Fin de retiro EFECTIVO de un animal: lo que dijo el servidor combinado con los tratamientos
    * que este dispositivo capturó sin señal. Gana el más lejano — un tratamiento aplicado recién en
    * la manga extiende el retiro, y quedarse con el dato del servidor diría que el animal ya está
@@ -575,6 +587,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         farmName: snapshot.farm?.name,
         farmId: snapshot.farm?.id,
         farmTimeZone: snapshot.farm?.timezone ?? undefined,
+        capabilities: snapshot.capabilities ?? undefined,
         lastSyncAt: new Date().toISOString(),
       };
       // Antes de `setStatus('ready')`: a partir de ahí se puede capturar, y capturar FECHA.
@@ -861,6 +874,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           meat: latestWithdrawal((animal?.meat_withdrawal_until as string) ?? null, ...locales.meat),
           milk: latestWithdrawal((animal?.milk_withdrawal_until as string) ?? null, ...locales.milk),
         };
+      },
+
+      puede: (cap: string, access: 'read' | 'write' = 'write') => {
+        const caps = metaRef.current?.capabilities;
+        if (!caps) return true; // bootstrap viejo: ofrecer de más y que el servidor rechace
+        const otorgado = caps[cap];
+        if (!otorgado) return false;
+        return otorgado === 'write' || access === 'read';
       },
 
       openPregnancy: (animalId: string) => {

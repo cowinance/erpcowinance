@@ -10,20 +10,32 @@ import { useSync } from '@/sync/SyncContext';
 import { EmptyHerd } from '@/components/EmptyHerd';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
-const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphMap; href: string }[] = [
+/**
+ * `cap` es la capacidad de ESCRITURA que exige el servidor para esa captura — la misma que
+ * `CAPACIDAD_DE_ESCRITURA` usa para aceptar o rechazar el push.
+ *
+ * Sin esto la app ofrecía las doce a todo el mundo: un operario podía registrar un servicio
+ * reproductivo, guardarlo offline, y enterarse del 403 recién al volver la señal con el trabajo del
+ * día hecho. Un botón que guarda algo destinado a ser rechazado es peor que un botón ausente.
+ *
+ * Los nombres se escriben a mano porque el móvil no comparte código con la API; un test del lado
+ * del servidor lee ESTE archivo y falla si alguno deja de existir en la matriz, que es la misma
+ * técnica con la que el gate revisa los altos fijos del móvil.
+ */
+const ACTIONS: { tipo: string; label: string; icon: keyof typeof Ionicons.glyphMap; href: string; cap: string }[] = [
   // Primero porque es el principio de todo: sin el animal cargado, ninguna de las otras diez sirve.
-  { tipo: 'nuevo', label: 'Nuevo animal', icon: 'add-outline', href: '/captura/nuevo' },
-  { tipo: 'pesar', label: 'Pesar (manga)', icon: 'speedometer-outline', href: '/manga' },
-  { tipo: 'vacunar', label: 'Vacunar', icon: 'shield-checkmark-outline', href: '/captura/vacunar' },
-  { tipo: 'tratar', label: 'Tratar', icon: 'medkit-outline', href: '/captura/tratar' },
-  { tipo: 'celo', label: 'Celo', icon: 'heart-outline', href: '/captura/celo' },
-  { tipo: 'servicio', label: 'Servicio', icon: 'git-merge-outline', href: '/captura/servicio' },
-  { tipo: 'diagnostico', label: 'Diag. preñez', icon: 'pulse-outline', href: '/captura/diagnostico' },
-  { tipo: 'parto', label: 'Parto', icon: 'add-circle-outline', href: '/captura/parto' },
-  { tipo: 'mover', label: 'Mover', icon: 'swap-horizontal-outline', href: '/captura/mover' },
-  { tipo: 'destete', label: 'Destete', icon: 'cut-outline', href: '/captura/destete' },
-  { tipo: 'nota', label: 'Nota', icon: 'create-outline', href: '/captura/nota' },
-  { tipo: 'mortalidad', label: 'Baja', icon: 'alert-circle-outline', href: '/captura/mortalidad' },
+  { tipo: 'nuevo', label: 'Nuevo animal', icon: 'add-outline', href: '/captura/nuevo', cap: 'hato' },
+  { tipo: 'pesar', label: 'Pesar (manga)', icon: 'speedometer-outline', href: '/manga', cap: 'pesajes' },
+  { tipo: 'vacunar', label: 'Vacunar', icon: 'shield-checkmark-outline', href: '/captura/vacunar', cap: 'sanidad.aplicar' },
+  { tipo: 'tratar', label: 'Tratar', icon: 'medkit-outline', href: '/captura/tratar', cap: 'sanidad.aplicar' },
+  { tipo: 'celo', label: 'Celo', icon: 'heart-outline', href: '/captura/celo', cap: 'reproduccion' },
+  { tipo: 'servicio', label: 'Servicio', icon: 'git-merge-outline', href: '/captura/servicio', cap: 'reproduccion' },
+  { tipo: 'diagnostico', label: 'Diag. preñez', icon: 'pulse-outline', href: '/captura/diagnostico', cap: 'reproduccion' },
+  { tipo: 'parto', label: 'Parto', icon: 'add-circle-outline', href: '/captura/parto', cap: 'reproduccion' },
+  { tipo: 'mover', label: 'Mover', icon: 'swap-horizontal-outline', href: '/captura/mover', cap: 'movimientos' },
+  { tipo: 'destete', label: 'Destete', icon: 'cut-outline', href: '/captura/destete', cap: 'reproduccion' },
+  { tipo: 'nota', label: 'Nota', icon: 'create-outline', href: '/captura/nota', cap: 'hato' },
+  { tipo: 'mortalidad', label: 'Baja', icon: 'alert-circle-outline', href: '/captura/mortalidad', cap: 'mortandad' },
 ];
 
 export default function CapturaMenu() {
@@ -35,6 +47,10 @@ export default function CapturaMenu() {
   // no hay animal que seleccionar. Las pantallas de captura siguen siendo la
   // autoridad sobre la elegibilidad fina (categoría/sexo/estado).
   const hasAnimals = sync.animals().length > 0;
+  // Solo lo que este rol puede escribir de verdad. Se OCULTA en vez de deshabilitar: un botón gris
+  // sin explicación invita a tocarlo igual y a preguntar por qué no anda, y acá la respuesta —«tu
+  // rol no lo permite»— no la puede dar la pantalla sin convertirse en un cartel de permisos.
+  const acciones = ACTIONS.filter((a) => sync.puede(a.cap));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -52,7 +68,7 @@ export default function CapturaMenu() {
               Todo se guarda en el dispositivo y se sube solo al sincronizar.
             </Text>
             <View style={styles.grid}>
-              {ACTIONS.map((a) => (
+              {acciones.map((a) => (
                 <Pressable
                   key={a.tipo}
                   onPress={() => router.replace(a.href as any)}

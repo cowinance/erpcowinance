@@ -4,6 +4,7 @@ import { DbService } from '../../db/db.service';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
 import { BillingService } from '../billing/billing.service';
 import { actorPuede } from '../../common/permissions/actor-puede';
+import { capacidadesDe } from '../../common/permissions/matrix';
 import { CAPACIDAD_DE_ESCRITURA, CAPACIDAD_DE_LECTURA, SIN_FILTRAR_AL_ENVIAR, type SyncTable } from './contracts/sync-table';
 
 /**
@@ -427,7 +428,18 @@ export class SyncService {
      * una — y la próxima tabla que alguien sume queda filtrada por defecto, porque lo que no está
      * declarado en `CAPACIDAD_DE_LECTURA` no se envía.
      */
-    return { cursor, farm, rows: bootstrapRows.filter((r) => this.puedeRecibir(r.table)) };
+    /**
+     * Las capacidades viajan con el bootstrap por el MISMO motivo que la zona horaria de la finca:
+     * el teléfono tiene que poder decidir qué ofrecer parado en el potrero, sin señal. Sin esto la
+     * app muestra los doce botones de captura a todo el mundo, y un operario que registra un
+     * servicio reproductivo se entera del 403 recién al sincronizar — con el trabajo del día hecho.
+     *
+     * Va la matriz RESUELTA, no el nombre del rol: traducir rol → permisos en el cliente sería una
+     * segunda copia de `matrix.ts`, y las dos copias se separan.
+     */
+    const capabilities = capacidadesDe(this.db.role ?? '');
+
+    return { cursor, farm, capabilities, rows: bootstrapRows.filter((r) => this.puedeRecibir(r.table)) };
   }
 
   /** Panel de flota (doc Catálogo A4). */

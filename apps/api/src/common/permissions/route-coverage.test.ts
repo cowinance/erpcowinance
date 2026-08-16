@@ -198,6 +198,33 @@ describe('matriz de permisos — invariantes de los roles', () => {
     }
   });
 
+  /**
+   * El móvil escribe los nombres de capacidad A MANO —no comparte código con la API— para decidir
+   * qué capturas ofrecer. Si un nombre deja de existir acá, `sync.puede()` devuelve `false` y el
+   * botón desaparece EN SILENCIO: la app se degrada sola sin que nada falle.
+   *
+   * Este test lee el archivo del móvil, igual que el gate de arquitectura revisa sus altos fijos.
+   * Es feo leer otro workspace desde un test, y es más feo que un operario se quede sin poder
+   * capturar un pesaje porque alguien renombró una capacidad.
+   */
+  it('las capacidades que usa el móvil existen en la matriz', () => {
+    const menu = join(process.cwd(), 'apps/mobile/src/app/captura/index.tsx');
+    const src = readFileSync(menu, 'utf8');
+    const usadas = [...src.matchAll(/cap:\s*'([^']+)'/g)].map((m) => m[1]);
+    expect(usadas.length, 'no se encontró ninguna capacidad en el menú de captura del móvil').toBeGreaterThan(5);
+
+    const conocidas = new Set<string>(ROUTE_RULES.map((r) => r.cap));
+    for (const cap of new Set(usadas)) {
+      expect(conocidas.has(cap), `el móvil usa «${cap}», que no existe en la matriz`).toBe(true);
+      // Y alguien tiene que poder usarla: una capacidad que ningún rol otorga esconde el botón
+      // para todos, que es igual de silencioso.
+      expect(
+        ROLES.some((rol) => permite(rol, cap as never, 'write')),
+        `ningún rol puede escribir «${cap}»: esa captura estaría oculta para todos`,
+      ).toBe(true);
+    }
+  });
+
   it('la matriz no declara capacidades inventadas', () => {
     // Tolera las que están en CAPACIDADES_SIN_RUTA —decisiones tomadas cuyo módulo falta— pero
     // no un nombre mal escrito, que si no otorgaría un permiso que nunca se evalúa.

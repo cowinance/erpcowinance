@@ -49,6 +49,21 @@ export interface PersistedMeta {
    * que el teléfono adopta la finca, así que para cuando se puede capturar algo ya está.
    */
   farmTimeZone?: string;
+  /**
+   * Qué puede hacer este usuario, resuelto por el servidor y traído por el bootstrap.
+   *
+   * Se PERSISTE por el mismo motivo que `farmTimeZone`: el teléfono decide qué botones ofrecer
+   * parado en el potrero, sin señal. Sin esto la app muestra las doce capturas a todo el mundo y un
+   * operario que registra un servicio reproductivo se entera del 403 al volver la señal, con el
+   * trabajo del día ya hecho.
+   *
+   * Es la matriz RESUELTA (capacidad → nivel), no el rol: traducir rol → permisos acá sería una
+   * segunda copia de la matriz del servidor, y las dos copias se separan.
+   *
+   * **No es un control de seguridad.** Lo que impide escribir es el servidor, que revalida cada
+   * push contra la misma matriz. Esto existe para no ofrecer lo que va a fallar.
+   */
+  capabilities?: Record<string, 'read' | 'write'>;
 }
 
 /**
