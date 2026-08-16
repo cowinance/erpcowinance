@@ -46,9 +46,22 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 
 /**
- * Monolito modular (Fase 0-1 del roadmap): cada módulo se alinea 1:1 con un
- * bounded context. La comunicación entre módulos pasará por el bus de eventos
- * interno; la extracción futura a microservicios preserva estos límites.
+ * Monolito modular (ADR-0001): cada módulo se alinea 1:1 con un bounded context, y la extracción
+ * futura a microservicios preserva esos límites.
+ *
+ * **Cómo se comunican los módulos, hoy:** por inyección directa del servicio del otro módulo. Las
+ * dependencias apuntan siempre hacia abajo —agregadores → procesos → dominio → plataforma— y
+ * `madge` verifica en el gate que no haya un solo ciclo.
+ *
+ * Acá decía que la comunicación «pasará por el bus de eventos interno». No es lo que pasa ni lo
+ * que conviene que pase en general: casi todo lo que un módulo le pide a otro tiene que ser
+ * ATÓMICO con la escritura que lo origina —descontar stock en una venta, dejar el hecho en la
+ * línea de tiempo del animal— y un bus at-least-once cambiaría esa garantía por consistencia
+ * eventual a cambio de desacople. Para esos casos el desacople no vale el precio.
+ *
+ * El bus (ADR-0005) existe, funciona y está bien construido, pero espera su primer consumidor
+ * real: algo cuya demora sea tolerable, cuyo fallo se pueda reintentar, y que NO sea el registro
+ * primario de nada. El ADR tiene el criterio y los candidatos ya descartados.
  */
 @Module({
   imports: [DbModule, OpsModule, SyncRegistryModule, EventBusModule, EmailModule, StorageModule, AnimalHistoryModule, AuthModule, IdentityModule, HerdModule, DashboardModule, SyncModule, HealthModule, ReproModule, LandModule, ReportsModule, AlertsModule, MediaModule, ImportModule, TasksModule, NotificationsModule, BillingModule, InventoryModule, CommerceModule, FinanceModule, NutritionModule, HrModule, AgricultureModule, MachineryModule, GeneticsModule, TraceabilityModule, SlaughterModule, GrazingModule, DairyModule, LabModule, FeedlotModule, BreedingModule, CostingModule, ConfigModule, DocumentsModule, WeatherModule, TaxModule, PlatformModule, OnboardingModule, InvitationsModule],

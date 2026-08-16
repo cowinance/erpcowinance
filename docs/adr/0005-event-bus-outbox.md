@@ -138,3 +138,50 @@ un emisor y luego se extiende sin mezclar responsabilidades.
 - **Exactly-once, ordenamiento global, event sourcing / replay** — F5 es at-least-once, sin garantías
   de orden.
 - **Optimización del relay** (hook post-commit en vez de poller) — el poller alcanza para F5.
+
+## Seguimiento — 15 ago 2026
+
+**Sigue habiendo un solo evento y ningún consumidor real, y eso es correcto.** Este ADR ya había
+fijado la regla: los eventos nuevos «se agregan **cuando tengan consumidor real**». Que la lista no
+haya crecido no es la decisión incumplida — es la regla funcionando. Se anota acá porque una
+auditoría interna leyó el bus vacío como trabajo abandonado a mitad de camino, y esa lectura vuelve
+cada vez que alguien nuevo abre `infra/event-bus/`.
+
+Lo que sí se corrigió es el comentario de `app.module.ts`, que decía que la comunicación entre
+módulos «pasará por el bus». No pasa, y en general no conviene que pase: hoy toda la integración es
+por inyección directa, con cero ciclos verificados por `madge` en el gate.
+
+### Cuándo un consumidor justifica migrar al bus
+
+Las tres condiciones son acumulativas. Si falla una, el efecto va inline con la escritura:
+
+1. **La demora es tolerable.** El relay es un poller; entre el commit y la reacción pasa hasta un
+   segundo, más los reintentos.
+2. **El fallo es reintentable y visible.** At-least-once significa que un consumidor roto no pierde
+   el evento, pero también que puede recibirlo dos veces: tiene que deduplicar por `eventId`.
+3. **No es el registro primario de nada.** Si alguien abre una pantalla y espera ver el efecto como
+   parte del hecho, el efecto es parte del hecho.
+
+### Candidatos evaluados y DESCARTADOS
+
+Se dejan escritos con su razón para no volver a discutirlos desde cero:
+
+| Candidato | Por qué NO |
+|---|---|
+| **Línea de tiempo del animal** (`animal_events`), que este mismo ADR menciona como futuro consumidor | Falla la condición 3. Es lo que un veterinario lee en la ficha: si el suscriptor falla, el tratamiento existe y en la ficha no figura, y nada avisa. Hoy es imposible porque se escribe en la misma tx. Además el comentario de `treatment.service.ts` documenta un bug ya arreglado de timeline faltante por un canal — volverlo asíncrono reintroduce esa familia. |
+| **Descuento de stock** (`inventory`), el módulo más acoplado del sistema: 7 módulos lo inyectan | Falla las condiciones 1 y 2. El stock tiene que cuadrar con la venta en el mismo instante, y una entrega duplicada descuenta dos veces salvo que el consumidor deduplique con mucho cuidado. El acoplamiento es real, pero la respuesta no es un bus. |
+| **Evaluación de alertas** | Falla la 1 con matices. Ya resuelto por otro camino: `AlertsService` cachea el estado deseado por tenant y lo invalida por ESCRITURA (`desired-cache.ts`), que da la frescura que el bus daría, sin la ventana de inconsistencia. |
+
+### El candidato que sí encajaría
+
+**Notificaciones push** de un hecho sanitario o reproductivo: la demora es tolerable, reintentar es
+seguro, y el aviso no es el registro de nada — el registro es la fila que ya se escribió. El día que
+las notificaciones dejen de derivarse de las alertas y necesiten reaccionar a hechos puntuales, ese
+es el primer consumidor.
+
+### Qué NO hacer mientras tanto
+
+Ni borrar el bus ni ampliarlo por simetría. La garantía de atomicidad del outbox es sólida y
+reconstruirla costaría más que mantenerla; y agregar eventos «porque ya que estamos» produce
+exactamente lo que este ADR quiso evitar: contratos publicados que nadie consume y que igual hay
+que versionar para siempre.
