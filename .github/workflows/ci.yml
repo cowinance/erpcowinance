@@ -60,6 +60,60 @@ jobs:
       - name: La matriz de permisos se aplica de verdad
         run: npm run verify:permisos
 
+  # Los MISMOS gates, en Windows. No es redundancia: es el único job que corre fuera de Linux.
+  #
+  # POR QUÉ EXISTE. Todo lo de arriba corre en `ubuntu-latest`, así que el repo no tenía forma de
+  # saber si funcionaba en otro lado — y no funcionaba. Al empezar a desarrollar en Windows
+  # aparecieron cuatro fallas de golpe, todas invisibles desde acá:
+  #
+  #   · `LocalFileStorage` comparaba el path resuelto contra '/' hardcodeado. En Windows `resolve()`
+  #     devuelve '\', así que RECHAZABA toda clave válida: el módulo de documentos no podía guardar
+  #     un solo archivo.
+  #   · `tokens:check` fallaba SIEMPRE sobre un árbol recién clonado. Comparaba byte a byte el CSS
+  #     generado (LF) contra el del disco (CRLF, porque no había `.gitattributes`). Contenido
+  #     idéntico, `git status` limpio, y el gate bloqueando igual.
+  #   · `audit-arch.mjs` filtraba la cobertura con rutas POSIX contra claves con barra invertida:
+  #     0 de 79 archivos matcheaban y reportaba 0% en vez de 96.77%.
+  #   · Los scripts de limpieza usaban `rm -rf`, que en PowerShell no existe.
+  #
+  # QUÉ NO HABRÍA ATAJADO, para no prometer de más: el orden de build de los workspaces (las apps
+  # se compilaban antes que los packages de los que dependen) no lo detecta NINGÚN CI, porque
+  # `npm ci` dispara el `prepare` de los packages y deja sus `dist/` listos antes de que corra el
+  # build. Solo se ve corriendo `clean` y después `build`, que es lo que nadie hace en CI.
+  #
+  # Corre el gate completo y no un subconjunto: duplicar "las partes sensibles a la plataforma" se
+  # desincroniza con el gate real al primer chequeo nuevo, y la gracia de `audit:arch` es ser el
+  # único lugar donde vive esa lista. El runner de Windows es ~2× más lento, de ahí el timeout más
+  # holgado.
+  gates-windows:
+    name: Gates en Windows (portabilidad)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Instalar dependencias de móvil
+        run: npm ci --prefix apps/mobile
+
+      - name: Gates de arquitectura
+        run: npm run audit:arch
+
+      - name: Typecheck web
+        run: npx tsc -p apps/web/tsconfig.json --noEmit
+
+      # El build va acá y no solo en Linux: `nest build` y el de Next resuelven rutas, y es el
+      # paso donde un separador mal asumido aparece sin que ningún test lo toque.
+      - name: Build
+        run: npm run build
+
   # Aislamiento multi-tenant contra PostgreSQL REAL. No lo cubre ningún otro job: la suite corre
   # sobre PGlite, que conecta como superusuario y SALTEA la RLS — o sea, en dev las políticas se
   # crean pero nunca se ejercen y una fuga cross-tenant recién aparecería en producción.
