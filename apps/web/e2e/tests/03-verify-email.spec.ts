@@ -30,5 +30,5 @@ test('verificación de email: éxito, reuso inválido, y el banner desaparece', 
   // De vuelta al dashboard: el banner ya no aparece (server ve email_verified=true).
   await page.goto('/');
   await expect(page.getByText('Verificá tu email')).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Cargar primer animal' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Cargar un animal' })).toBeVisible();
 });

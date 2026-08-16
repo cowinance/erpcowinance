@@ -87,10 +87,14 @@ export default async function globalSetup() {
   api.stdout?.pipe(logStream);
   api.stderr?.pipe(logStream);
 
+  // `shell: true` porque en Windows `npm` es `npm.cmd`: sin shell, `spawn` busca un ejecutable
+  // llamado exactamente «npm», no lo encuentra, y el proceso muere con ENOENT antes de que arranque
+  // un solo spec. En POSIX no cambia nada. Misma corrección que en `verify-app-postgres.mjs`.
   const web = spawn('npm', ['run', 'dev', '--', '-p', String(WEB_PORT)], {
     cwd: path.join(REPO_ROOT, 'apps/web'),
     detached: true,
     stdio: 'ignore',
+    shell: true,
     env: { ...process.env, NEXT_PUBLIC_API_URL: API_URL },
   });
 

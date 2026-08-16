@@ -38,5 +38,5 @@ test('registro con auto-login fallido → fallback a login, sin re-registrar', a
   await page.getByLabel('Contraseña').fill(u.password);
   await page.getByRole('button', { name: 'Ingresar' }).click();
   await page.waitForURL((url) => url.pathname === '/');
-  await expect(page.getByRole('link', { name: 'Cargar primer animal' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Cargar un animal' })).toBeVisible();
 });

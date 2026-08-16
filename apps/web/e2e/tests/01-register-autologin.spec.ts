@@ -20,6 +20,9 @@ test('registro + auto-login → dashboard vacío con nombre real, finca y banner
   const firstName = u.fullName.split(' ')[0];
   await expect(page.getByRole('heading', { name: new RegExp(`Bienvenido a Cowinance, ${firstName}`) })).toBeVisible();
   await expect(page.getByText(`${u.farm} está lista`)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Cargar primer animal' })).toBeVisible();
+  // El estado vacío ya no es un CTA suelto: es el panel de primeros pasos (O-2), que sale del
+  // estado real de la finca. El primero pendiente es cargar el hato, con su acción a la vista.
+  await expect(page.getByRole('heading', { name: 'Poné tu finca en marcha' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Cargar un animal' })).toBeVisible();
   await expect(page.getByText('Verificá tu email')).toBeVisible();
 });
