@@ -24,12 +24,16 @@ async function sessionContext() {
     // /alerts/kpis evalúa las reglas (read-through) → el badge siempre está fresco
     // /notifications/unread-count es READ-THROUGH (genera el ledger si falta) → el badge es
     // correcto en cualquier página sin descargar el feed, como /alerts/kpis con las alertas.
-    const [me, farms, alertKpis, unread, flags] = await Promise.all([
+    const [me, farms, alertKpis, unread, flags, orgs] = await Promise.all([
       fetch(`${API_URL}/auth/me`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/farms`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/alerts/kpis`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/notifications/unread-count`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API_URL}/config/feature-flags`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
+      // Para el selector de finca. Va en el MISMO `Promise.all` que el resto, así que no agrega
+      // latencia: es una consulta indexada por usuario, y quien pertenece a una sola organización
+      // —casi todo el mundo— recibe una lista de uno y la cabecera ni siquiera se vuelve un menú.
+      fetch(`${API_URL}/auth/organizations`, { headers, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
     ]);
     if (!me) return null;
     const moduleFlags: Record<string, boolean> = {};
@@ -39,6 +43,7 @@ async function sessionContext() {
       userEmail: me.email as string,
       impersonation: me.impersonation as { by_email: string; sid?: string } | null,
       orgName: me.organization?.name as string,
+      organizations: (orgs ?? []) as { tenant_id: string; name: string; role: string }[],
       farmTimeZone: (me.organization?.timezone as string) ?? null,
       farmName: farms?.[0]?.name as string,
       openAlerts: (alertKpis?.open ?? 0) as number,
@@ -93,6 +98,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             orgName={session?.orgName}
             farmName={session?.farmName}
             userName={session?.userName}
+            organizations={session?.organizations ?? []}
             openAlerts={session?.openAlerts ?? 0}
             criticalAlerts={session?.criticalAlerts ?? 0}
             unreadNotifications={session?.unreadNotifications ?? 0}
@@ -109,6 +115,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           orgName={session?.orgName}
           farmName={session?.farmName}
           userName={session?.userName}
+          organizations={session?.organizations ?? []}
           openAlerts={session?.openAlerts ?? 0}
           criticalAlerts={session?.criticalAlerts ?? 0}
           unreadNotifications={session?.unreadNotifications ?? 0}

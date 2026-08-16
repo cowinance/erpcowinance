@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { OrgSwitcher, type OrgOption } from './OrgSwitcher';
 import {
   LayoutDashboard,
   Beef,
@@ -36,7 +37,6 @@ import {
   GraduationCap,
   Settings,
   FileText,
-  ChevronsUpDown,
   Search,
   Zap,
   LogOut, Receipt } from 'lucide-react';
@@ -164,6 +164,7 @@ export function Sidebar({
   orgName,
   farmName,
   userName,
+  organizations = [],
   openAlerts = 0,
   criticalAlerts = 0,
   unreadNotifications = 0,
@@ -173,6 +174,8 @@ export function Sidebar({
   orgName?: string;
   farmName?: string;
   userName?: string;
+  /** Organizaciones del usuario. Con una sola, la cabecera no es un menú. */
+  organizations?: OrgOption[];
   openAlerts?: number;
   criticalAlerts?: number;
   unreadNotifications?: number;
@@ -192,14 +195,6 @@ export function Sidebar({
     const flag = MODULE_FLAG[href];
     return !flag || moduleFlags[flag] !== false;
   };
-  const farm = farmName ?? 'Cowinance';
-  const initials = farm
-    .split(' ')
-    .filter((w) => w.length > 2)
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
   return (
     <aside
       className={
@@ -208,17 +203,8 @@ export function Sidebar({
           : 'sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sunken px-3 pt-4 pb-3 max-lg:hidden'
       }
     >
-      {/* Cabecera de contexto: Organización → Finca */}
-      <button className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-brand-soft">
-        <div className="flex size-7 items-center justify-center rounded-md bg-brand text-label font-semibold text-white">
-          {initials || 'CW'}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-body font-semibold">{farm}</div>
-          <div className="truncate text-caption text-ink-3">{orgName ?? '—'}</div>
-        </div>
-        <ChevronsUpDown size={14} className="text-ink-3" />
-      </button>
+      {/* Cabecera de contexto: Organización → Finca. Es un menú SOLO si hay más de una. */}
+      <OrgSwitcher organizations={organizations} farmName={farmName} orgName={orgName} />
 
       {/* Buscador global (command palette ⌘K, próximamente) */}
       <button className="mt-3 flex h-8 items-center gap-2 rounded-md border border-subtle bg-surface px-2.5 text-body text-ink-3">
