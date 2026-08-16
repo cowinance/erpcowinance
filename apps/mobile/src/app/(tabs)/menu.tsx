@@ -10,6 +10,20 @@ import { activatePush } from '@/push/native';
 import { pushStatusMessage, type PushRegistrationStatus } from '@/push/registration';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
+/**
+ * El rol en castellano. Se escribe acá y no viaja del servidor porque es una etiqueta de interfaz:
+ * el contrato con la API son los códigos (`veterinarian`, `foreman`), y traducirlos del lado del
+ * servidor obligaría a versionar textos de pantalla.
+ */
+const ROL_ES: Record<string, string> = {
+  owner: 'Propietario',
+  admin: 'Administrador',
+  veterinarian: 'Veterinario',
+  foreman: 'Capataz',
+  worker: 'Operario',
+  accountant: 'Contador',
+};
+
 export default function Menu() {
   const T = useTheme();
   const styles = useStyles(makeStyles);
@@ -21,6 +35,28 @@ export default function Menu() {
   const [resendMsg, setResendMsg] = useState('');
   const [pushStatus, setPushStatus] = useState<PushRegistrationStatus>('idle');
   const [activating, setActivating] = useState(false);
+  const [confirmFinca, setConfirmFinca] = useState<string | null>(null);
+  const [cambiando, setCambiando] = useState(false);
+  const [fincaMsg, setFincaMsg] = useState('');
+
+  /**
+   * Cambiar de finca pide confirmar, con el mismo doble toque que el borrado local — y por el mismo
+   * motivo: descarta la base de este teléfono y vuelve a bajar la finca nueva entera. En el campo
+   * eso son minutos y datos.
+   */
+  async function cambiarFinca(tenantId: string) {
+    if (cambiando) return;
+    if (confirmFinca !== tenantId) {
+      setConfirmFinca(tenantId);
+      setFincaMsg('');
+      return;
+    }
+    setCambiando(true);
+    const err = await sync.switchOrganization(tenantId);
+    setCambiando(false);
+    setConfirmFinca(null);
+    setFincaMsg(err ?? '');
+  }
 
   // Permiso CONTEXTUAL (D3): el prompt del SO solo se dispara por esta acción explícita del
   // usuario, nunca en boot ni al abrir /notificaciones. La obtención/sync del token es nativa.
@@ -83,6 +119,51 @@ export default function Menu() {
           {account.role ? <Text style={[styles.value, { marginTop: T.space['0.5'] }]}>Rol: {account.role}</Text> : null}
           <Text style={[styles.title, { marginTop: T.space['3'] }]}>Finca</Text>
           <Text style={styles.value}>{sync.farmName ?? '—'}</Text>
+
+          {/* Solo con MÁS DE UNA: una lista que ofrece la única opción posible promete algo que no
+              cumple, y esta pantalla la abre todo el mundo. La lista viene persistida del login,
+              así que se ve sin señal — que es donde se usa la app. */}
+          {sync.organizations.length > 1 && (
+            <View style={{ marginTop: T.space['2'], gap: T.space['1'] }}>
+              {sync.organizations.map((o) => {
+                const actual = o.tenant_id === sync.tenantId;
+                const porConfirmar = confirmFinca === o.tenant_id;
+                return (
+                  <Pressable
+                    key={o.tenant_id}
+                    onPress={() => !actual && cambiarFinca(o.tenant_id)}
+                    disabled={actual || cambiando}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: actual, disabled: actual || cambiando }}
+                    accessibilityLabel={actual ? `${o.name}, finca actual` : `Cambiar a ${o.name}, entrás como ${ROL_ES[o.role] ?? o.role}`}
+                    style={[styles.finca, porConfirmar && styles.fincaConfirm]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.value, actual && { color: T.brand500 }]}>{o.name}</Text>
+                      <Text style={styles.mono}>{ROL_ES[o.role] ?? o.role}</Text>
+                    </View>
+                    {actual ? (
+                      <Ionicons name="checkmark-circle" size={20} color={T.brand500} />
+                    ) : (
+                      <Text style={[styles.mono, porConfirmar && { color: T.danger }]}>
+                        {cambiando ? 'cambiando…' : porConfirmar ? '¿confirmar?' : 'cambiar'}
+                      </Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+              {confirmFinca && !cambiando ? (
+                <Text style={{ fontSize: T.type.label, color: T.ink3 }}>
+                  Se borra la base de este teléfono y se descarga la otra finca. Necesitás señal.
+                </Text>
+              ) : null}
+              {fincaMsg ? (
+                <Text accessibilityRole="alert" style={{ fontSize: T.type.label, color: T.danger }}>
+                  {fincaMsg}
+                </Text>
+              ) : null}
+            </View>
+          )}
           <Text style={[styles.title, { marginTop: T.space['3'] }]}>API</Text>
           <Text style={styles.mono}>{API_URL}</Text>
           <Text style={[styles.title, { marginTop: T.space['3'] }]}>Último sync</Text>
@@ -215,6 +296,21 @@ const makeStyles = (T: Theme) =>
     borderWidth: 1,
     borderColor: T.borderSubtle,
   },
+  // Fila de finca: `minHeight` y no alto fijo — el gate de arquitectura lo verifica, y con el
+  // texto del sistema en grande un alto fijo recorta el nombre de la finca.
+  finca: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: T.space['2'],
+    minHeight: 48,
+    paddingHorizontal: T.space['3'],
+    paddingVertical: T.space['2'],
+    backgroundColor: T.surface,
+    borderRadius: T.radiusMd,
+    borderWidth: 1,
+    borderColor: T.borderSubtle,
+  },
+  fincaConfirm: { borderColor: T.danger },
   notifLabel: { flex: 1, fontSize: T.type.body, fontWeight: '600', color: T.ink },
   notifEmpty: { fontSize: T.type.label, color: T.ink3 },
   // El contador lleva un número adentro: si el texto del sistema crece y el globo no, se recorta.

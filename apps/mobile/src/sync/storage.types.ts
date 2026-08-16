@@ -40,6 +40,14 @@ export interface PersistedMeta {
   // el store de un usuario/tenant bajo otra cuenta (aislamiento multi-tenant local).
   userId?: string;
   tenantId?: string;
+  /**
+   * Las organizaciones de esta persona, con su rol en cada una. Vienen en la respuesta del login.
+   *
+   * Se PERSISTEN —y no se piden al abrir el menú— porque el móvil trabaja sin señal: si la lista
+   * dependiera de la red, el selector desaparecería justo en el potrero, que es donde se usa la
+   * app. Es el mismo criterio que la zona horaria de la finca y las capacidades del rol.
+   */
+  organizations?: { tenant_id: string; name: string; role: string }[];
   farmId?: string;
   /**
    * La zona horaria de la finca (`organizations.timezone`), traída por el bootstrap.

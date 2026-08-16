@@ -148,6 +148,12 @@ interface SyncCtx {
   authFetch: (path: string, init?: RequestInit) => Promise<Response>;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
+  /** Fincas de esta persona con su rol en cada una. Una sola (o ninguna) = no hay nada que elegir. */
+  organizations: { tenant_id: string; name: string; role: string }[];
+  /** Finca en la que está la sesión. La usa el selector para marcar cuál es la actual. */
+  tenantId?: string;
+  /** Cambia de finca: descarta el store local y vuelve a bootstrapear. `null` = salió bien. */
+  switchOrganization: (tenantId: string) => Promise<string | null>;
   farmName?: string;
   /** Zona con la que se fecha en este dispositivo. `null` = todavía la del teléfono. */
   farmTimeZone: string | null;
@@ -661,6 +667,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           userEmail: j.user?.email,
           userId: newUserId,
           tenantId: newTenantId,
+          organizations: j.organizations ?? [],
         };
         await storageRef.current.saveMeta(metaRef.current!);
         setStatus('boot');
@@ -671,6 +678,71 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [init, savedPendingCount],
+  );
+
+  /**
+   * Cambia de organización sin volver a pedir la contraseña.
+   *
+   * **En el móvil esto NO es cambiar un token, como en la web: es cambiar el dataset entero.** El
+   * store local es propiedad de `(userId, tenantId)` —el backend rechaza con 404 un `device_id` de
+   * otro tenant— así que la finca nueva arranca con una base vacía y un bootstrap completo. En un
+   * teléfono en el campo eso puede ser varios minutos y muchos megas.
+   *
+   * De ahí las dos decisiones que siguen:
+   *
+   *  · **Con cambios sin sincronizar NO se cambia.** No se pueden subir bajo la otra finca ni
+   *    descartar en silencio: es el trabajo del día. Se bloquea y se dice cuántos son, con el
+   *    mismo texto que ya usa el login cuando entra otra cuenta en un dispositivo con pendientes.
+   *  · **Se emite el par de tokens ANTES de tocar el store.** Si `/auth/switch` falla —sin señal,
+   *    acceso revocado— la persona se queda donde estaba, con sus datos intactos. Al revés
+   *    quedaría con la base borrada y sin sesión en ningún lado.
+   */
+  const switchOrganization = useCallback(
+    async (tenantId: string): Promise<string | null> => {
+      const destino = metaRef.current?.organizations?.find((o) => o.tenant_id === tenantId);
+      if (!destino) return 'No tenés acceso a esa finca.';
+      if (tenantId === metaRef.current?.tenantId) return null; // ya estás ahí
+
+      const pending = await savedPendingCount();
+      if (pending > 0)
+        return `Tenés ${pending} ${pending === 1 ? 'cambio' : 'cambios'} sin sincronizar. Sincronizá antes de cambiar de finca: no se pueden subir desde otra.`;
+
+      let j: any;
+      try {
+        const res = await authFetch('/auth/switch', { method: 'POST', body: JSON.stringify({ organization_id: tenantId }) });
+        j = await res.json().catch(() => null);
+        if (!res.ok) return j?.message?.title ?? j?.title ?? 'No se pudo cambiar de finca.';
+      } catch (e: any) {
+        return `Sin conexión con la API (${e.message})`;
+      }
+
+      // Recién ahora se descarta lo local: el token nuevo ya está en la mano.
+      await storageRef.current.reset();
+      deviceRef.current = null;
+      metaRef.current = {
+        ...metaRef.current,
+        accessToken: j.access_token,
+        refreshToken: j.refresh_token,
+        userId: j.user?.id,
+        tenantId: j.user?.tenant_id,
+        // Se conserva la lista: es de la PERSONA, no de la finca, y sin ella el selector
+        // desaparecería justo después de usarlo.
+        organizations: metaRef.current?.organizations ?? [],
+        // Lo que sí es de la finca que se deja: nombre, zona, agenda y notificaciones. Arrastrarlos
+        // haría que el menú informe la finca anterior hasta el primer sync.
+        farmName: undefined,
+        agenda: undefined,
+        notifications: undefined,
+        lastSyncAt: undefined,
+        serverDeviceId: undefined,
+      };
+      await storageRef.current.saveMeta(metaRef.current!);
+      setFarmTimeZone(null);
+      setStatus('boot');
+      await init();
+      return null;
+    },
+    [authFetch, init, savedPendingCount],
   );
 
   const logout = useCallback(async () => {
@@ -722,6 +794,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       authFetch,
       login,
       logout,
+      organizations: metaRef.current?.organizations ?? [],
+      tenantId: metaRef.current?.tenantId,
+      switchOrganization,
       farmName: metaRef.current?.farmName,
       // Del módulo de fecha y no de la meta: lo que importa mostrar es la zona que se está USANDO
       // para fechar, no la que quedó guardada. Si difirieran, el diagnóstico mentiría.
@@ -1404,7 +1479,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         init();
       },
     };
-  }, [status, errorMsg, version, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, authFetch]);
+  }, [status, errorMsg, version, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, switchOrganization, authFetch]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
