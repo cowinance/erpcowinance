@@ -12,9 +12,16 @@ test('presupuestos: cargar líneas y ver el comparativo vs real', async ({ page 
   const auth = { Authorization: `Bearer ${(await page.context().cookies()).find((c) => c.name === 'cw_access')?.value}` };
   const post = async (p: string, data: any) => (await page.request.post(`${API_URL}${p}`, { headers: auth, data })).json();
 
-  // Plan de cuentas + período + un gasto REAL de 1200 en 2030.
+  // Período 2030 + un gasto REAL de 1200 para comparar contra el presupuesto.
+  //
+  // La cuenta de caja NO se crea: `1.1.01` ya viene en el plan sembrado (`45cdb17`) y el INSERT
+  // devolvía 409, dejando `caja.id` en `undefined` y el asiento sin contrapartida. Se busca por
+  // CÓDIGO y no por nombre porque el código es el contrato del plan; el nombre es una etiqueta que
+  // cada finca puede editar.
   const gastos = await post('/finance/accounts', { code: '5.1.10', name: 'Alimentación', type: 'expense' });
-  const caja = await post('/finance/accounts', { code: '1.1.01', name: 'Caja', type: 'asset' });
+  const cuentas: any[] = await (await page.request.get(`${API_URL}/finance/accounts`, { headers: auth })).json();
+  const caja = cuentas.find((c) => c.code === '1.1.01')!;
+  expect(caja, 'el plan de cuentas sembrado tiene que traer 1.1.01').toBeTruthy();
   await post('/finance/periods', { name: '2030', start_date: '2030-01-01', end_date: '2030-12-31' });
   await post('/finance/journal', { entry_date: '2030-01-15', lines: [{ account_id: gastos.id, debit: 1200 }, { account_id: caja.id, credit: 1200 }] });
 

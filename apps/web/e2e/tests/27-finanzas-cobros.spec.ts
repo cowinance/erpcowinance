@@ -12,19 +12,17 @@ test('finanzas: emitir factura, contabilizar y cobrar', async ({ page }) => {
   const auth = { Authorization: `Bearer ${(await page.context().cookies()).find((c) => c.name === 'cw_access')?.value}` };
   const post = async (p: string, data: any) => (await page.request.post(`${API_URL}${p}`, { headers: auth, data })).json();
 
-  // Plan de cuentas + período amplio + mapa de posteo.
-  const mk = async (code: string, name: string, type: string) => (await post('/finance/accounts', { code, name, type })).id;
-  const roles = {
-    receivable: await mk('1.1.02', 'Deudores', 'asset'),
-    sales_income: await mk('4.1.01', 'Ventas', 'income'),
-    vat_debit: await mk('2.1.01', 'IVA débito', 'liability'),
-    purchases: await mk('5.1.01', 'Compras', 'expense'),
-    vat_credit: await mk('1.1.03', 'IVA crédito', 'asset'),
-    payable: await mk('2.1.02', 'Proveedores', 'liability'),
-    cash: await mk('1.1.01', 'Caja', 'asset'),
-  };
-  await post('/finance/periods', { name: 'Amplio', start_date: '2020-01-01', end_date: '2035-12-31' });
-  await page.request.put(`${API_URL}/finance/posting-accounts`, { headers: auth, data: roles });
+  /**
+   * Acá había un bloque que creaba siete cuentas, un período y el mapa rol→cuenta. Ya no hace
+   * falta ninguna de las tres cosas: desde `45cdb17` la finca nueva nace con el plan de cuentas
+   * completo, el mapa de posteo cableado en `system_settings` y los períodos del ejercicio en
+   * curso. Los siete `INSERT` chocaban contra los códigos sembrados, devolvían 409, y el mapa
+   * quedaba armado con `undefined`.
+   *
+   * Sacarlo no debilita el spec: lo acerca a lo que hace un productor de verdad, que es facturar
+   * y cobrar sobre el plan que le vino, sin construir contabilidad a mano. Que el bootstrap deje
+   * todo eso listo lo verifica `26-finanzas`.
+   */
 
   // Cliente + ítem + una venta sin impuesto (total 100).
   const cust = await post('/commerce/partners', { type: 'customer', name: 'Cliente Cobro', customer_segment: 'retail' });
