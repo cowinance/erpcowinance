@@ -25,6 +25,28 @@ const CC_OPTIONS = [2, 2.5, 3, 3.5, 4, 4.5];
 const SCAN_DEBOUNCE_MS = 1500;
 
 type Mode = 'Pesaje' | 'Revisión' | 'Nota' | 'Tratamiento' | 'Vacunación' | 'Movimiento' | 'Reproducción';
+
+/**
+ * Cada modo con la capacidad que hace falta para GUARDARLO.
+ *
+ * La pantalla de captura ya filtraba por rol, pero esta —que es la que más se usa en el corral— no,
+ * y ofrecía los siete a todo el mundo. Comprobado con un veterinario, que tiene `pesajes` en modo
+ * lectura: entraba a una sesión de Pesaje sin obstáculo. El servidor rechazaba el push igual (el
+ * canal de sync valida capacidad), pero eso es justo lo peor: el trabajo se guarda en el teléfono y
+ * el rechazo aparece al volver la señal, con la manga ya levantada.
+ *
+ * Revisión y Nota van bajo `hato`: son observaciones sobre el animal, no un acto clínico. Es la
+ * misma capacidad con la que se edita su ficha.
+ */
+const MODE_CAP: Record<Mode, string> = {
+  Pesaje: 'pesajes',
+  Revisión: 'hato',
+  Nota: 'hato',
+  Tratamiento: 'sanidad.aplicar',
+  Vacunación: 'sanidad.aplicar',
+  Movimiento: 'movimientos',
+  Reproducción: 'reproduccion',
+};
 const MODES: Mode[] = ['Pesaje', 'Revisión', 'Nota', 'Tratamiento', 'Vacunación', 'Movimiento', 'Reproducción'];
 const NOTE_TEMPLATES = ['cojea', 'flaco', 'revisar ojo', 'revisar ubre', 'agresivo', 'sin novedad'];
 
@@ -40,8 +62,19 @@ const clock = (t: number) => new Date(t).toLocaleTimeString('es-AR', { hour: '2-
 
 export default function Manga() {
   const sync = useSync();
+
+  /**
+   * Los modos que ESTE rol puede guardar. Se calcula una vez: la matriz llega en el bootstrap y no
+   * cambia mientras dure la sesión.
+   *
+   * El default deja de ser «Pesaje» fijo y pasa a ser el primero permitido — para un veterinario,
+   * que no pesa, arrancar en un modo que no puede usar sería la misma promesa rota, solo que en la
+   * primera pantalla.
+   */
+  const modosPermitidos = useMemo(() => MODES.filter((m) => sync.puede(MODE_CAP[m], 'write')), [sync]);
+
   const [phase, setPhase] = useState<'setup' | 'capture' | 'summary'>('setup');
-  const [mode, setMode] = useState<Mode>('Pesaje');
+  const [mode, setMode] = useState<Mode>(modosPermitidos[0] ?? 'Pesaje');
   const [sessionName, setSessionName] = useState('');
   const [targetLot, setTargetLot] = useState<{ id: string; name: string } | null>(null);
   const [startedAt, setStartedAt] = useState(0);
@@ -102,6 +135,32 @@ export default function Manga() {
   const saved = records.length;
   const mins = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
 
+  /**
+   * Un rol sin ninguna captura —el contador— no entra a la manga.
+   *
+   * Sin esto vería la lista de modos vacía y un EMPEZAR que arranca una sesión donde no puede
+   * guardar nada. Acá SÍ se explica el motivo, al revés que en la pantalla de captura, donde las
+   * acciones simplemente no aparecen: allá el rol se lleva algunas y quedan otras, y un cartel
+   * sobraría; acá se lleva la pantalla entera, y una pantalla en blanco sin decir por qué se lee
+   * como una falla de la app.
+   */
+  if (modosPermitidos.length === 0) {
+    return (
+      <SafeAreaView style={styles.root}>
+        <View style={[styles.setupBody, { justifyContent: 'center', flex: 1 }]}>
+          <Text style={styles.kicker}>MODO MANGA</Text>
+          <Text style={styles.setupTitle}>No disponible para tu rol</Text>
+          <Text style={[styles.link, { textAlign: 'left', opacity: 0.7 }]}>
+            La manga registra trabajo de campo —pesajes, sanidad, movimientos— y tu rol no captura ninguno.
+          </Text>
+          <Pressable onPress={() => router.back()}>
+            <Text style={styles.link}>Volver</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   // ── Setup ──
   if (phase === 'setup') {
     return (
@@ -136,7 +195,7 @@ export default function Manga() {
 
           <Text style={styles.fieldLabel}>MODO</Text>
           <View style={styles.wrapRow}>
-            {MODES.map((m) => {
+            {modosPermitidos.map((m) => {
               const on = mode === m;
               return (
                 <Pressable key={m} onPress={() => setMode(m)} style={[styles.pill, on && styles.pillOn]}>
@@ -267,7 +326,7 @@ export default function Manga() {
 
             {/* Cambiar de modo entre animales */}
             <View style={styles.wrapRow}>
-              {MODES.map((m) => {
+              {modosPermitidos.map((m) => {
                 const on = mode === m;
                 return (
                   <Pressable key={m} onPress={() => setMode(m)} style={[styles.pillSm, on && styles.pillOn]}>
