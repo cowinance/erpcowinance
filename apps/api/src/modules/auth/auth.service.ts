@@ -51,22 +51,87 @@ export class AuthService {
         await hashPassword(body.password),
       ]);
 
-    // Tenant y rol del actor (v0: primera asignación; multi-organización después)
-    const assignment = await this.db.one<any>(
-      `SELECT ura.tenant_id, r.code AS role
-       FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id
-       WHERE ura.user_id = $1 AND ura.deleted_at IS NULL
-         AND (ura.valid_until IS NULL OR ura.valid_until >= CURRENT_DATE)
-       ORDER BY ura.created_at LIMIT 1`,
-      [user.id],
-    );
-    if (!assignment)
+    /**
+     * A qué organización entra.
+     *
+     * Antes era `LIMIT 1` sobre la asignación más vieja, con un «v0: multi-organización después»
+     * al lado. Ese límite se sentía lejos de acá: por él una invitación a alguien que ya tenía
+     * cuenta se rechazaba —la asignación se habría creado bien y la persona habría entrado siempre
+     * a su organización vieja, sin ningún error visible— y un veterinario que atiende dos fincas no
+     * podía ser dado de alta en la segunda.
+     *
+     * Con una sola organización, que es el caso de casi todos, no cambia nada: se entra ahí.
+     * Con varias, `organization_id` elige, y si no viene se entra a la primera y la respuesta trae
+     * la lista para que el cliente ofrezca cambiar. Nunca se falla pidiendo que elija: quien tiene
+     * dos fincas igual quiere entrar a alguna.
+     */
+    const asignaciones = await this.assignmentsOf(user.id);
+    if (asignaciones.length === 0)
       throw new UnauthorizedException({ code: 'auth.no_tenant', title: 'El usuario no pertenece a ninguna organización' });
 
-    await this.assertOrganizationActive(assignment.tenant_id);
+    const pedida = (body as { organization_id?: string })?.organization_id?.trim();
+    const elegida = pedida ? asignaciones.find((a) => a.tenant_id === pedida) : asignaciones[0];
+    if (!elegida)
+      throw new UnauthorizedException({
+        code: 'auth.no_access_to_organization',
+        title: 'No tenés acceso a esa organización',
+      });
+
+    await this.assertOrganizationActive(elegida.tenant_id);
 
     await this.db.query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [user.id]);
-    return this.issueTokens(user, assignment.tenant_id, assignment.role);
+    const tokens = await this.issueTokens(user, elegida.tenant_id, elegida.role);
+    return { ...tokens, organizations: asignaciones };
+  }
+
+  /**
+   * Organizaciones del usuario de la sesión, con su rol en cada una.
+   *
+   * La necesita el selector: sin esto, quien pertenece a dos fincas no tiene forma de saber que la
+   * otra existe.
+   */
+  async organizations() {
+    const ctx = requestContext.getStore()!;
+    return this.assignmentsOf(ctx.userId);
+  }
+
+  /**
+   * Cambia de organización sin volver a pedir la contraseña.
+   *
+   * Emite un par de tokens nuevo para la otra finca. NO revoca el de la actual: alguien puede
+   * querer las dos abiertas en dos pestañas, y cerrarle una al abrir la otra sería una sorpresa
+   * desagradable en el medio de una carga.
+   */
+  async switchOrganization(body: { organization_id?: string }) {
+    const ctx = requestContext.getStore()!;
+    const destino = (body?.organization_id ?? '').trim();
+    if (!destino)
+      throw new UnauthorizedException({ code: 'auth.missing_organization', title: 'organization_id es obligatorio' });
+
+    const assignment = await this.assignmentOf(ctx.userId, destino);
+    if (!assignment)
+      throw new UnauthorizedException({
+        code: 'auth.no_access_to_organization',
+        title: 'No tenés acceso a esa organización',
+      });
+    await this.assertOrganizationActive(destino);
+
+    const user = await this.db.one<any>(`SELECT id, email, full_name FROM users WHERE id = $1`, [ctx.userId]);
+    return this.issueTokens(user, destino, assignment.role);
+  }
+
+  /** Asignaciones VIGENTES del usuario, con el nombre de cada organización. Las más viejas primero. */
+  private async assignmentsOf(userId: string) {
+    return this.db.query<{ tenant_id: string; name: string; role: string }>(
+      `SELECT ura.tenant_id, o.name, r.code AS role
+       FROM user_role_assignments ura
+       JOIN roles r ON r.id = ura.role_id
+       JOIN organizations o ON o.id = ura.tenant_id
+       WHERE ura.user_id = $1 AND ura.deleted_at IS NULL
+         AND (ura.valid_until IS NULL OR ura.valid_until >= CURRENT_DATE)
+       ORDER BY ura.created_at`,
+      [userId],
+    );
   }
 
   /** Rotación de refresh: cada token se usa UNA vez; el reuso revoca la sesión. */
@@ -100,7 +165,46 @@ export class AuthService {
     // renovando su sesión indefinidamente y la suspensión solo alcanzaría a quien volviera a
     // ingresar desde cero.
     await this.assertOrganizationActive(row.tenant_id);
-    return this.issueTokens(user, row.tenant_id, payload.role ?? 'owner');
+
+    /**
+     * El rol se relee de la BASE, no del token.
+     *
+     * Antes salía de `payload.role ?? 'owner'`, y eso tenía dos agujeros que no se notaban mientras
+     * el rol no restringía nada:
+     *
+     *  1. **Quitarle el acceso a alguien no se lo quitaba.** El login le daba 401, pero su refresh
+     *     seguía funcionando SIETE DÍAS y le devolvía un token con el rol viejo, que la API aceptaba
+     *     sin chistar. Comprobado antes de este cambio: revocado, `/animals` seguía dando 200.
+     *  2. **Bajarle el rol a alguien tampoco.** De administrador a operario seguía siendo
+     *     administrador hasta que venciera el refresh.
+     *
+     * Y el `?? 'owner'` convertía un token sin `role` en dueño de la finca: nunca pasó porque
+     * `issueTokens` siempre lo firma, pero es el default más caro posible para una equivocación.
+     *
+     * Releerlo hace que revocaciones, cambios de rol y vencimientos de `valid_until` surtan efecto
+     * en cuanto vence el access token, sin tocar el resto del sistema.
+     */
+    const assignment = await this.assignmentOf(row.user_id, row.tenant_id);
+    if (!assignment)
+      throw new UnauthorizedException({
+        code: 'auth.access_revoked',
+        title: 'Ya no tenés acceso a esta organización',
+      });
+
+    return this.issueTokens(user, row.tenant_id, assignment.role);
+  }
+
+  /** La asignación VIGENTE de un usuario en una organización, o `null` si no tiene. */
+  private async assignmentOf(userId: string, tenantId: string): Promise<{ role: string } | null> {
+    const row = await this.db.one<{ role: string }>(
+      `SELECT r.code AS role
+       FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id
+       WHERE ura.user_id = $1 AND ura.tenant_id = $2 AND ura.deleted_at IS NULL
+         AND (ura.valid_until IS NULL OR ura.valid_until >= CURRENT_DATE)
+       ORDER BY ura.created_at LIMIT 1`,
+      [userId, tenantId],
+    );
+    return row ?? null;
   }
 
   /**

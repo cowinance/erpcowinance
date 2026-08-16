@@ -112,23 +112,31 @@ export class InvitationsService {
   }
 
   /**
-   * Un email que ya tiene cuenta NO se puede invitar, y el motivo es de honestidad, no de
-   * seguridad: hoy el login resuelve el tenant con la PRIMERA asignación vigente del usuario
-   * (`auth.service.ts`, marcado «v0: multi-organización después»). Si se dejara aceptar, la
-   * asignación se crearía bien y el invitado entraría siempre a su organización vieja, sin ningún
-   * error visible. Un rechazo claro le sirve más a todo el mundo que un acceso que no lleva a
-   * ningún lado.
+   * Un email que ya tiene cuenta SÍ se puede invitar — desde que el login sabe elegir organización.
    *
-   * Cuando el login sepa elegir organización, esto se convierte en «sumar la asignación».
+   * Antes se rechazaba, y no por seguridad: el login resolvía el tenant con la PRIMERA asignación
+   * vigente, así que la asignación se habría creado bien y el invitado habría entrado siempre a su
+   * organización vieja, sin ningún error visible. Con ese límite levantado se cae el caso que lo
+   * motivaba: el veterinario que atiende dos fincas.
+   *
+   * Lo que sí se sigue rechazando es invitar a alguien que YA tiene acceso a ESTA organización.
+   * Eso no es multi-organización: es invitar dos veces a la misma persona a la misma finca.
    */
   private async assertEmailLibre(email: string): Promise<void> {
     const ya = await this.db.one<{ id: string }>(`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, [email]);
-    if (ya)
-      throw new ConflictException({
-        code: 'invitation.email_con_cuenta',
-        title: `${email} ya tiene una cuenta de Cowinance`,
-        detail: 'Todavía no se puede pertenecer a dos organizaciones con el mismo email.',
-      });
+    if (ya) {
+      const aca = await this.db.one<{ id: string }>(
+        `SELECT ura.id FROM user_role_assignments ura
+         WHERE ura.user_id = $1 AND ura.tenant_id = $2 AND ura.deleted_at IS NULL
+           AND (ura.valid_until IS NULL OR ura.valid_until >= CURRENT_DATE)`,
+        [ya.id, this.db.tenant],
+      );
+      if (aca)
+        throw new ConflictException({
+          code: 'invitation.ya_es_miembro',
+          title: `${email} ya tiene acceso a esta organización`,
+        });
+    }
     const pendiente = await this.db.one<{ id: string }>(
       `SELECT id FROM invitations
        WHERE tenant_id = $1 AND lower(email) = $2 AND accepted_at IS NULL AND deleted_at IS NULL AND expires_at > now()`,
@@ -200,7 +208,13 @@ export class InvitationsService {
   }
 
   /**
-   * Consume la invitación y crea la cuenta.
+   * Consume la invitación: crea la cuenta, o suma la organización a una que ya existe.
+   *
+   * **Los dos caminos.** Si el email no tiene cuenta se crea, y para eso hacen falta nombre y
+   * contraseña. Si ya la tiene —el veterinario que atiende otra finca— NO se le pide nada: entra
+   * con las credenciales que ya usa, y pedirle una contraseña nueva sería pedirle que cambie la de
+   * su otra finca. Por eso `password` y `full_name` solo se exigen en el primer caso, y esa
+   * decisión se toma DESPUÉS de leer la invitación, no antes.
    *
    * Todo en UNA transacción: si algo falla, no queda ni el usuario a medio crear ni la invitación
    * marcada como aceptada. El `UPDATE … WHERE accepted_at IS NULL RETURNING` al final es lo que
@@ -213,11 +227,6 @@ export class InvitationsService {
     const fullName = (body?.full_name ?? '').trim();
 
     if (!partido) throw new BadRequestException({ code: 'invitation.invalid_token', title: 'Invitación inválida o vencida' });
-    if (!fullName) throw new BadRequestException({ code: 'invitation.missing_fields', title: 'full_name es obligatorio' });
-    if (password.length < 8)
-      throw new BadRequestException({ code: 'invitation.weak_password', title: 'La contraseña debe tener al menos 8 caracteres' });
-
-    const hash = await hashPassword(password);
 
     return this.db.tx(async (q) => {
       // Sin esto la RLS esconde la fila: ver `invitation-token.ts` para por qué el tenant viaja
@@ -231,21 +240,45 @@ export class InvitationsService {
       );
       if (!inv) throw new BadRequestException({ code: 'invitation.invalid_token', title: 'Invitación inválida o vencida' });
 
-      // Se revalida acá y no solo al invitar: entre que se mandó el email y se abre el enlace, esa
-      // persona pudo haberse registrado por su cuenta.
-      const ya = await q.one<{ id: string }>(`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, [inv.email]);
-      if (ya)
-        throw new ConflictException({
-          code: 'invitation.email_con_cuenta',
-          title: `${inv.email} ya tiene una cuenta de Cowinance`,
-          detail: 'Iniciá sesión con esa cuenta; todavía no se puede pertenecer a dos organizaciones.',
-        });
+      // La cuenta pudo nacer entre que se mandó el email y se abrió el enlace: o esa persona se
+      // registró por su cuenta, o ya trabajaba en otra finca. Los dos casos terminan igual acá.
+      const existente = await q.one<{ id: string }>(
+        `SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`,
+        [inv.email],
+      );
 
-      const user = (await q.one<{ id: string }>(
-        `INSERT INTO users (email, full_name, password_hash, email_verified_at)
-         VALUES ($1,$2,$3, now()) RETURNING id`,
-        [inv.email, fullName, hash],
-      ))!;
+      let user: { id: string };
+      if (existente) {
+        // Ya tiene cuenta: se suma la organización y listo. Sin tocarle la contraseña ni el nombre
+        // —son de su cuenta, no de esta finca—, y sin exigírselos en el formulario.
+        const yaAca = await q.one<{ id: string }>(
+          `SELECT id FROM user_role_assignments
+           WHERE user_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+             AND (valid_until IS NULL OR valid_until >= CURRENT_DATE)`,
+          [existente.id, partido.tenantId],
+        );
+        if (yaAca)
+          throw new ConflictException({
+            code: 'invitation.ya_es_miembro',
+            title: 'Ya tenés acceso a esta organización',
+          });
+        user = existente;
+      } else {
+        if (!fullName)
+          throw new BadRequestException({ code: 'invitation.missing_fields', title: 'full_name es obligatorio' });
+        if (password.length < 8)
+          throw new BadRequestException({
+            code: 'invitation.weak_password',
+            title: 'La contraseña debe tener al menos 8 caracteres',
+          });
+        // El email queda verificado de entrada: llegar con el token ES la prueba de que controla
+        // esa casilla, que es justo lo que verifica el flujo de verificación.
+        user = (await q.one<{ id: string }>(
+          `INSERT INTO users (email, full_name, password_hash, email_verified_at)
+           VALUES ($1,$2,$3, now()) RETURNING id`,
+          [inv.email, fullName, await hashPassword(password)],
+        ))!;
+      }
 
       await q.query(
         `INSERT INTO user_role_assignments (tenant_id, user_id, role_id, farm_id, granted_by, created_by)
@@ -261,10 +294,16 @@ export class InvitationsService {
       if (!consumida)
         throw new ConflictException({ code: 'invitation.ya_aceptada', title: 'Esa invitación ya fue aceptada' });
 
-      this.logger.log(`Invitación aceptada: user=${user.id} en tenant=${partido.tenantId}`);
+      this.logger.log(
+        `Invitación aceptada: user=${user.id} en tenant=${partido.tenantId} (${existente ? 'cuenta existente' : 'cuenta nueva'})`,
+      );
       // No emite tokens, igual que `register`: el cliente llama a `/auth/login` después. Mantiene
       // desacoplado invitations → auth.
-      return { user_id: user.id, email: inv.email };
+      //
+      // `cuenta_nueva` le dice a la pantalla qué mensaje mostrar: quien ya tenía cuenta entra con
+      // la contraseña que ya usa, y decirle «creá tu contraseña» sería mandarlo a cambiar la de su
+      // otra finca.
+      return { user_id: user.id, email: inv.email, cuenta_nueva: !existente };
     });
   }
 

@@ -100,10 +100,28 @@ export class MembersService {
       [t, userId],
     );
 
+    /**
+     * Y se cortan las sesiones vivas de esa persona EN ESTA organización.
+     *
+     * Sin esto, quitar el acceso no lo quitaba: el login le daba 401 pero su refresh seguía
+     * andando siete días y le devolvía un token con el rol viejo. `AuthService.refresh` ahora
+     * revalida la asignación, así que el agujero ya está cerrado igual — pero eso deja una ventana
+     * de hasta 15 minutos, la vida del access token. Acá se cierra en el acto.
+     *
+     * Se escribe la tabla directo en vez de inyectar `AuthService` a propósito: este módulo no
+     * necesita nada más de autenticación, y la dependencia haría que sacar a alguien de una finca
+     * arrastre el emisor de tokens.
+     *
+     * `tenant_id` en el WHERE, no solo `user_id`: quien trabaja en dos fincas y sale de una tiene
+     * que conservar su sesión en la otra.
+     */
+    await this.db.query(
+      `UPDATE auth_refresh_tokens SET revoked_at = now()
+       WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL`,
+      [userId, t],
+    );
+
     this.logger.log(`Acceso revocado: user=${userId} (${objetivo.role}) en tenant=${t}`);
-    // Las sesiones vivas siguen siendo válidas hasta que venza el access token. Es la misma
-    // ventana que ya acepta el resto del sistema; revocarlas exigiría que este módulo dependa de
-    // `auth`, y el corte se puede hacer después sin cambiar este contrato.
     return { revoked: true };
   }
 }

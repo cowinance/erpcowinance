@@ -8,6 +8,7 @@ import { AuthService } from '../auth/auth.service';
 import { BillingService } from '../billing/billing.service';
 import { InvitationsService } from './invitations.service';
 import { MembersService } from './members.service';
+import { nuevoTokenDeInvitacion } from './invitation-token';
 import type { EmailMessage, EmailSender } from '../../application/ports/email-sender.port';
 
 /**
@@ -77,11 +78,21 @@ describe('invitaciones — el dueño suma a su veterinario', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  /**
+   * Cada test arranca con la organización como la dejó el seed: solo el dueño.
+   *
+   * No alcanza con borrar las invitaciones. Los tests que ACEPTAN dejan un usuario real, y el plan
+   * de prueba admite cinco: sin esta limpieza, los usuarios de unos tests consumen el cupo de los
+   * otros y el resultado pasa a depender del orden en que corren — que es la peor forma de test
+   * intermitente, porque falla el test equivocado.
+   */
   beforeEach(async () => {
     enviados = [];
-    // Cada test arranca sin invitaciones pendientes: varios prueban el mismo email y el guard de
-    // duplicados los haría depender del orden.
-    await db.query(`DELETE FROM invitations WHERE tenant_id = $1`, [tenantId]);
+    await db.query(`DELETE FROM invitations`);
+    const deTest = `SELECT id FROM users WHERE email LIKE '%@ejemplo.com'`;
+    await db.query(`DELETE FROM auth_refresh_tokens WHERE user_id IN (${deTest})`);
+    await db.query(`DELETE FROM user_role_assignments WHERE user_id IN (${deTest})`);
+    await db.query(`DELETE FROM users WHERE email LIKE '%@ejemplo.com'`);
   });
 
   it('el ciclo completo: invitar, aceptar y entrar con el rol nuevo', async () => {
@@ -177,10 +188,55 @@ describe('invitaciones — el dueño suma a su veterinario', () => {
     expect(ok.role).toBe('foreman');
   }, 60_000);
 
-  it('un email que ya tiene cuenta no se puede invitar', async () => {
-    await rechaza('invitation.email_con_cuenta', () =>
+  it('no se invita a quien YA tiene acceso a esta organización', async () => {
+    await rechaza('invitation.ya_es_miembro', () =>
       como('owner', () => invitations.create({ email: 'cowinance@gmail.com', role: 'worker' })),
     );
+  }, 60_000);
+
+  /**
+   * El caso que motivó levantar el `LIMIT 1` del login: un veterinario que atiende dos fincas.
+   *
+   * Antes se rechazaba porque el login resolvía el tenant con la primera asignación vigente, así
+   * que la asignación se creaba bien y la persona entraba SIEMPRE a su organización vieja, sin
+   * ningún error visible. Ahora acepta, queda en las dos, y elige al entrar.
+   */
+  it('a quien ya tiene cuenta en OTRA finca se lo invita y queda en las dos', async () => {
+    const email = `dos.fincas${Date.now()}@ejemplo.com`;
+
+    // Primera finca: se crea la cuenta por el camino normal.
+    await como('owner', () => invitations.create({ email, role: 'veterinarian' }));
+    const primera: any = await invitations.accept({
+      token: ultimoToken(),
+      password: 'unaClaveLarga',
+      full_name: 'Vet De Dos Fincas',
+    });
+    expect(primera.cuenta_nueva).toBe(true);
+
+    // Segunda finca: otra organización invita al MISMO email.
+    const otra = await db.one<{ id: string }>(`SELECT id FROM organizations WHERE id <> $1 LIMIT 1`, [tenantId]);
+    expect(otra, 'el seed tiene que traer una segunda organización').toBeTruthy();
+    const rol = await db.one<{ id: string }>(`SELECT id FROM roles WHERE code = 'foreman' AND tenant_id IS NULL`);
+    const { token, secretHash } = nuevoTokenDeInvitacion(otra!.id);
+    await db.query(
+      `INSERT INTO invitations (tenant_id, email, role_id, token, expires_at)
+       VALUES ($1,$2,$3,$4, now() + INTERVAL '7 days')`,
+      [otra!.id, email, rol!.id, secretHash],
+    );
+
+    // No se le piden nombre ni contraseña: ya tiene cuenta, entra con la que usa.
+    const segunda: any = await invitations.accept({ token });
+    expect(segunda.cuenta_nueva).toBe(false);
+    expect(segunda.user_id).toBe(primera.user_id); // la MISMA persona, no una cuenta nueva
+
+    // Y ahora pertenece a las dos, con un rol distinto en cada una.
+    const orgs = await db.query<{ tenant_id: string; role: string }>(
+      `SELECT ura.tenant_id, r.code AS role FROM user_role_assignments ura
+       JOIN roles r ON r.id = ura.role_id
+       WHERE ura.user_id = $1 AND ura.deleted_at IS NULL ORDER BY ura.created_at`,
+      [primera.user_id],
+    );
+    expect(orgs.map((o) => o.role)).toEqual(['veterinarian', 'foreman']);
   }, 60_000);
 
   it('no se invita dos veces al mismo email', async () => {
@@ -207,6 +263,32 @@ describe('invitaciones — el dueño suma a su veterinario', () => {
 
     it('nadie se saca a sí mismo', async () => {
       await rechaza('member.no_a_si_mismo', () => como('owner', () => members.revoke(ownerId)));
+    }, 60_000);
+
+    /**
+     * REGRESIÓN. Quitar el acceso NO lo quitaba: el login devolvía 401, pero el refresh seguía
+     * funcionando siete días y devolvía un token con el rol viejo que la API aceptaba. Comprobado
+     * a mano contra la API antes de arreglarlo: revocado, `/animals` daba 200.
+     *
+     * Se cierra por dos lados y se prueban los dos: `members.revoke` revoca los refresh de esa
+     * persona en esa organización (inmediato), y `AuthService.refresh` revalida la asignación
+     * (cubre además los cambios de rol y los vencimientos de `valid_until`).
+     */
+    it('quitar el acceso corta la sesión viva, no solo el próximo login', async () => {
+      const email = `revocado${Date.now()}@ejemplo.com`;
+      await como('owner', () => invitations.create({ email, role: 'foreman' }));
+      const nuevo: any = await invitations.accept({
+        token: ultimoToken(),
+        password: 'unaClaveLarga',
+        full_name: 'Capataz Saliente',
+      });
+      const sesion: any = await auth.login({ email, password: 'unaClaveLarga' });
+      expect(sesion.refresh_token).toBeTruthy();
+
+      await como('owner', () => members.revoke(nuevo.user_id));
+
+      await expect(auth.login({ email, password: 'unaClaveLarga' })).rejects.toThrow();
+      await expect(auth.refresh({ refresh_token: sesion.refresh_token })).rejects.toThrow();
     }, 60_000);
 
     it('a un invitado sí se lo puede sacar, y deja de figurar', async () => {
