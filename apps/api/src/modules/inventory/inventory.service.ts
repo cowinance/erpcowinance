@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { randomUUID } from 'crypto';
 import { addFarmDays, computeStockRotation, DEFAULT_LEAD_TIME_DAYS } from '@cowinance/domain';
 import { DbService, Q } from '../../db/db.service';
+import { actorPuede, sinCamposSi } from '../../common/permissions/actor-puede';
 
 const CATEGORY_KINDS = ['feed', 'veterinary', 'agrochemical', 'seed', 'fuel', 'spare_part', 'supply', 'product'];
 
@@ -70,13 +71,14 @@ export class InventoryService {
 
   // ── Ítems ─────────────────────────────────────────────────────────────────
   async listItems() {
-    return this.db.query(
+    const filas = await this.db.query<Record<string, unknown>>(
       `SELECT i.id, i.name, i.sku, i.unit, i.track_batches, i.reorder_point::float AS reorder_point, i.standard_cost::float AS standard_cost,
               i.is_active, i.category_id, c.name AS category_name
        FROM inventory_items i LEFT JOIN inventory_categories c ON c.id = i.category_id
        WHERE i.tenant_id = $1 AND i.deleted_at IS NULL ORDER BY i.is_active DESC, i.name`,
       [this.db.tenant],
     );
+    return sinCamposSi(filas, 'inventario.valuacion', ['standard_cost']);
   }
 
   async createItem(body: any) {
@@ -297,7 +299,7 @@ export class InventoryService {
       params.push(itemId);
       filter += ` AND sl.item_id = $${params.length}`;
     }
-    return this.db.query(
+    const filas = await this.db.query<Record<string, unknown>>(
       `SELECT sl.item_id, i.name AS item_name, i.unit, sl.warehouse_id, w.name AS warehouse_name, sl.batch_id,
               sl.quantity::float AS quantity, sl.avg_cost::float AS avg_cost
        FROM stock_levels sl JOIN inventory_items i ON i.id = sl.item_id JOIN warehouses w ON w.id = sl.warehouse_id
@@ -305,6 +307,7 @@ export class InventoryService {
        ORDER BY i.name, w.name`,
       params,
     );
+    return sinCamposSi(filas, 'inventario.valuacion', ['avg_cost']);
   }
 
   /**
@@ -390,20 +393,38 @@ export class InventoryService {
     items.sort((a, b) => ORDEN[a.status] - ORDEN[b.status] || (b.stockValue ?? 0) - (a.stockValue ?? 0));
 
     const dormidos = items.filter((i) => i.status === 'dormido');
+
+    /**
+     * Este endpoint contesta DOS preguntas y solo una es de plata: «¿para cuántos días me alcanza?»
+     * y «¿qué compré que no uso?». Quien no ve valuación se queda con la primera entera —cobertura,
+     * rotación, punto de reposición sugerido, estado— y pierde solo los importes. Recortar el
+     * endpoint completo le sacaría al capataz la respuesta que más usa.
+     *
+     * `idle_items` y `critical_items` se quedan: son CUENTAS de ítems, no importes.
+     * `items_without_cost` se va con los importes — sin ellos no significa nada.
+     *
+     * El ORDEN no cambia: se calculó arriba con los valores reales, y «lo más caro primero dentro
+     * de cada estado» sigue siendo un orden razonable aunque el importe no viaje.
+     */
+    const conValuacion = actorPuede('inventario.valuacion');
     return {
       from,
       to,
       period_days: periodDays,
       lead_time_days: leadTimeDays,
-      items,
+      items: conValuacion ? items : items.map(({ stockValue: _, ...resto }) => resto),
       totals: {
-        stock_value: +items.reduce((s, i) => s + (i.stockValue ?? 0), 0).toFixed(2),
-        /** Plata quieta: saldo de ítems que no se consumieron en el período. */
-        idle_value: +dormidos.reduce((s, i) => s + (i.stockValue ?? 0), 0).toFixed(2),
+        ...(conValuacion
+          ? {
+              stock_value: +items.reduce((s, i) => s + (i.stockValue ?? 0), 0).toFixed(2),
+              /** Plata quieta: saldo de ítems que no se consumieron en el período. */
+              idle_value: +dormidos.reduce((s, i) => s + (i.stockValue ?? 0), 0).toFixed(2),
+              /** Ítems sin costo cargado: su saldo no entra en los totales de arriba. */
+              items_without_cost: items.filter((i) => i.stockValue == null).length,
+            }
+          : {}),
         idle_items: dormidos.length,
         critical_items: items.filter((i) => i.status === 'critico' || i.status === 'sin_stock').length,
-        /** Ítems sin costo cargado: su saldo no entra en los totales de arriba. */
-        items_without_cost: items.filter((i) => i.stockValue == null).length,
       },
     };
   }
@@ -420,7 +441,7 @@ export class InventoryService {
       params.push(warehouseId);
       filter += ` AND m.warehouse_id = $${params.length}`;
     }
-    return this.db.query(
+    const filas = await this.db.query<Record<string, unknown>>(
       `SELECT m.id, m.movement_type, m.quantity::float AS quantity, m.unit_cost::float AS unit_cost, m.occurred_at,
               i.name AS item_name, i.unit, w.name AS warehouse_name
        FROM stock_movements m JOIN inventory_items i ON i.id = m.item_id JOIN warehouses w ON w.id = m.warehouse_id
@@ -428,6 +449,7 @@ export class InventoryService {
        ORDER BY m.occurred_at DESC, m.created_at DESC LIMIT 100`,
       params,
     );
+    return sinCamposSi(filas, 'inventario.valuacion', ['unit_cost']);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

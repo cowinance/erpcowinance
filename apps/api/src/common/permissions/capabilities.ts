@@ -88,9 +88,10 @@ export const ROUTE_RULES: RouteRule[] = [
   // costos por la puerta de al lado.
   { prefix: 'health/costs', cap: 'inventario.valuacion', access: 'read' },
   { prefix: 'health/consumption', cap: 'inventario.valuacion', access: 'read' },
-  // PENDIENTE: dentro de `/inventory` el costo unitario viaja como CAMPO de respuestas que por lo
-  // demás son de existencias, así que ahí la valuación no se puede separar por ruta. Es la única
-  // capacidad que además necesita esconder una columna, y eso se resuelve en el servicio, no acá.
+  // Dentro de `/inventory` el costo unitario NO se puede separar por ruta: viaja como CAMPO de
+  // respuestas que por lo demás son de existencias. `inventario.valuacion` es la única capacidad
+  // que además esconde columnas, y eso se resuelve donde se arma la respuesta —ver
+  // `sinCamposSi()` en `actor-puede.ts` y sus tres usos en `inventory.service.ts`—, no acá.
 
   // ── Sanidad: indicar ≠ aplicar ──────────────────────────────────────────────
   { prefix: 'health-plans/:id/apply', cap: 'sanidad.aplicar' }, // lanzar la campaña es trabajo de campo
