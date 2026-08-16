@@ -117,6 +117,17 @@ export const MATRIX: Record<Role, Permisos> = {
     hato: 'write', pesajes: 'write', movimientos: 'write', mortandad: 'write',
     'sanidad.aplicar': 'write', tareas: 'write',
     produccion: 'write', nutricion: 'read', campo: 'read', maquinaria: 'read',
+    /**
+     * LEE reproducción, no la escribe (decisión 15 ago). Saber que una vaca está preñada cambia
+     * cómo se la maneja en la manga, y el móvil lo muestra en la FICHA del animal —no solo en la
+     * captura reproductiva—, así que sin esto la ficha le diría «Vacía» a una vaca preñada. Es el
+     * mismo criterio por el que el retiro sanitario y los casos clínicos abiertos ya le llegan.
+     *
+     * Alcance real, para que no sorprenda: son 23 rutas de lectura, incluidas `reproduction/kpis`,
+     * `reproduction/dashboard` y los reportes reproductivos. Se aceptó a sabiendas; la alternativa
+     * angosta era mapear SOLO la tabla `pregnancies` del sync bajo `hato` y dejar el resto cerrado.
+     */
+    reproduccion: 'read',
   },
 
   /**

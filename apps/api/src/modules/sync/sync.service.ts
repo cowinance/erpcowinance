@@ -1,8 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Changeset, Op } from '@cowinance/sync-core';
 import { DbService } from '../../db/db.service';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
 import { BillingService } from '../billing/billing.service';
+import { actorPuede } from '../../common/permissions/actor-puede';
+import { CAPACIDAD_DE_ESCRITURA, CAPACIDAD_DE_LECTURA, SIN_FILTRAR_AL_ENVIAR, type SyncTable } from './contracts/sync-table';
 
 /**
  * Resultado remoto de una fila de pull (contrato con el cliente). Un changeset de
@@ -88,6 +90,8 @@ export class SyncService {
     if (!Array.isArray(body.changesets) || !body.changesets.length)
       throw new BadRequestException({ code: 'sync.empty_push', title: 'changesets vacío' });
 
+    this.assertPuedeEscribir(body.changesets);
+
     let accepted = 0;
     let deduped = 0;
     const conflicts: { type: string; entity_id: string; detail: string }[] = [];
@@ -133,6 +137,71 @@ export class SyncService {
     return { accepted, deduped, conflicts, server_cursor: cursor };
   }
 
+  /** ¿El actor puede RECIBIR filas de esta tabla? Lo no declarado se filtra: la omisión deniega. */
+  private puedeRecibir(table: string): boolean {
+    if (SIN_FILTRAR_AL_ENVIAR.includes(table)) return true;
+    const cap = CAPACIDAD_DE_LECTURA[table];
+    return !!cap && actorPuede(cap, 'read');
+  }
+
+  /**
+   * Saca de cada changeset las operaciones de tablas que el rol no puede leer, y descarta los que
+   * quedan vacíos.
+   *
+   * **El cursor NO se toca.** Se filtra DESPUÉS de traer las filas y después de calcular
+   * `nextCursor` sobre las crudas: el cliente recibe menos changesets pero su cursor sigue
+   * avanzando igual, así que nunca queda un hueco ni un reintento infinito. Es la parte que había
+   * que cuidar — filtrar antes del `LIMIT` habría hecho que un lote entero de operaciones ajenas
+   * devolviera cero filas y el cliente se quedara pidiendo el mismo cursor para siempre.
+   */
+  private filtrarChangesets(rows: SyncChangesetRow[]): SyncChangesetRow[] {
+    const salida: SyncChangesetRow[] = [];
+    for (const r of rows) {
+      const ops = ((r.operations as { ops?: Op[] })?.ops ?? []).filter((o) => this.puedeRecibir(o.table));
+      if (!ops.length) continue; // nada que aplicar para este rol
+      salida.push({ ...r, operations: { ...(r.operations as object), ops } } as SyncChangesetRow);
+    }
+    return salida;
+  }
+
+  /**
+   * El rol tiene que poder escribir CADA tabla que toca el push.
+   *
+   * **Por qué hace falta acá y no alcanza con el interceptor.** El interceptor autoriza rutas, y
+   * `/sync/push` es UNA ruta bajo la capacidad `sincronizacion`, que todos los roles tienen porque
+   * sin ella el móvil no funciona. Adentro viajan escrituras a trece tablas distintas. Sin este
+   * chequeo el canal esquivaba la matriz entera: un veterinario recibía 403 en `PUT /animals/:id`
+   * y el MISMO cambio entraba por sync sin que nada lo mirara — verificado antes de arreglarlo, el
+   * animal quedaba renombrado.
+   *
+   * **Se rechaza el push COMPLETO, no la operación.** Cada changeset ya es atómico por diseño («se
+   * registra y aplica completo, o nada»), y aceptar parcialmente dejaría al dispositivo creyendo
+   * que subió todo. Además un cliente legítimo solo captura lo que su rol permite: un push mixto
+   * es un bug del cliente o alguien probando, y en los dos casos la respuesta correcta es no
+   * aplicar nada.
+   *
+   * El mensaje dice QUÉ tabla faltó. Un 403 mudo en el canal de sync es de las cosas más difíciles
+   * de diagnosticar que existen: el trabajo del día ya está cargado en el teléfono.
+   */
+  private assertPuedeEscribir(changesets: Changeset[]): void {
+    for (const cs of changesets) {
+      for (const op of cs.ops ?? []) {
+        const cap = CAPACIDAD_DE_ESCRITURA[op.table as SyncTable];
+        if (!cap)
+          throw new BadRequestException({
+            code: 'sync.tabla_desconocida',
+            title: `La tabla «${op.table}» no participa del protocolo de sincronización`,
+          });
+        if (!actorPuede(cap, 'write'))
+          throw new ForbiddenException({
+            code: 'sync.sin_permiso',
+            title: 'Tu rol no puede sincronizar estos datos',
+            detail: `Escribir «${op.table}» requiere ${cap}.`,
+          });
+      }
+    }
+  }
+
   async pull(deviceId: string, cursor: number, limit = 500): Promise<{ changesets: PulledChangesetDto[]; cursor: number }> {
     const device = await this.assertDevice(deviceId);
     // IS DISTINCT FROM (no !=): un changeset de origen servidor tiene
@@ -152,7 +221,7 @@ export class SyncService {
       [device.id, nextCursor],
     );
     return {
-      changesets: rows.map((r) => ({
+      changesets: this.filtrarChangesets(rows).map((r) => ({
         server_seq: Number(r.server_seq),
         device_id: r.sync_device_id,
         seq: r.seq == null ? null : Number(r.seq),
@@ -348,7 +417,17 @@ export class SyncService {
       })),
     ];
 
-    return { cursor, farm, rows: bootstrapRows };
+    /**
+     * El bootstrap manda CINCO tablas en una sola ruta, y el interceptor solo autorizó la ruta. Sin
+     * este filtro, un contador —a quien `GET /animals` le devuelve 403— recibía acá los 65 animales
+     * de la finca, más lotes, tareas y el catálogo veterinario.
+     *
+     * Se filtra al final y no en cada consulta a propósito: las cinco arman `bootstrapRows` con la
+     * misma forma `{table, rowId, state}`, así que un único punto de corte no puede olvidarse de
+     * una — y la próxima tabla que alguien sume queda filtrada por defecto, porque lo que no está
+     * declarado en `CAPACIDAD_DE_LECTURA` no se envía.
+     */
+    return { cursor, farm, rows: bootstrapRows.filter((r) => this.puedeRecibir(r.table)) };
   }
 
   /** Panel de flota (doc Catálogo A4). */
