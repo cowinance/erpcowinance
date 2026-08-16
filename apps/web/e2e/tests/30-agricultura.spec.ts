@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { uniqueUser, registerAndAutoLogin } from '../helpers';
+import { uniqueUser, registerAndAutoLogin, stockCell } from '../helpers';
 import { API_URL } from '../env';
 
 /**
@@ -31,6 +31,9 @@ test('agricultura: cultivo, labor que consume stock y cosecha', async ({ page })
   await expect(page.getByRole('heading', { name: /Maíz/ })).toBeVisible();
   await page.getByLabel('Tipo de labor').selectOption('fertilization');
   await page.getByLabel('Insumo').selectOption({ label: 'Urea (kg)' });
+  // El selector arranca en «Depósito principal», que la finca nueva trae sembrado y está vacío:
+  // la urea de este spec está en «Silo agro». Antes había un solo depósito y no hacía falta elegir.
+  await page.getByLabel('Depósito del insumo').selectOption({ label: 'Silo agro' });
   await page.getByLabel('Cantidad del insumo').fill('200');
   await page.getByRole('button', { name: 'Registrar labor' }).click();
   await expect(page.getByRole('listitem').filter({ hasText: 'Fertilización' })).toBeVisible();
@@ -43,6 +46,6 @@ test('agricultura: cultivo, labor que consume stock y cosecha', async ({ page })
 
   // Stock: urea 800, grano 400000.
   await page.goto('/inventario');
-  await expect(page.getByText('800 kg', { exact: true })).toBeVisible();
-  await expect(page.getByText('400000 kg', { exact: true })).toBeVisible();
+  await expect(stockCell(page, '800 kg')).toBeVisible();
+  await expect(stockCell(page, '400000 kg')).toBeVisible();
 });

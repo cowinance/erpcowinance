@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { uniqueUser, registerAndAutoLogin } from '../helpers';
+import { uniqueUser, registerAndAutoLogin, stockCell } from '../helpers';
 import { API_URL } from '../env';
 
 /**
@@ -27,10 +27,13 @@ test('maquinaria: crear máquina y cargar combustible que descuenta stock', asyn
   await expect(page.getByRole('heading', { name: 'Tractor 01' })).toBeVisible();
   await page.getByLabel('Litros').fill('200');
   await page.getByLabel('Ítem de combustible').selectOption({ label: 'Gasoil (l)' });
+  // El selector arranca en «Depósito principal», que la finca nueva trae sembrado y está vacío:
+  // el gasoil de este spec está en «Tanque». Antes había un solo depósito y no hacía falta elegir.
+  await page.getByLabel('Depósito del combustible').selectOption({ label: 'Tanque' });
   await page.getByRole('button', { name: 'Registrar carga' }).click();
   await expect(page.getByRole('listitem').filter({ hasText: 'Gasoil' })).toBeVisible();
 
   // Stock: 5000 - 200 = 4800.
   await page.goto('/inventario');
-  await expect(page.getByText('4800 l', { exact: true })).toBeVisible();
+  await expect(stockCell(page, '4800 l')).toBeVisible();
 });

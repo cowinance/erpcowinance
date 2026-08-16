@@ -10,6 +10,22 @@ export interface TestUser {
   password: string;
 }
 
+/**
+ * La celda de saldo en la tabla de EXISTENCIAS de `/inventario`.
+ *
+ * Existe porque `/inventario` tiene dos tablas que muestran el mismo ítem con su cantidad —
+ * existencias y rotación— así que buscar «50 kg» como texto suelto encuentra las dos y Playwright
+ * corta por ambigüedad. Media docena de specs de otros módulos (compras, ventas, nutrición,
+ * agricultura, maquinaria) terminan comprobando stock acá, y todos se rompieron a la vez el día
+ * que apareció la segunda tabla.
+ *
+ * Va como helper y no copiado en cada spec para que la próxima tabla que se agregue a esa pantalla
+ * se arregle en un solo lugar.
+ */
+export function stockCell(page: Page, saldo: string) {
+  return page.getByRole('table', { name: 'Existencias' }).getByRole('cell', { name: saldo });
+}
+
 let seq = 0;
 /** Usuario único por invocación: emails/nombres irrepetibles (sin depender de demo). */
 export function uniqueUser(prefix = 'u'): TestUser {

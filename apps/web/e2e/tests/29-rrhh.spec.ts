@@ -12,15 +12,18 @@ test('rrhh: crear empleado, liquidar, aprobar y pagar', async ({ page }) => {
   const auth = { Authorization: `Bearer ${(await page.context().cookies()).find((c) => c.name === 'cw_access')?.value}` };
   const post = async (p: string, data: any) => (await page.request.post(`${API_URL}${p}`, { headers: auth, data })).json();
 
-  const mk = async (code: string, name: string, type: string) => (await post('/finance/accounts', { code, name, type })).id;
-  const roles = {
-    salary_expense: await mk('6.1.01', 'Sueldos', 'expense'),
-    salaries_payable: await mk('2.1.03', 'Remuneraciones a pagar', 'liability'),
-    payroll_withholdings: await mk('2.1.04', 'Retenciones a pagar', 'liability'),
-    cash: await mk('1.1.01', 'Caja', 'asset'),
-  };
+  /**
+   * Las cuentas y el mapa rol→cuenta ya no se arman acá: desde `45cdb17` la finca nueva nace con
+   * el plan sembrado, y trae los tres roles que la nómina necesita —`salary_expense`,
+   * `salaries_payable`, `payroll_withholdings`— más `cash`. Tres de las cuatro cuentas que este
+   * bloque creaba chocaban contra códigos ya existentes, el mapa quedaba con `undefined`, y
+   * aprobar fallaba en `requireRoles` sin decir por qué en la UI.
+   *
+   * El PERÍODO sí se sigue creando, y no es simetría floja: la liquidación es de 2030 y aprobar
+   * asienta el devengado con ESA fecha. Los períodos sembrados son del ejercicio en curso, así que
+   * sin este el asiento no tiene dónde caer.
+   */
   await post('/finance/periods', { name: 'Amplio', start_date: '2020-01-01', end_date: '2035-12-31' });
-  await page.request.put(`${API_URL}/finance/posting-accounts`, { headers: auth, data: roles });
 
   // Empleado.
   await page.goto('/rrhh');

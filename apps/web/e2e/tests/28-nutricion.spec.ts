@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { uniqueUser, registerAndAutoLogin } from '../helpers';
+import { uniqueUser, registerAndAutoLogin, stockCell } from '../helpers';
 import { API_URL } from '../env';
 
 /**
@@ -48,5 +48,5 @@ test('nutrición: componer una ración y entregarla a un lote', async ({ page })
 
   // El stock de maíz bajó 60 (1000 → 940).
   await page.goto('/inventario');
-  await expect(page.getByText('940 kg', { exact: true })).toBeVisible();
+  await expect(stockCell(page, '940 kg')).toBeVisible();
 });

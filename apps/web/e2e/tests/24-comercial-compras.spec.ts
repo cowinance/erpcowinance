@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { uniqueUser, registerAndAutoLogin } from '../helpers';
+import { uniqueUser, registerAndAutoLogin, stockCell } from '../helpers';
 import { API_URL } from '../env';
 
 /**
@@ -34,5 +34,5 @@ test('comercial: crear compra de ítem, recibir y ver el stock', async ({ page }
 
   // El stock entró al kardex (cruce de módulos).
   await page.goto('/inventario');
-  await expect(page.getByText('50 kg', { exact: true })).toBeVisible();
+  await expect(stockCell(page, '50 kg')).toBeVisible();
 });

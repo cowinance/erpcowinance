@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { uniqueUser, registerAndAutoLogin } from '../helpers';
+import { uniqueUser, registerAndAutoLogin, stockCell } from '../helpers';
 import { API_URL } from '../env';
 
 /**
@@ -13,7 +13,17 @@ test('comercial: crear venta de ítem, entregar y ver el stock descontado', asyn
   const auth = { Authorization: `Bearer ${(await page.context().cookies()).find((c) => c.name === 'cw_access')?.value}` };
   await page.request.post(`${API_URL}/commerce/partners`, { headers: auth, data: { type: 'customer', name: 'Frigorífico Sur', customer_segment: 'slaughterhouse' } });
   const item = await (await page.request.post(`${API_URL}/inventory/items`, { headers: auth, data: { name: 'Ración', unit: 'kg' } })).json();
-  const wh = await (await page.request.post(`${API_URL}/inventory/warehouses`, { headers: auth, data: { name: 'Depósito' } })).json();
+  /**
+   * El stock entra al depósito que la finca YA TIENE, no a uno nuevo.
+   *
+   * La entrega de una venta no deja elegir depósito: el servidor descuenta del más viejo del
+   * tenant (`ORDER BY created_at LIMIT 1`, documentado en `sales.service`). Desde `45cdb17` ese es
+   * el «Depósito principal» que se siembra al registrarse, así que crear otro acá dejaba el stock
+   * en el lugar equivocado y la entrega fallaba con «Stock insuficiente: hay 0».
+   */
+  const depositos = await (await page.request.get(`${API_URL}/inventory/warehouses`, { headers: auth })).json();
+  const wh = (Array.isArray(depositos) ? depositos : (depositos.data ?? []))[0];
+  expect(wh, 'la finca nueva tiene que traer un depósito').toBeTruthy();
   await page.request.post(`${API_URL}/inventory/movements`, { headers: auth, data: { item_id: item.id, warehouse_id: wh.id, movement_type: 'in', quantity: 80, unit_cost: 3 } });
 
   await page.goto('/comercial/ventas');
@@ -34,5 +44,5 @@ test('comercial: crear venta de ítem, entregar y ver el stock descontado', asyn
 
   // El stock quedó en 80 - 30 = 50.
   await page.goto('/inventario');
-  await expect(page.getByText('50 kg', { exact: true })).toBeVisible();
+  await expect(stockCell(page, '50 kg')).toBeVisible();
 });
