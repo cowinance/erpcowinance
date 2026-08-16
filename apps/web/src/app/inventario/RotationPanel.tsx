@@ -76,7 +76,8 @@ export function RotationPanel({ data }: { data: RotationReport }) {
           consume mientras llega una reposición.
         </p>
         <div className="-mx-4 mt-3 overflow-x-auto px-4">
-          <table className="w-full min-w-[46rem] text-body">
+          {/* Ver la nota de `StockPanel`: las dos tablas de esta pantalla necesitan nombre propio. */}
+          <table className="w-full min-w-[46rem] text-body" aria-label="Rotación de inventario">
             <thead>
               <tr className="border-b border-subtle text-left text-caption text-ink-3">
                 <th className="py-2 font-medium">Ítem</th>

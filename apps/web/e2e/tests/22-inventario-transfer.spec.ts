@@ -16,12 +16,19 @@ test('inventario: transferir stock entre depósitos', async ({ page }) => {
   await page.request.post(`${API_URL}/inventory/movements`, { headers: auth, data: { item_id: item.id, warehouse_id: a.id, movement_type: 'in', quantity: 100 } });
 
   await page.goto('/inventario');
-  await expect(page.getByText('100 kg', { exact: true })).toBeVisible(); // stock inicial en A
+
+  // Anclado a la tabla de existencias: el saldo también figura en la de rotación, y sin ancla el
+  // texto suelto podía encontrar la otra. Ver la nota del spec 21.
+  const existencias = page.getByRole('table', { name: 'Existencias' });
+  await expect(existencias.getByRole('cell', { name: '100 kg' })).toBeVisible(); // stock inicial en A
 
   // Transferir 40 de A → B (defaults: item Sal, origen A, destino B).
   await page.getByLabel('Cantidad a transferir').fill('40');
   await page.getByRole('button', { name: 'Transferir' }).click();
 
-  await expect(page.getByText('60 kg', { exact: true })).toBeVisible(); // A queda en 60
-  await expect(page.getByText('40 kg', { exact: true })).toBeVisible(); // B queda en 40
+  // Por FILA, no por texto: «60 kg» y «40 kg» sueltos no dicen en qué depósito quedaron, que es
+  // exactamente lo que esta prueba existe para verificar. Con dos depósitos del mismo ítem, una
+  // transferencia al revés dejaría los mismos dos números y el test seguiría pasando.
+  await expect(existencias.getByRole('row', { name: /Depósito A/ })).toContainText('60 kg');
+  await expect(existencias.getByRole('row', { name: /Depósito B/ })).toContainText('40 kg');
 });

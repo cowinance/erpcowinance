@@ -226,10 +226,13 @@ export function StockPanel({ items, warehouses, stock, movements, batches }: { i
         {/* Existencias + kardex */}
         <Card className="col-span-3 self-start max-lg:col-span-5">
           <CardTitle action={<span className="text-label text-ink-3">{stock.length} existencias</span>}>Existencias</CardTitle>
+          {/* La tabla lleva nombre accesible: /inventario tiene DOS tablas de datos —esta y la de
+              rotación— y sin nombre son indistinguibles para un lector de pantalla, que las anuncia
+              como «tabla» a secas. Ambas listan el mismo ítem con su cantidad. */}
           {stock.length === 0 ? (
             <p className="py-3 text-center text-label text-ink-3">Sin existencias.</p>
           ) : (
-            <table className="w-full text-body">
+            <table className="w-full text-body" aria-label="Existencias">
               <thead>
                 <tr className="h-8 border-b border-subtle text-left text-caption font-medium tracking-[0.06em] text-ink-3 uppercase">
                   <th>Ítem</th>
