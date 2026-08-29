@@ -389,7 +389,7 @@ export class HealthService {
     opts: { inventoryItemId: string | null; table: 'treatments' | 'vaccinations'; rowId: string; quantity: number; warehouseId?: string; refType: string; occurredAt?: string; manualCost?: number | null },
   ): Promise<number | null> {
     if (!opts.inventoryItemId) return null;
-    const whId = await this.resolveWarehouse(q, opts.inventoryItemId, opts.warehouseId);
+    const whId = await this.inventory.resolveSourceWarehouseInTx(q, opts.inventoryItemId, opts.warehouseId);
     if (!whId) return null;
     const res: any = await this.inventory.recordMovementInTx(q, {
       item_id: opts.inventoryItemId, warehouse_id: whId, movement_type: 'consumption',
@@ -401,18 +401,6 @@ export class HealthService {
       await q.query(`UPDATE ${opts.table} SET cost = $3 WHERE id = $1 AND tenant_id = $2`, [opts.rowId, this.db.tenant, cost]);
     }
     return cost;
-  }
-
-  /** Depósito para consumir: el indicado, si no el de mayor stock del ítem, si no el primero del tenant. */
-  private async resolveWarehouse(q: Q, itemId: string, given?: string): Promise<string | null> {
-    if (given) return given;
-    const wh = await q.one<{ warehouse_id: string }>(
-      `SELECT warehouse_id FROM stock_levels WHERE tenant_id = $1 AND item_id = $2 AND quantity > 0 ORDER BY quantity DESC LIMIT 1`,
-      [this.db.tenant, itemId],
-    );
-    if (wh) return wh.warehouse_id;
-    const any = await q.one<{ id: string }>(`SELECT id FROM warehouses WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`, [this.db.tenant]);
-    return any?.id ?? null;
   }
 
   /**
