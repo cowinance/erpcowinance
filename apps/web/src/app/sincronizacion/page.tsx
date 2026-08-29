@@ -2,6 +2,7 @@ import { apiSafe } from '@/lib/server-api';
 import { Card, CardTitle, EmptyState, TagMono } from '@/components/ui';
 import { relativeTime } from '@/lib/format';
 import { ResolveButton } from './ResolveButton';
+import { RevokeDeviceButton } from './RevokeDeviceButton';
 import { Smartphone, Tablet, Monitor, AlertTriangle, Copy, GitMerge } from 'lucide-react';
 
 const PLATFORM_ICON: Record<string, any> = { ios: Smartphone, android: Tablet, web: Monitor };
@@ -43,13 +44,18 @@ export default async function SyncPage() {
                 <th className="text-right">Changesets subidos</th>
                 <th className="text-right">Cursor</th>
                 <th className="text-right">Último sync</th>
-                <th className="pr-1 text-right">Estado</th>
+                <th className="text-right">Estado</th>
+                <th className="pr-1 text-right"></th>
               </tr>
             </thead>
             <tbody>
               {state.devices.map((d: any) => {
                 const Icon = PLATFORM_ICON[d.platform] ?? Monitor;
                 const fresh = d.last_sync_at && Date.now() - new Date(d.last_sync_at).getTime() < 24 * 3600000;
+                // Hasta ahora la columna ignoraba `status`: un dispositivo dado de baja se mostraba
+                // como «Atrasado», que invita a preguntar por qué no sincroniza en vez de decir que
+                // ya no debe hacerlo.
+                const revocado = d.status !== 'active';
                 return (
                   <tr key={d.id} className="h-9 border-b border-subtle last:border-0">
                     <td className="font-medium">
@@ -63,11 +69,14 @@ export default async function SyncPage() {
                     <td className="tnum text-right">{d.changesets_pushed}</td>
                     <td className="tnum text-right">{d.sync_cursor}</td>
                     <td className="text-right text-ink-2">{d.last_sync_at ? relativeTime(d.last_sync_at) : 'nunca'}</td>
-                    <td className="pr-1 text-right">
+                    <td className="text-right">
                       <span className="inline-flex items-center gap-1.5">
-                        <span className={`size-2 rounded-full ${fresh ? 'bg-success' : 'bg-warning'}`} />
-                        <span className="text-label text-ink-2">{fresh ? 'Al día' : 'Atrasado'}</span>
+                        <span className={`size-2 rounded-full ${revocado ? 'bg-ink-3' : fresh ? 'bg-success' : 'bg-warning'}`} />
+                        <span className="text-label text-ink-2">{revocado ? 'De baja' : fresh ? 'Al día' : 'Atrasado'}</span>
                       </span>
+                    </td>
+                    <td className="pr-1 text-right">
+                      {!revocado && <RevokeDeviceButton deviceId={d.id} deviceName={d.device_name ?? d.platform} />}
                     </td>
                   </tr>
                 );

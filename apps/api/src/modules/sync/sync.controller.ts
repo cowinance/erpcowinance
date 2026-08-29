@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { SyncService } from './sync.service';
 
 /** API de sincronización (doc APIs §7). En prod: Protobuf+zstd sobre HTTP/2; v0: JSON. */
@@ -9,6 +9,15 @@ export class SyncController {
   @Post('devices')
   register(@Body() body: any) {
     return this.sync.registerDevice(body);
+  }
+
+  /**
+   * Da de baja un dispositivo y libera su lugar del plan. Cada quien los suyos; el dueño y el
+   * administrador, cualquiera de la finca.
+   */
+  @Delete('devices/:id')
+  revokeDevice(@Param('id') id: string) {
+    return this.sync.revokeDevice(id);
   }
 
   @Post('devices/:id/push-token')

@@ -27,6 +27,7 @@ import { ROLES, permite } from '../../common/permissions/matrix';
 describe('sync — el canal no esquiva los permisos', () => {
   let db: DbService;
   let sync: SyncService;
+  let billing: BillingService;
   let originalCwd: string;
   let tmp: string;
   let tenantId: string;
@@ -55,6 +56,10 @@ describe('sync — el canal no esquiva los permisos', () => {
     };
   };
 
+  /** Consumo de dispositivos según el plan — la misma cuenta que decide si entra uno más. */
+  const consumoDeDispositivos = async (): Promise<number> =>
+    ((await como('owner', () => billing.getSubscription())) as any).usage.devices;
+
   beforeAll(async () => {
     originalCwd = process.cwd();
     tmp = mkdtempSync(join(tmpdir(), 'syncperm-'));
@@ -68,7 +73,8 @@ describe('sync — el canal no esquiva los permisos', () => {
     const writer = new ServerOriginChangesetWriter(db);
     const registry = new SyncHandlerRegistry();
     new AnimalSyncHandler(db, versions, new SyncConflictWriter(db), registry).onModuleInit();
-    sync = new SyncService(db, registry, new BillingService(db));
+    billing = new BillingService(db);
+    sync = new SyncService(db, registry, billing);
 
     // Un usuario REAL: el contexto viaja a `created_by` de varias escrituras, y un id inventado
     // revienta con «invalid input syntax for type uuid» lejos de donde se declaró.
@@ -223,4 +229,78 @@ describe('sync — el canal no esquiva los permisos', () => {
     // Y la lista de roles no creció sin que este test se entere.
     expect(ROLES).toHaveLength(6);
   });
+
+  /**
+   * Dar de baja un dispositivo. La tabla y la aplicación ya existían —`status='revoked'`,
+   * `assertDevice` rechazando, el plan contando solo `active`— y no había forma de llegar.
+   */
+  describe('baja de dispositivos', () => {
+    const nuevoDevice = async (rol: string, quien = userId) =>
+      (await requestContext.run({ userId: quien, tenantId, role: rol }, () =>
+        sync.registerDevice({ platform: 'android', device_name: 'para dar de baja' }),
+      )) as any;
+
+    it('libera el lugar del plan, que es el motivo de existir de esto', async () => {
+      const antes = await consumoDeDispositivos();
+      const dev = await nuevoDevice('owner');
+      expect(await consumoDeDispositivos()).toBe(antes + 1);
+
+      await como('owner', () => sync.revokeDevice(dev.id));
+      expect(await consumoDeDispositivos()).toBe(antes);
+    }, 60_000);
+
+    it('un dispositivo dado de baja deja de sincronizar', async () => {
+      const dev = await nuevoDevice('owner');
+      await como('owner', () => sync.revokeDevice(dev.id));
+
+      // Las tres puertas del canal, no solo una.
+      await expect(como('owner', () => sync.bootstrap(dev.id))).rejects.toMatchObject({
+        response: { code: 'sync.device_revoked' },
+      });
+      await expect(como('owner', () => sync.pull(dev.id, 0))).rejects.toMatchObject({
+        response: { code: 'sync.device_revoked' },
+      });
+      await expect(
+        como('owner', () => sync.push({ ...pushDeAnimal('desde un revocado', 90), device_id: dev.id })),
+      ).rejects.toMatchObject({ response: { code: 'sync.device_revoked' } });
+    }, 60_000);
+
+    /**
+     * La regla que la ruta NO puede hacer cumplir: `sync/devices` cae bajo `sincronizacion`, que
+     * todos los roles tienen porque sin ella el móvil no arranca. Sin esta comprobación un
+     * operario le desconectaría el teléfono al veterinario.
+     */
+    it('nadie da de baja el dispositivo de otro, salvo el dueño y el administrador', async () => {
+      const otroUser = (await db.query<{ id: string }>(`SELECT id FROM users WHERE id <> $1 LIMIT 1`, [userId]))[0];
+      const ajeno = await nuevoDevice('owner', otroUser.id);
+
+      await expect(como('worker', () => sync.revokeDevice(ajeno.id))).rejects.toMatchObject({
+        response: { code: 'sync.device_ajeno' },
+      });
+      await expect(como('veterinarian', () => sync.revokeDevice(ajeno.id))).rejects.toMatchObject({
+        response: { code: 'sync.device_ajeno' },
+      });
+
+      // El dueño sí: es el caso del empleado que se fue con la app instalada.
+      await expect(como('owner', () => sync.revokeDevice(ajeno.id))).resolves.toMatchObject({ revoked: true });
+    }, 60_000);
+
+    it('cada quien da de baja el suyo sin depender de un administrador', async () => {
+      const propio = await nuevoDevice('worker');
+      await expect(como('worker', () => sync.revokeDevice(propio.id))).resolves.toMatchObject({ revoked: true });
+    }, 60_000);
+
+    it('es idempotente: darlo de baja dos veces no es un error', async () => {
+      const dev = await nuevoDevice('owner');
+      await expect(como('owner', () => sync.revokeDevice(dev.id))).resolves.toMatchObject({ already: false });
+      await expect(como('owner', () => sync.revokeDevice(dev.id))).resolves.toMatchObject({ already: true });
+    }, 60_000);
+
+    it('un dispositivo de otra finca no existe para esta', async () => {
+      await expect(como('owner', () => sync.revokeDevice(randomUUID()))).rejects.toMatchObject({
+        response: { code: 'sync.device_not_found' },
+      });
+    }, 60_000);
+  });
+
 });

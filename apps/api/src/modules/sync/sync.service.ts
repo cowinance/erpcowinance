@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Changeset, Op } from '@cowinance/sync-core';
 import { DbService } from '../../db/db.service';
+import { requestContext } from '../../common/request-context';
 import { SyncHandlerRegistry } from './registry/sync-handler.registry';
 import { BillingService } from '../billing/billing.service';
 import { actorPuede } from '../../common/permissions/actor-puede';
@@ -448,7 +449,10 @@ export class SyncService {
       this.db.query(
         `SELECT d.id, d.platform, d.device_name, d.app_version, d.last_sync_at, d.sync_cursor::int, d.status,
                 (SELECT count(*)::int FROM sync_changesets c WHERE c.sync_device_id = d.id) AS changesets_pushed
-         FROM sync_devices d WHERE d.tenant_id = $1 AND d.deleted_at IS NULL ORDER BY d.created_at`,
+         FROM sync_devices d WHERE d.tenant_id = $1 AND d.deleted_at IS NULL
+         -- Los activos primero: es la lista desde la que se da de baja, y un revocado ya no ocupa
+         -- lugar del plan. Se siguen mostrando para que se vea qué pasó con un teléfono viejo.
+         ORDER BY (d.status = 'active') DESC, d.created_at`,
         [this.db.tenant],
       ),
       this.globalCursor(),
@@ -491,6 +495,56 @@ export class SyncService {
       [this.db.tenant],
     );
     return r?.c ?? 0;
+  }
+
+  /**
+   * Da de baja un dispositivo y LIBERA su lugar del plan.
+   *
+   * Faltaba la puerta, no el mecanismo: `sync_devices.status` ya contemplaba `'revoked'`,
+   * `assertDevice` ya rechaza push/pull/bootstrap de un revocado, y el consumo del plan ya cuenta
+   * solo los `active`. Las tres piezas estaban construidas y no había forma de llegar a ellas.
+   *
+   * Sin esto, cada teléfono que se pierde, se cambia o reinstala la app quema un lugar PARA
+   * SIEMPRE. Con el plan básico son tres: al tercer cambio de celular el productor se queda sin
+   * poder usar la app en el campo, y la única salida es pagar un plan más caro por dispositivos
+   * que ya no existen.
+   *
+   * QUIÉN PUEDE: cada quien da de baja los suyos; el dueño y el administrador, cualquiera de la
+   * finca — el caso del empleado que se fue con la app instalada, que es cuando más urge. La
+   * comprobación va acá y no en la matriz porque la ruta cae bajo `sincronizacion`, que todos los
+   * roles tienen: sin ella un operario podría desconectarle el teléfono al veterinario.
+   *
+   * ES IDEMPOTENTE. Dar de baja algo ya dado de baja no es un error: es el estado que se pedía. Un
+   * 409 acá solo obligaría a la pantalla a distinguir dos formas de éxito.
+   */
+  async revokeDevice(id: string) {
+    const t = this.db.tenant;
+    const actor = requestContext.getStore();
+
+    const device = await this.db.one<{ id: string; user_id: string; status: string; platform: string }>(
+      `SELECT id, user_id, status, platform FROM sync_devices
+       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [id, t],
+    );
+    if (!device) throw new NotFoundException({ code: 'sync.device_not_found', title: 'Dispositivo no encontrado' });
+
+    const esPropio = device.user_id === actor?.userId;
+    const mandaEnLaFinca = actor?.role === 'owner' || actor?.role === 'admin';
+    if (!esPropio && !mandaEnLaFinca)
+      throw new ForbiddenException({
+        code: 'sync.device_ajeno',
+        title: 'Solo el propietario o el administrador pueden dar de baja el dispositivo de otra persona',
+      });
+
+    if (device.status !== 'active') return { revoked: true, already: true };
+
+    // `push_token` se limpia junto con la baja: si quedara, el transporte push seguiría mandando
+    // avisos de la finca a un teléfono que ya no pertenece a nadie.
+    await this.db.query(
+      `UPDATE sync_devices SET status = 'revoked', push_token = NULL, updated_at = now() WHERE id = $1`,
+      [id],
+    );
+    return { revoked: true, already: false };
   }
 
   private async assertDevice(id: string) {
