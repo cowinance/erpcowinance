@@ -43,6 +43,7 @@ import {
   stageWeaning,
   stageWeighing,
 } from './capture-actions';
+import { decidirCambioDeFinca, decidirIngreso } from './session-rules';
 import type { PulledChangesetWire, ServerConflict, SyncCtx } from './sync-types';
 import {
   type CachedNotification,
@@ -429,18 +430,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const newUserId: string | undefined = j.user?.id;
         const newTenantId: string | undefined = j.user?.tenant_id;
         const prev = metaRef.current;
-        const storeExists = !!prev?.serverDeviceId;
-        const sameOwner = !!newUserId && prev?.userId === newUserId && prev?.tenantId === newTenantId;
-
-        if (storeExists && !sameOwner) {
-          // No perder cambios locales sin subir del dueño anterior: no se pueden
-          // enviar bajo la cuenta nueva (device de otro tenant → 404) ni descartar
-          // en silencio. Se bloquea el cambio hasta sincronizarlos con su cuenta.
-          const pending = await savedPendingCount();
-          if (pending > 0) {
-            return `Este dispositivo tiene ${pending} ${pending === 1 ? 'cambio' : 'cambios'} sin sincronizar de otra cuenta. Ingresá con esa cuenta y sincronizá (o reiniciá la base local desde el Menú) antes de cambiar de usuario.`;
-          }
-          // Sin pendientes: descartar el store del dueño previo y re-namespace limpio.
+        const decision = await decidirIngreso({
+          storeExistente: !!prev?.serverDeviceId,
+          mismoDueno: !!newUserId && prev?.userId === newUserId && prev?.tenantId === newTenantId,
+          contarPendientes: savedPendingCount,
+        });
+        // No perder cambios locales sin subir del dueño anterior: no se pueden enviar bajo la
+        // cuenta nueva (device de otro tenant → 404) ni descartar en silencio.
+        if (decision.accion === 'bloquear') return decision.mensaje;
+        if (decision.accion === 'descartar') {
           await storageRef.current.reset();
           deviceRef.current = null;
           metaRef.current = null;
@@ -486,13 +484,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
    */
   const switchOrganization = useCallback(
     async (tenantId: string): Promise<string | null> => {
-      const destino = metaRef.current?.organizations?.find((o) => o.tenant_id === tenantId);
-      if (!destino) return 'No tenés acceso a esa finca.';
-      if (tenantId === metaRef.current?.tenantId) return null; // ya estás ahí
-
-      const pending = await savedPendingCount();
-      if (pending > 0)
-        return `Tenés ${pending} ${pending === 1 ? 'cambio' : 'cambios'} sin sincronizar. Sincronizá antes de cambiar de finca: no se pueden subir desde otra.`;
+      const decision = await decidirCambioDeFinca({
+        organizaciones: metaRef.current?.organizations ?? [],
+        fincaActual: metaRef.current?.tenantId,
+        destino: tenantId,
+        contarPendientes: savedPendingCount,
+      });
+      if (decision.accion === 'bloquear') return decision.mensaje;
+      if (decision.accion === 'seguir') return null; // ya estás ahí
 
       let j: any;
       try {
