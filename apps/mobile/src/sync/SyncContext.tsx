@@ -8,18 +8,42 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import { SyncDevice, Changeset, Op, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
-import { farmToday, setFarmTimeZone, getFarmTimeZone } from '../lib/date';
-import {
-  computeWithdrawal,
-  computeExpectedDueDateFromService,
-  computeExpectedDueDateFromDiagnosis,
-  latestWithdrawal,
-  newbornCategoryCode,
-} from '@cowinance/domain';
+import { SyncDevice, Changeset, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
+import { setFarmTimeZone, getFarmTimeZone } from '../lib/date';
 import { createStorage } from './storage';
 import type { DeviceStorage, PersistedMeta, AgendaItem } from './storage.types';
-import { buildMortalityEmit, buildWeaningEmit, buildNoteEmit } from './capture-builders';
+import {
+  describePending,
+  effectiveWithdrawal,
+  findAnimalByTag,
+  findOpenPregnancy,
+  getAnimal,
+  listAnimalEvents,
+  listAnimals,
+  listBulls,
+  listCategoriesInUse,
+  listLots,
+  listProducts,
+  listTasks,
+  tieneCapacidad,
+} from './store-queries';
+import {
+  stageCalving,
+  stageDiagnosis,
+  stageHeat,
+  stageMortality,
+  stageMovement,
+  stageNewAnimal,
+  stageNote,
+  stageService,
+  stageTaskCreate,
+  stageTaskFields,
+  stageTreatment,
+  stageVaccination,
+  stageWeaning,
+  stageWeighing,
+} from './capture-actions';
+import type { PulledChangesetWire, ServerConflict, SyncCtx } from './sync-types';
 import {
   type CachedNotification,
   type NotificationCacheState,
@@ -34,237 +58,23 @@ import {
 } from './notification-cache';
 export type { AgendaItem } from './storage.types';
 export type { CachedNotification } from './notification-cache';
+// Las pantallas siguen importando los tipos desde acá: el contrato público del módulo no cambia
+// porque las definiciones se hayan mudado a `sync-types`.
+export type {
+  AnimalEventRow,
+  AnimalRow,
+  LocalPregnancy,
+  LotRow,
+  PendingItem,
+  ServerConflict,
+  SyncCtx,
+  TaskRow,
+  VetProduct,
+} from './sync-types';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
 const AUTO_SYNC_INTERVAL_MS = 60_000;
 const POST_CAPTURE_DEBOUNCE_MS = 2_500;
-
-/** Forma cruda de un changeset en la respuesta de pull (wire, snake_case). */
-interface PulledChangesetWire {
-  server_seq: number;
-  device_id: string | null;
-  seq: number | null;
-  hlc: string;
-  id: string;
-  schema_version: number;
-  ops: Op[];
-}
-
-// `RemoteChangeset` (changeset recibido por pull, con deviceId/seq nullable) vive
-// ahora en sync-core (ADR-0016, P-a). El apply de un server-origin lo hace
-// SyncDevice.sync por ops/hlc/cursor; ya no hace falta puente ni throw en el móvil.
-
-export interface AnimalRow {
-  id: string;
-  tag?: string;
-  name?: string;
-  status?: string;
-  sex?: string;
-  category?: string;
-  /** Lote actual (sincronizable). El nombre se resuelve del catálogo por este id. */
-  current_lot_id?: string | null;
-  lot_name?: string;
-  last_weight_kg?: number;
-  last_weighed_at?: string;
-  /**
-   * Derivados de SOLO LECTURA que manda el servidor para la tarjeta de manga (retiro vigente y
-   * casos clínicos abiertos). El dispositivo nunca los pone en un put: los recalcula el servidor.
-   * Lo que el dispositivo capturó offline se combina aparte — ver `withdrawalOf`.
-   */
-  meat_withdrawal_until?: string | null;
-  milk_withdrawal_until?: string | null;
-  open_cases?: number;
-  case_severity?: string | null;
-}
-
-export interface VetProduct {
-  id: string;
-  name: string;
-  type: string;
-  withdrawal_meat_days?: number;
-  withdrawal_milk_hours?: number;
-  default_dose?: string;
-}
-
-/** Lote del catálogo local (P3 M-3.1): destino de movimientos, usable 100% offline. */
-export interface LotRow {
-  id: string;
-  name: string;
-  current_paddock_id: string | null;
-  paddock_name: string | null;
-}
-
-export interface TaskRow {
-  id: string;
-  title: string;
-  description: string | null;
-  type: string;
-  status: string;
-  due_date: string | null;
-  priority: string;
-  related_type: string | null;
-  related_id: string | null;
-  /** Responsable (sincroniza vía TASK_SYNC_FIELDS). Permite filtrar «asignadas a mí» offline. */
-  assigned_to: string | null;
-}
-
-export interface LocalPregnancy {
-  id: string;
-  animal_id: string;
-  status: string;
-  diagnosis_date?: string;
-  expected_due_date?: string;
-}
-
-export interface PendingItem {
-  seq: number;
-  summary: string;
-  tag?: string;
-}
-
-export interface ServerConflict {
-  id: string;
-  conflict_type: string;
-  entity_type: string;
-  detail: string;
-  tag?: string;
-  created_at: string;
-  resolution?: string;
-  resolved_at?: string;
-}
-
-interface SyncCtx {
-  status: 'boot' | 'login' | 'ready' | 'error';
-  errorMsg?: string;
-  userName?: string;
-  userEmail?: string;
-  /** Id del usuario logueado: filtra «asignadas a mí» sin red. */
-  userId?: string;
-  /**
-   * Fetch autenticado (Bearer + rotación de refresh + 401→login). Expuesto para
-   * que la capa de cuenta (AccountContext) reutilice el MISMO mecanismo de auth
-   * al leer /auth/me — sin un segundo flujo de refresh ni tocar el store de sync.
-   */
-  authFetch: (path: string, init?: RequestInit) => Promise<Response>;
-  login: (email: string, password: string) => Promise<string | null>;
-  logout: () => Promise<void>;
-  /** Fincas de esta persona con su rol en cada una. Una sola (o ninguna) = no hay nada que elegir. */
-  organizations: { tenant_id: string; name: string; role: string }[];
-  /** Finca en la que está la sesión. La usa el selector para marcar cuál es la actual. */
-  tenantId?: string;
-  /** Cambia de finca: descarta el store local y vuelve a bootstrapear. `null` = salió bien. */
-  switchOrganization: (tenantId: string) => Promise<string | null>;
-  farmName?: string;
-  /** Zona con la que se fecha en este dispositivo. `null` = todavía la del teléfono. */
-  farmTimeZone: string | null;
-  lastSyncAt?: string;
-  lastSyncResult?: string;
-  storageEngine: string;
-  pendingCount: number;
-  offlineSim: boolean;
-  syncing: boolean;
-  version: number;
-  animals: (query?: string) => AnimalRow[];
-  animal: (id: string) => AnimalRow | null;
-  animalEvents: (id: string) => { id: string; type: string; at: string; data: Record<string, unknown> }[];
-  findByTag: (tag: string) => AnimalRow | null;
-  products: (type?: 'vaccine' | 'other') => VetProduct[];
-  bulls: () => AnimalRow[];
-  lots: () => LotRow[];
-  /** Tareas locales (bootstrap pendientes + completadas en sesión), 100% offline (P6-3). */
-  tasks: () => TaskRow[];
-  /** Crea una tarea offline (put sobre tasks; el servidor sanea a general/pending). */
-  captureTaskCreate: (title: string, opts?: { dueDate?: string | null; priority?: string }) => void;
-  /** Completa una tarea offline (put status='done' + completed_at del device). */
-  captureTaskComplete: (taskId: string) => void;
-  /** Inicia una tarea offline (put status='in_progress'). */
-  captureTaskStart: (taskId: string) => void;
-  /** Cancela una tarea offline (put status='canceled'). */
-  captureTaskCancel: (taskId: string) => void;
-  /** Reprograma offline (put due_date, sin cambio de estado). `null` = sin fecha. */
-  captureTaskReschedule: (taskId: string, dueDate: string | null) => void;
-  /** Asigna/desasigna responsable offline (put assigned_to). `null` = desasignar. */
-  captureTaskAssign: (taskId: string, assignedTo: string | null) => void;
-  /** Agenda diaria cacheada (P4-2), usable offline; `agendaAt` = cuándo se refrescó. */
-  agenda: () => AgendaItem[];
-  agendaAt?: string;
-  /** Feed in_app cacheado (P7-4.c), vista reconciliada (snapshot + read-set), usable offline. */
-  notifications: () => CachedNotification[];
-  /** Conteo de no leídas sobre la vista reconciliada (misma fuente que `notifications()`). */
-  unreadNotifications: () => number;
-  /** Cuándo se refrescó el snapshot del feed in_app. */
-  notificationsAt?: string;
-  /** Marca leída (optimista + persistente) y hace POST /read best-effort; no navega. */
-  markNotificationRead: (id: string) => Promise<void>;
-  /** Refresca el feed in_app (flush de reads pendientes + GET), reutilizable al enfocar la pantalla. */
-  refreshNotifications: () => Promise<void>;
-  /** Id del device registrado en el servidor (para asociar el token de push). */
-  serverDeviceId?: string;
-  /** Último token Expo confirmado con el servidor (optimización local de idempotencia). */
-  pushLastToken?: string;
-  /** Sincroniza el token Expo con el servidor (POST push-token + persiste lastPushToken). */
-  syncPushToken: (token: string) => Promise<void>;
-  /** Refresca el feed in_app con anti-ráfaga (debounce trailing); para pushes en foreground. */
-  scheduleNotificationsRefresh: () => void;
-  openPregnancy: (animalId: string) => LocalPregnancy | null;
-  /**
-   * ¿Este usuario puede hacerlo? Resuelto con la matriz que trajo el bootstrap, así que contesta
-   * SIN SEÑAL — que es cuando la app tiene que decidir qué ofrecer.
-   *
-   * No es un control de seguridad: el servidor revalida cada push contra la misma matriz. Sirve
-   * para no ofrecer un botón que guarda una captura offline destinada a ser rechazada.
-   *
-   * Sin capacidades conocidas (bootstrap viejo, guardado antes de que esto existiera) devuelve
-   * `true`: es preferible ofrecer de más y que el servidor rechace, a dejar una app instalada sin
-   * ningún botón después de actualizar.
-   */
-  puede: (cap: string, access?: 'read' | 'write') => boolean;
-  /**
-   * Fin de retiro EFECTIVO de un animal: lo que dijo el servidor combinado con los tratamientos
-   * que este dispositivo capturó sin señal. Gana el más lejano — un tratamiento aplicado recién en
-   * la manga extiende el retiro, y quedarse con el dato del servidor diría que el animal ya está
-   * apto cuando no lo está.
-   */
-  withdrawalOf: (animalId: string) => { meat: string | null; milk: string | null };
-  captureWeighing: (animalId: string, kg: number, cc?: number) => void;
-  captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => void;
-  captureTreatment: (animalId: string, productId: string, dose?: number, route?: string) => { meatUntil: string | null };
-  captureHeat: (animalId: string) => void;
-  captureService: (animalId: string, method: 'ai' | 'natural', sireId?: string) => void;
-  captureDiagnosis: (animalId: string, result: 'pregnant' | 'empty') => { expectedDue?: string };
-  captureCalving: (damId: string, calf: { sex: 'F' | 'M'; tag?: string }) => { calfId: string };
-  /** Alta rápida en el corral: put sobre `animals` con id del dispositivo, igual que la cría de un
-   *  parto. El servidor (AnimalSyncHandler) resuelve category_code→category_id, inserta la caravana
-   *  visual y marca conflicto si ya existía. Las categorías salen del rodeo bajado, no de una lista
-   *  escrita en la app: son un catálogo editable por finca. */
-  captureNewAnimal: (a: {
-    tag: string;
-    sex: 'F' | 'M';
-    categoryCode: string;
-    categoryLabel: string;
-    origin: 'born' | 'purchased';
-    lotId?: string | null;
-  }) => { animalId: string };
-  /** Las categorías que la finca usa de verdad, para el selector del alta. */
-  categoriesInUse: () => { code: string; label: string }[];
-  /** Mueve un animal a un lote (o lo saca: toLotId=null). Emite SOLO el event op de
-   *  animal_movements (event-only, M-3.2.a); el servidor deriva el potrero y converge. */
-  captureMovement: (animalId: string, toLotId: string | null, reason?: string) => void;
-  /** Baja por muerte (P5-2): emite SOLO el event op de mortalities (event-only, Patrón B);
-   *  el servidor autora hecho + status='dead' + timeline y converge por server-origin. */
-  captureMortality: (animalId: string, notes?: string) => void;
-  /** Destete (P5-2): emite SOLO el event op de weanings; el servidor materializa
-   *  atómicamente el hecho, el pesaje determinista (si hay peso) y el timeline. */
-  captureWeaning: (animalId: string, weightKg?: number) => void;
-  /** Nota libre (P5-2): un event op sobre animal_events (event_type='note'); no emite vacías. */
-  captureNote: (animalId: string, text: string) => void;
-  pendingDetail: () => PendingItem[];
-  fetchConflicts: () => Promise<ServerConflict[] | { error: string }>;
-  resolveConflict: (conflictId: string) => Promise<boolean>;
-  syncNow: () => Promise<{ pushed: number; pulled: number } | { error: string }>;
-  setOfflineSim: (v: boolean) => void;
-  resetLocal: () => Promise<void>;
-}
 
 const Ctx = createContext<SyncCtx | null>(null);
 export const useSync = () => {
@@ -272,29 +82,6 @@ export const useSync = () => {
   if (!ctx) throw new Error('useSync fuera de SyncProvider');
   return ctx;
 };
-
-function rowToAnimal(id: string, fields: Record<string, unknown>, lotName?: (lotId: string) => string | undefined): AnimalRow {
-  const currentLotId = (fields.current_lot_id as string) ?? null;
-  return {
-    id,
-    tag: fields.visual_tag as string,
-    name: (fields.name as string) ?? undefined,
-    status: fields.status as string,
-    sex: fields.sex as string,
-    category: fields.category as string,
-    current_lot_id: currentLotId,
-    // El nombre del lote SIEMPRE se resuelve del catálogo (sync.lots()) por
-    // current_lot_id: el put de un movimiento actualiza current_lot_id pero NO el
-    // lot_name denormalizado, que quedaría obsoleto.
-    lot_name: currentLotId ? lotName?.(currentLotId) : undefined,
-    last_weight_kg: fields.last_weight_kg as number,
-    last_weighed_at: fields.last_weighed_at as string,
-    meat_withdrawal_until: (fields.meat_withdrawal_until as string) ?? null,
-    milk_withdrawal_until: (fields.milk_withdrawal_until as string) ?? null,
-    open_cases: (fields.open_cases as number) ?? 0,
-    case_severity: (fields.case_severity as string) ?? null,
-  };
-}
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const storageRef = useRef<DeviceStorage>(createStorage());
@@ -782,8 +569,27 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<SyncCtx>(() => {
     const store = () => deviceRef.current?.store;
-    // Resolución del nombre de lote desde el catálogo local (M-3.2.b), por current_lot_id.
-    const lotNameOf = (lotId: string): string | undefined => store()?.rows.get('lots')?.get(lotId)?.fields.name as string | undefined;
+
+    /**
+     * El ciclo que comparte TODA captura: escribir sobre el dispositivo, cerrar el changeset,
+     * avisarle a la UI y programar el envío. Estaba repetido veinte veces, una por captura, y
+     * cada repetición era una oportunidad de olvidarse del `commit()` — que es exactamente la
+     * forma en que una captura se pierde sin dejar rastro.
+     *
+     * Sin dispositivo todavía (arranque en frío) devuelve el valor neutro en vez de romper. Si el
+     * commit no produjo changeset no hay nada que sincronizar: hoy el único caso es una nota que
+     * quedó vacía tras el trim.
+     */
+    const capturar = <T,>(neutro: T, escribir: (d: SyncDevice) => T): T => {
+      const d = deviceRef.current;
+      if (!d) return neutro;
+      const resultado = escribir(d);
+      if (d.commit()) {
+        bump();
+        scheduleSync();
+      }
+      return resultado;
+    };
 
     return {
       status,
@@ -809,106 +615,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       syncing,
       version,
 
-      animals: (query?: string) => {
-        const m = store()?.rows.get('animals');
-        if (!m) return [];
-        const list: AnimalRow[] = [];
-        for (const [id, st] of m) {
-          if (st.fields.status !== 'active') continue;
-          const a = rowToAnimal(id, st.fields, lotNameOf);
-          if (query) {
-            const q = query.toLowerCase();
-            if (!a.tag?.toLowerCase().includes(q) && !a.name?.toLowerCase().includes(q)) continue;
-          }
-          list.push(a);
-        }
-        return list.sort((a, b) => (a.tag ?? '').localeCompare(b.tag ?? '', undefined, { numeric: true }));
-      },
-
-      animal: (id: string) => {
-        const st = store()?.getRow('animals', id);
-        return st ? rowToAnimal(id, st.fields, lotNameOf) : null;
-      },
-
-      findByTag: (tag: string) => {
-        const m = store()?.rows.get('animals');
-        if (!m) return null;
-        for (const [id, st] of m) {
-          if (st.fields.status === 'active' && String(st.fields.visual_tag ?? '') === tag.trim()) return rowToAnimal(id, st.fields, lotNameOf);
-        }
-        return null;
-      },
-
-      animalEvents: (id: string) => {
-        const m = store()?.events.get('animal_events');
-        if (!m) return [];
-        const list: { id: string; type: string; at: string; data: Record<string, unknown> }[] = [];
-        for (const [eid, row] of m) {
-          if (row.animal_id !== id) continue;
-          list.push({ id: eid, type: String(row.event_type), at: String(row.occurred_at), data: (row.payload as any) ?? {} });
-        }
-        return list.sort((a, b) => (a.at < b.at ? 1 : -1));
-      },
-
-      products: (type?: 'vaccine' | 'other') => {
-        const m = store()?.rows.get('products_veterinary');
-        if (!m) return [];
-        const list: VetProduct[] = [];
-        for (const [id, st] of m) {
-          const p = { id, ...(st.fields as any) } as VetProduct;
-          if (type === 'vaccine' && p.type !== 'vaccine') continue;
-          if (type === 'other' && p.type === 'vaccine') continue;
-          list.push(p);
-        }
-        return list.sort((a, b) => a.name.localeCompare(b.name));
-      },
-
-      bulls: () => {
-        const m = store()?.rows.get('animals');
-        if (!m) return [];
-        const list: AnimalRow[] = [];
-        for (const [id, st] of m) {
-          if (st.fields.status === 'active' && st.fields.category_code === 'toro') list.push(rowToAnimal(id, st.fields, lotNameOf));
-        }
-        return list;
-      },
-
-      // Catálogo de lotes hidratado en el bootstrap (P3 M-3.1). Colección estable
-      // (orden por nombre) y 100% offline: lee del store local, sin red.
-      lots: (): LotRow[] => {
-        const m = store()?.rows.get('lots');
-        if (!m) return [];
-        const list: LotRow[] = [];
-        for (const [id, st] of m) {
-          const f = st.fields as any;
-          list.push({ id, name: String(f.name ?? ''), current_paddock_id: (f.current_paddock_id as string) ?? null, paddock_name: (f.paddock_name as string) ?? null });
-        }
-        return list.sort((a, b) => a.name.localeCompare(b.name));
-      },
-
-      // Tareas hidratadas por el bootstrap (P6-1.b.2) + las completadas en la sesión (put
-      // local). Colección estable, 100% offline: lee del store local (patrón lots()).
-      tasks: (): TaskRow[] => {
-        const m = store()?.rows.get('tasks');
-        if (!m) return [];
-        const list: TaskRow[] = [];
-        for (const [id, st] of m) {
-          const f = st.fields as any;
-          list.push({
-            id,
-            title: String(f.title ?? ''),
-            description: (f.description as string) ?? null,
-            type: String(f.type ?? 'general'),
-            status: String(f.status ?? 'pending'),
-            due_date: (f.due_date as string) ?? null,
-            priority: String(f.priority ?? 'normal'),
-            related_type: (f.related_type as string) ?? null,
-            related_id: (f.related_id as string) ?? null,
-            assigned_to: (f.assigned_to as string) ?? null,
-          });
-        }
-        return list;
-      },
+      animals: (query?: string) => listAnimals(store(), query),
+      animal: (id: string) => getAnimal(store(), id),
+      findByTag: (tag: string) => findAnimalByTag(store(), tag),
+      animalEvents: (id: string) => listAnimalEvents(store(), id),
+      products: (type?: 'vaccine' | 'other') => listProducts(store(), type),
+      bulls: () => listBulls(store()),
+      lots: () => listLots(store()),
+      tasks: () => listTasks(store()),
 
       // Agenda diaria cacheada (P4-2): snapshot del último sync exitoso, usable offline.
       agenda: (): AgendaItem[] => metaRef.current?.agenda ?? [],
@@ -929,522 +643,61 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       syncPushToken,
       scheduleNotificationsRefresh,
 
-      /**
-       * Retiro efectivo: el que trajo el bootstrap (tratamientos de cualquier canal) combinado con
-       * los que ESTE dispositivo capturó offline y todavía no subió. La regla de cuál gana vive en
-       * el dominio (`latestWithdrawal`), igual que la de las alertas.
-       */
-      withdrawalOf: (animalId: string) => {
-        const animal = store()?.getRow('animals', animalId)?.fields as Record<string, unknown> | undefined;
-        const locales: { meat: (string | null)[]; milk: (string | null)[] } = { meat: [], milk: [] };
-        const tratamientos = store()?.events.get('treatments');
-        if (tratamientos) {
-          for (const [, row] of tratamientos) {
-            if ((row as any).animal_id !== animalId) continue;
-            locales.meat.push((row as any).meat_withdrawal_until ?? null);
-            locales.milk.push((row as any).milk_withdrawal_until ?? null);
-          }
-        }
-        return {
-          meat: latestWithdrawal((animal?.meat_withdrawal_until as string) ?? null, ...locales.meat),
-          milk: latestWithdrawal((animal?.milk_withdrawal_until as string) ?? null, ...locales.milk),
-        };
+      withdrawalOf: (animalId: string) => effectiveWithdrawal(store(), animalId),
+
+      puede: (cap: string, access: 'read' | 'write' = 'write') =>
+        tieneCapacidad(metaRef.current?.capabilities, cap, access),
+
+      openPregnancy: (animalId: string) => findOpenPregnancy(store(), animalId),
+
+      captureVaccination: (animalId, productId, dose, batch) =>
+        capturar(undefined, (d) => stageVaccination(d, animalId, productId, dose, batch, new Date(), Crypto.randomUUID)),
+
+      // La zona del DISPOSITIVO y no la de la finca: el teléfono está físicamente ahí, y el
+      // retiro de carne se cuenta en días de calendario. Ver `stageTreatment`.
+      captureTreatment: (animalId, productId, dose, route) =>
+        capturar({ meatUntil: null }, (d) =>
+          stageTreatment(d, animalId, productId, dose, route, new Date(), Crypto.randomUUID, Intl.DateTimeFormat().resolvedOptions().timeZone),
+        ),
+
+      captureHeat: (animalId) => capturar(undefined, (d) => stageHeat(d, animalId, new Date(), Crypto.randomUUID)),
+      captureService: (animalId, method, sireId) =>
+        capturar(undefined, (d) => stageService(d, animalId, method, sireId, new Date(), Crypto.randomUUID)),
+      captureDiagnosis: (animalId, result) =>
+        capturar({}, (d) => stageDiagnosis(d, animalId, result, new Date(), Crypto.randomUUID)),
+      captureCalving: (damId, calf) =>
+        capturar({ calfId: '' }, (d) => stageCalving(d, damId, calf, new Date(), Crypto.randomUUID)),
+      captureNewAnimal: (a) => capturar({ animalId: '' }, (d) => stageNewAnimal(d, a, new Date(), Crypto.randomUUID)),
+
+      categoriesInUse: () => listCategoriesInUse(store()),
+
+      captureMovement: (animalId, toLotId, reason) =>
+        capturar(undefined, (d) => stageMovement(d, animalId, toLotId, reason, new Date(), Crypto.randomUUID)),
+      captureMortality: (animalId, notes) =>
+        capturar(undefined, (d) => stageMortality(d, animalId, notes, new Date(), Crypto.randomUUID)),
+      captureWeaning: (animalId, weightKg) =>
+        capturar(undefined, (d) => stageWeaning(d, animalId, weightKg, new Date(), Crypto.randomUUID)),
+      // Una nota vacía no emite nada; `capturar` tampoco sincroniza porque el commit no produce
+      // changeset. Es el único caso en que una captura puede no dejar rastro, y es intencional.
+      captureNote: (animalId, text) => {
+        capturar(false, (d) => stageNote(d, animalId, text, new Date(), Crypto.randomUUID));
       },
 
-      puede: (cap: string, access: 'read' | 'write' = 'write') => {
-        const caps = metaRef.current?.capabilities;
-        if (!caps) return true; // bootstrap viejo: ofrecer de más y que el servidor rechace
-        const otorgado = caps[cap];
-        if (!otorgado) return false;
-        return otorgado === 'write' || access === 'read';
+      captureTaskCreate: (title, opts) => {
+        capturar(false, (d) => stageTaskCreate(d, title, opts, Crypto.randomUUID));
       },
+      captureTaskComplete: (taskId) =>
+        capturar(undefined, (d) => stageTaskFields(d, taskId, { status: 'done', completed_at: new Date().toISOString() })),
+      captureTaskStart: (taskId) => capturar(undefined, (d) => stageTaskFields(d, taskId, { status: 'in_progress' })),
+      captureTaskCancel: (taskId) => capturar(undefined, (d) => stageTaskFields(d, taskId, { status: 'canceled' })),
+      // Sin `status` → el handler lo lee como reprogramar; sin `status` ni `due_date` → asignar.
+      captureTaskReschedule: (taskId, dueDate) => capturar(undefined, (d) => stageTaskFields(d, taskId, { due_date: dueDate })),
+      captureTaskAssign: (taskId, assignedTo) => capturar(undefined, (d) => stageTaskFields(d, taskId, { assigned_to: assignedTo })),
 
-      openPregnancy: (animalId: string) => {
-        const m = store()?.rows.get('pregnancies');
-        if (!m) return null;
-        for (const [id, st] of m) {
-          if (st.fields.animal_id === animalId && st.fields.status === 'open')
-            return { id, ...(st.fields as any) } as LocalPregnancy;
-        }
-        return null;
-      },
+      captureWeighing: (animalId, kg, cc) =>
+        capturar(undefined, (d) => stageWeighing(d, animalId, kg, cc, new Date(), Crypto.randomUUID)),
 
-      captureVaccination: (animalId: string, productId: string, dose?: number, batch?: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const now = new Date().toISOString();
-        const product = store()?.getRow('products_veterinary', productId)?.fields as any;
-        d.addEvent('vaccinations', Crypto.randomUUID(), {
-          animal_id: animalId,
-          product_id: productId,
-          applied_at: now,
-          dose: dose ?? null,
-          dose_unit: dose ? 'ml' : null,
-          batch_number: batch ?? null,
-        });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          event_type: 'vaccination',
-          payload: { product: product?.name ?? null, dose: dose ?? null },
-          occurred_at: now,
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureTreatment: (animalId: string, productId: string, dose?: number, route?: string) => {
-        const d = deviceRef.current;
-        if (!d) return { meatUntil: null };
-        const now = new Date();
-        const product = store()?.getRow('products_veterinary', productId)?.fields as any;
-        // Cálculo LOCAL de retiros (el operario necesita saberlo en el campo, sin señal).
-        //
-        // La zona del DISPOSITIVO: el retiro de carne se cuenta en días de calendario, y el teléfono
-        // está físicamente en la finca, así que su zona es la de la finca. Sin esto se contaba en
-        // UTC y el retiro salía corrido un día — y en un huso positivo, corrido hacia ANTES, que es
-        // carne con residuos dada por habilitada.
-        //
-        // El servidor sigue siendo la autoridad y recalcula con la zona de la organización; esto es
-        // lo que el operario ve en la manga mientras tanto, y ahora coincide.
-        const zonaDelDispositivo = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const { meatWithdrawalUntil: meatUntil, milkWithdrawalUntil: milkUntil } = computeWithdrawal(
-          now,
-          product?.withdrawal_meat_days ?? null,
-          product?.withdrawal_milk_hours ?? null,
-          zonaDelDispositivo,
-        );
-        d.addEvent('treatments', Crypto.randomUUID(), {
-          animal_id: animalId,
-          product_id: productId,
-          applied_at: now.toISOString(),
-          dose: dose ?? null,
-          dose_unit: dose ? 'ml' : null,
-          route: route ?? null,
-          meat_withdrawal_until: meatUntil,
-          milk_withdrawal_until: milkUntil,
-        });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          event_type: 'treatment',
-          payload: { product: product?.name ?? null, withdrawal_meat_until: meatUntil },
-          occurred_at: now.toISOString(),
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-        return { meatUntil };
-      },
-
-      captureHeat: (animalId: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const now = new Date().toISOString();
-        d.addEvent('breeding_events', Crypto.randomUUID(), { animal_id: animalId, type: 'heat', occurred_at: now });
-        d.addEvent('animal_events', Crypto.randomUUID(), { animal_id: animalId, event_type: 'heat', payload: {}, occurred_at: now });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureService: (animalId: string, method: 'ai' | 'natural', sireId?: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const now = new Date().toISOString();
-        d.addEvent('breeding_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          type: method === 'ai' ? 'service_ai' : 'service_natural',
-          occurred_at: now,
-          sire_id: sireId ?? null,
-        });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          event_type: 'service',
-          payload: { method },
-          occurred_at: now,
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureDiagnosis: (animalId: string, result: 'pregnant' | 'empty') => {
-        const d = deviceRef.current;
-        if (!d) return {};
-        const now = new Date();
-        const today = farmToday(now);
-
-        // Preñez abierta local (si existe)
-        let openId: string | null = null;
-        const pm = store()?.rows.get('pregnancies');
-        if (pm) for (const [id, st] of pm) if (st.fields.animal_id === animalId && st.fields.status === 'open') openId = id;
-
-        if (result === 'pregnant') {
-          // Fecha probable: último servicio local + gestación; si no hay, estimación conservadora
-          let serviceAt: Date | null = null;
-          const be = store()?.events.get('breeding_events');
-          if (be)
-            for (const [, row] of be) {
-              if (row.animal_id === animalId && String(row.type).startsWith('service')) {
-                const at = new Date(String(row.occurred_at));
-                if (!serviceAt || at > serviceAt) serviceAt = at;
-              }
-            }
-          const expectedDue = serviceAt
-            ? computeExpectedDueDateFromService(serviceAt)
-            : computeExpectedDueDateFromDiagnosis(now);
-          d.setFields('pregnancies', Crypto.randomUUID(), {
-            animal_id: animalId,
-            status: 'open',
-            diagnosis_date: today,
-            method: 'ultrasound',
-            expected_due_date: expectedDue,
-          });
-          d.addEvent('animal_events', Crypto.randomUUID(), {
-            animal_id: animalId,
-            event_type: 'pregnancy_diagnosed',
-            payload: { method: 'ultrasound', expected_due_date: expectedDue },
-            occurred_at: now.toISOString(),
-          });
-          d.commit();
-          bump();
-          scheduleSync();
-          return { expectedDue };
-        }
-
-        if (openId) d.setFields('pregnancies', openId, { status: 'lost', closed_at: today });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          event_type: 'pregnancy_negative',
-          payload: { previous_lost: !!openId },
-          occurred_at: now.toISOString(),
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-        return {};
-      },
-
-      captureCalving: (damId: string, calf: { sex: 'F' | 'M'; tag?: string }) => {
-        const d = deviceRef.current;
-        if (!d) return { calfId: '' };
-        const now = new Date();
-        const today = farmToday(now);
-        const dam = store()?.getRow('animals', damId)?.fields as any;
-
-        let pregnancyId: string | null = null;
-        const pm = store()?.rows.get('pregnancies');
-        if (pm) for (const [id, st] of pm) if (st.fields.animal_id === damId && st.fields.status === 'open') pregnancyId = id;
-
-        const calfId = Crypto.randomUUID();
-        const categoryCode = newbornCategoryCode(calf.sex);
-        d.setFields('animals', calfId, {
-          visual_tag: calf.tag ?? null,
-          name: null,
-          status: 'active',
-          sex: calf.sex,
-          birth_date: today,
-          category: categoryCode === 'ternero' ? 'Ternero' : 'Ternera',
-          category_code: categoryCode,
-          dam_id: damId,
-          current_lot_id: dam?.current_lot_id ?? null, // hereda el lote de la madre (el nombre se resuelve del catálogo)
-          last_weight_kg: null,
-          last_weighed_at: null,
-        });
-        if (pregnancyId) d.setFields('pregnancies', pregnancyId, { status: 'calved', closed_at: today });
-
-        const calvingId = Crypto.randomUUID();
-        d.addEvent('calvings', calvingId, {
-          dam_id: damId,
-          pregnancy_id: pregnancyId,
-          calving_date: today,
-          offspring_count: 1,
-        });
-        d.addEvent('calving_offspring', Crypto.randomUUID(), { calving_id: calvingId, animal_id: calfId, vitality: 'live' });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: damId,
-          event_type: 'calving',
-          payload: { offspring: 1, calf_tag: calf.tag ?? null },
-          occurred_at: now.toISOString(),
-        });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: calfId,
-          event_type: 'birth',
-          payload: { dam_tag: dam?.visual_tag ?? null },
-          occurred_at: now.toISOString(),
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-        return { calfId };
-      },
-
-      /**
-       * Alta rápida (corral). Mismo camino que la cría de un parto —un put sobre `animals` con id
-       * generado en el teléfono— porque es el único que el servidor ya sabe recibir: el handler
-       * contempla explícitamente la «creación de animal offline».
-       *
-       * `birth_date` va en null a propósito: en un alta rápida nadie sabe la fecha exacta, y poner
-       * hoy como nacimiento crearía animales recién nacidos de 400 kilos. Sin fecha el sistema
-       * simplemente no calcula edad, que es lo honesto; se completa después desde la web.
-       *
-       * `origin` viaja de verdad y no queda en el 'born' fijo del INSERT: lo que se da de alta a
-       * mano suele ser comprado, y ese campo alimenta la tasa de reposición.
-       */
-      captureNewAnimal: (a) => {
-        const d = deviceRef.current;
-        if (!d) return { animalId: '' };
-        const animalId = Crypto.randomUUID();
-        d.setFields('animals', animalId, {
-          visual_tag: a.tag,
-          name: null,
-          status: 'active',
-          sex: a.sex,
-          birth_date: null,
-          category: a.categoryLabel,
-          category_code: a.categoryCode,
-          origin: a.origin,
-          current_lot_id: a.lotId ?? null,
-          last_weight_kg: null,
-          last_weighed_at: null,
-        });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          event_type: 'registered',
-          payload: { origin: a.origin, category: a.categoryCode, source: 'movil_alta_rapida' },
-          occurred_at: new Date().toISOString(),
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-        return { animalId };
-      },
-
-      /**
-       * Las categorías se derivan del rodeo bajado y NO de una lista escrita en la app: son un
-       * catálogo que cada finca edita en Configuración, así que cualquier lista fija quedaría
-       * desactualizada sin que nadie se entere. El costo es que una categoría que la finca todavía
-       * no usa no aparece; para el alta rápida alcanza, y lo raro se carga desde la web.
-       */
-      categoriesInUse: () => {
-        const vistas = new Map<string, string>();
-        const am = store()?.rows.get('animals');
-        if (am)
-          for (const [, st] of am) {
-            const code = st.fields.category_code;
-            const label = st.fields.category;
-            if (typeof code === 'string' && code && !vistas.has(code)) vistas.set(code, typeof label === 'string' && label ? label : code);
-          }
-        return [...vistas].map(([code, label]) => ({ code, label })).sort((x, y) => x.label.localeCompare(y.label, 'es'));
-      },
-
-      // Movimiento offline (P3 M-3.3.a): emite SOLO el event op de intención. El
-      // servidor (MovementSyncHandler → recordMovement) deriva el potrero del lote,
-      // escribe hecho+timeline y emite el server-origin put que converge el campo en
-      // todos los devices. `toLotId=null` ⇒ sacar del lote. Sin put compañero
-      // (atomicidad de M-3.2.a): el lote local converge al sincronizar (accept-lag).
-      captureMovement: (animalId: string, toLotId: string | null, reason?: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        d.addEvent('animal_movements', Crypto.randomUUID(), {
-          animal_id: animalId,
-          to_lot_id: toLotId,
-          reason: reason ?? 'movimiento',
-          moved_at: new Date().toISOString(),
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      // Baja por muerte offline (P5-2, Patrón B): emite SOLO el event op de mortalities.
-      // El servidor (MortalitySyncHandler → recordMortality) escribe hecho + status='dead'
-      // + timeline y emite el server-origin put que converge el estado en todos los devices
-      // (incl. el emisor, por pull). Sin put de status ni animal_events compañero: la
-      // atomicidad de P5-1 exige que el estado y su hecho viajen juntos (accept-lag).
-      captureMortality: (animalId: string, notes?: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const op = buildMortalityEmit(animalId, notes, new Date(), Crypto.randomUUID);
-        d.addEvent(op.table, op.rowId, op.row);
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      // Destete offline (P5-2, Patrón B): emite SOLO el event op de weanings. El servidor
-      // (WeaningSyncHandler → recordWeaning) materializa atómicamente el hecho, el pesaje
-      // asociado (si hay peso, con identidad determinista) y el timeline. Fact-only: sin
-      // server-origin (no toca campo autoritativo). Sin animal_events ni pesaje compañero.
-      captureWeaning: (animalId: string, weightKg?: number) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const op = buildWeaningEmit(animalId, weightKg, new Date(), Crypto.randomUUID);
-        d.addEvent(op.table, op.rowId, op.row);
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      // Nota libre offline (P5-2): un único event op sobre animal_events (event_type='note'),
-      // cubierto por el AnimalEventSyncHandler existente. La nota aparece de inmediato en el
-      // timeline local. No se emiten notas vacías (trim en el builder).
-      captureNote: (animalId: string, text: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const op = buildNoteEmit(animalId, text, new Date(), Crypto.randomUUID);
-        if (!op) return; // nota vacía tras trim → no se emite
-        d.addEvent(op.table, op.rowId, op.row);
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      // Crear tarea offline (P6-3): put sobre `tasks` (entidad mutable) → optimismo local
-      // inmediato + push. El servidor (TaskSyncHandler) sanea (fuerza general/pending); se
-      // envían esos valores para dejar el row local completo. type='health'/related_* son
-      // reservados del servidor y no se envían.
-      captureTaskCreate: (title: string, opts?: { dueDate?: string | null; priority?: string }) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const t = title.trim();
-        if (!t) return;
-        d.setFields('tasks', Crypto.randomUUID(), {
-          title: t,
-          type: 'general',
-          status: 'pending',
-          due_date: opts?.dueDate ?? null,
-          priority: opts?.priority ?? 'normal',
-          description: null,
-          related_type: null,
-          related_id: null,
-          completed_at: null,
-        });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      // Completar tarea offline (P6-3): put status='done' + completed_at del device (D2).
-      // El row local pasa a done al instante; el handler aplica pending→done (done→done no-op).
-      captureTaskComplete: (taskId: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        d.setFields('tasks', taskId, { status: 'done', completed_at: new Date().toISOString() });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      // Paridad móvil de tareas: el TaskSyncHandler acepta estos puts offline (status /
-      // due_date-solo / assigned_to-solo) y los aplica con la regla única del TaskService.
-      captureTaskStart: (taskId: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        d.setFields('tasks', taskId, { status: 'in_progress' });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureTaskCancel: (taskId: string) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        d.setFields('tasks', taskId, { status: 'canceled' });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureTaskReschedule: (taskId: string, dueDate: string | null) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        d.setFields('tasks', taskId, { due_date: dueDate }); // sin status → el handler reprograma
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureTaskAssign: (taskId: string, assignedTo: string | null) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        d.setFields('tasks', taskId, { assigned_to: assignedTo }); // sin status/due_date → asigna
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      captureWeighing: (animalId: string, kg: number, cc?: number) => {
-        const d = deviceRef.current;
-        if (!d) return;
-        const now = new Date().toISOString();
-        d.addEvent('weighings', Crypto.randomUUID(), {
-          animal_id: animalId,
-          weight_kg: kg,
-          body_condition: cc ?? null,
-          weighed_at: now,
-        });
-        d.addEvent('animal_events', Crypto.randomUUID(), {
-          animal_id: animalId,
-          event_type: 'weighing',
-          payload: { weight_kg: kg, body_condition: cc ?? null },
-          occurred_at: now,
-        });
-        // Actualiza el "último peso" local (campo de presentación, LWW)
-        d.setFields('animals', animalId, { last_weight_kg: kg, last_weighed_at: now });
-        d.commit();
-        bump();
-        scheduleSync();
-      },
-
-      pendingDetail: () => {
-        const d = deviceRef.current;
-        if (!d) return [];
-        const tagOf = (animalId: unknown) => {
-          if (typeof animalId !== 'string') return undefined;
-          const st = store()?.getRow('animals', animalId);
-          return (st?.fields.visual_tag as string) ?? undefined;
-        };
-        const items: PendingItem[] = [];
-        for (const cs of d.pendingChangesets) {
-          for (const op of cs.ops) {
-            let summary = '';
-            let tag: string | undefined;
-            if (op.kind === 'event') {
-              const row = op.row;
-              tag = tagOf(row.animal_id ?? row.dam_id);
-              if (op.table === 'weighings') summary = `Pesaje · ${row.weight_kg} kg`;
-              else if (op.table === 'vaccinations') summary = 'Vacunación';
-              else if (op.table === 'treatments') summary = 'Tratamiento';
-              else if (op.table === 'mortalities') summary = 'Baja por muerte';
-              else if (op.table === 'weanings') summary = 'Destete';
-              else if (op.table === 'breeding_events')
-                summary = row.type === 'heat' ? 'Celo' : String(row.type).startsWith('service') ? 'Servicio' : 'Evento reproductivo';
-              else if (op.table === 'calvings') summary = 'Parto';
-              else if (op.table === 'calving_offspring') continue; // detalle interno del parto
-              else if (op.table === 'animal_events') {
-                if (row.event_type === 'note') summary = 'Nota';
-                else continue; // espejo del timeline de otras capturas, no repetir
-              } else summary = op.table;
-            } else {
-              if (op.table === 'animals') {
-                tag = (op.fields.visual_tag as string) ?? tagOf(op.rowId);
-                summary = op.fields.visual_tag ? 'Alta de animal' : 'Cambios del animal';
-              } else if (op.table === 'pregnancies') {
-                tag = tagOf(op.fields.animal_id) ?? tagOf(op.rowId);
-                summary =
-                  op.fields.status === 'open'
-                    ? 'Diagnóstico de preñez'
-                    : op.fields.status === 'calved'
-                      ? 'Cierre de preñez (parto)'
-                      : 'Cambio de preñez';
-              } else summary = op.table;
-            }
-            items.push({ seq: cs.seq, summary, tag });
-          }
-        }
-        return items;
-      },
+      pendingDetail: () => describePending(deviceRef.current?.pendingChangesets ?? [], store()),
 
       fetchConflicts: async () => {
         if (offlineRef.current) return { error: 'Sin señal — los conflictos se revisan con conexión' };
