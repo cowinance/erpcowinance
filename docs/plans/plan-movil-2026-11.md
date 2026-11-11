@@ -1,6 +1,6 @@
 # Plan: la app móvil, de proyecto a producto
 
-**Fecha:** 2026-11-11 · **Estado: Fase 0 hecha salvo la compilación** · **Origen:** pedido del productor —
+**Fecha:** 2026-11-11 · **Estado: Fases 0 y 1 hechas salvo lo que pide un teléfono** · **Origen:** pedido del productor —
 *«rehacer la app móvil, hacerla nativa para Android y iOS, hacerla más profesional»*
 
 > **Cómo leer este documento.** El pedido traía tres cosas juntas —rehacer, nativa, profesional— y
@@ -111,6 +111,12 @@ nativos propios.
 Tienda: Apple 99 USD al año, Google 25 una vez, más revisiones de días. Interna: se reparte el
 `.apk` o por TestFlight/Enterprise, sin revisión. Cambia los tiempos de cada entrega, no el código.
 
+### D-4 · ¿Reporte de fallos a un servicio, y a cuál?
+
+Sentry y sus alternativas piden cuenta y un DSN, igual que EAS. La Fase 1 dejó el registro local y
+la costura para enviarlo; falta decidir si se manda y adónde. Sin servicio, los fallos solo se ven
+si alguien abre la pantalla de Sincronización y los copia.
+
 ### D-3 · ¿Hay Mac disponible?
 
 Compilar para iOS lo exige, salvo que se usen las compilaciones en la nube de EAS. Si no hay Mac ni
@@ -159,19 +165,60 @@ Faltan **tres cosas que no son código** para cerrar la fase:
 
 ## FASE 1 · Que se pueda confiar — 1 semana
 
-1. **`ErrorBoundary` en la raíz**, con pantalla de recuperación que conserve la cola de pendientes.
-   Hoy un error de render pierde la pantalla; no puede además poner en riesgo el trabajo del día.
-2. **Reporte de fallos** (Sentry u otro), con el identificador del dispositivo que ya existe. Sin
+1. ✅ **`ErrorBoundary` en la raíz**, con pantalla de recuperación que conserve la cola de
+   pendientes. Hoy un error de render pierde la pantalla; no puede además poner en riesgo el
+   trabajo del día.
+2. ◐ **Reporte de fallos** (Sentry u otro), con el identificador del dispositivo que ya existe. Sin
    esto, los errores del campo son invisibles.
-3. **Partir `SyncContext`** por las costuras que ya tiene: sesión y tokens · almacén local · cola y
-   envío · bootstrap y catálogos · notificaciones. La API hizo esto tres veces con buen resultado;
-   el método es cortar por donde el archivo ya está dividido, no inventar divisiones nuevas.
-4. **Extender el gate de tamaño al móvil**, con el mismo criterio que la API.
-5. **Tests de lo que duele perder:** cola de pendientes, cambio de organización, y que un rechazo
+3. ✅ **Partir `SyncContext`** por las costuras que ya tiene. La API hizo esto tres veces con buen
+   resultado; el método es cortar por donde el archivo ya está dividido, no inventar divisiones
+   nuevas.
+4. ✅ **Extender el gate de tamaño al móvil**, con el mismo criterio que la API.
+5. ✅ **Tests de lo que duele perder:** cola de pendientes, cambio de organización, y que un rechazo
    del servidor no borre trabajo local.
 
 **Cómo se sabe que terminó:** el gate cubre el móvil, y matar la app con cambios en cola no pierde
 ninguno.
+
+### Cómo quedó
+
+`SyncContext.tsx` pasó de **1.485 a 738 líneas**, cortado por donde ya estaba dividido:
+`sync-types` (las formas de datos), `store-queries` (todo lo que la app lee, como funciones puras),
+`capture-actions` (las veinte capturas) y `session-rules` (las dos decisiones que descartan la base
+local). Los cuatro son `.ts` sin React ni Expo, que es el requisito para que el runner del monorepo
+los tome — y era la razón real de la falta de tests, no una consecuencia.
+
+Apareció `capturar()`, que encierra el ciclo que estaba repetido veinte veces: escribir, confirmar,
+avisar a la UI, programar el envío. Cada repetición era una ocasión de olvidarse del `commit()`,
+que es exactamente cómo una captura se pierde sin dejar rastro.
+
+**La proporción de tests del móvil subió de 0,08 a 0,19** (1.406 líneas de test sobre 7.409 de
+código), con 85 tests nuevos. Los que importan, porque fijan invariantes que un refactor rompe en
+silencio:
+
+| Qué fija | Por qué |
+|---|---|
+| El retiro de carne se cuenta en la zona del teléfono | En UTC salía corrido hacia ANTES: carne con residuos dada por habilitada |
+| El retiro efectivo combina servidor + capturas offline | Gana el más lejano; quedarse con el del servidor diría que el animal ya está apto |
+| El nombre del lote se resuelve del catálogo | El `lot_name` denormalizado queda viejo tras un movimiento |
+| Mortalidad, destete y movimiento emiten UNA sola op | Patrón B: el estado y su hecho tienen que viajar juntos |
+| `sync()` vacía la cola DESPUÉS del push | Se comprobó moviendo esa línea: compila igual y mata tres tests |
+| Volver a entrar con la misma cuenta no toca el disco | Contar pendientes implica restaurar el store del dueño previo |
+
+El gate de tamaño ahora cubre el móvil, techo en 800 líneas para `.ts` y `.tsx` —en el móvil la
+lógica vive en componentes—, peor caso 774 (`manga.tsx`). Se verificó que muerde bajándolo a 700 y
+viéndolo nombrar los dos infractores.
+
+### Lo que quedó a medias y por qué
+
+**El reporte de fallos es local, no remoto.** Se registran los últimos diez fallos en el
+dispositivo, con la pila recortada y las credenciales tapadas, y aparecen en la pantalla de
+Sincronización con el identificador del dispositivo al pie. Deliberadamente fuera del motor de
+sync: un registrador que depende de la pieza que puede estar rota no registra nada el día que
+importa. Mandarlos a un servicio es **D-4** (abajo) y es aditivo: la costura ya está.
+
+**El criterio de cierre está probado en test, no en un teléfono.** Que `restore` conserve la cola
+está fijado por tests; que matar la app de verdad no pierda nada depende de la Fase 0 punto 4.
 
 ---
 
@@ -238,7 +285,7 @@ verificar.
 |---|---|
 | El SDK del lector RFID solo tiene versión Android | Se entrega Android primero; iOS teclea mientras tanto. No bloquea. |
 | La revisión de Apple rechaza la primera entrega | Entregar a TestFlight en la Fase 0, no al final: el rechazo aparece temprano y barato. |
-| Partir `SyncContext` rompe algo sutil | Es el archivo menos probado. **La Fase 1 escribe los tests ANTES de partir**, no después. |
+| ~~Partir `SyncContext` rompe algo sutil~~ | Mitigado distinto de lo planeado: el plan decía escribir los tests ANTES de partir, y se escribieron contra cada módulo **recién extraído**. Escribirlos antes habría exigido montar React y Expo —que es justamente lo que impedía probarlo—. A cambio: se partió en pasos chicos, con typecheck verde en cada uno, sin tocar el contrato público (ninguna pantalla cambió), y los dos cambios de comportamiento son deliberados y están anotados. |
 | OCR de caravanas poco confiable con barro o pelo | Confirmación obligatoria antes de guardar, y el teclado siempre disponible como salida. |
 
 ---
@@ -247,7 +294,14 @@ verificar.
 
 - **El ciclo de captura offline nunca se verificó en un dispositivo real.** Guardar sin señal, verlo
   en la cola, y que suba al sincronizar. La Fase 0 lo habilita; conviene que sea lo primero que se
-  pruebe sobre la primera compilación.
+  pruebe sobre la primera compilación. La Fase 1 lo dejó fijado por tests —la cola sobrevive a un
+  push fallido y a un `restore` desde disco— pero eso no reemplaza apagar el teléfono y volver.
+- **La tarjeta de fallos de la pantalla de Sincronización no se probó en uso.** El `ErrorBoundary`
+  sí: se forzó un error real en el navegador y apareció la pantalla de recuperación con el fallo
+  persistido. La tarjeta pide sesión, así que queda para la primera corrida con API.
+- **Los dos cambios de comportamiento del refactor**, por si alguno sorprende: una nota que queda
+  vacía tras el trim ya no programa un sync (antes lo programaba sin tener nada que enviar), y
+  volver a entrar con la misma cuenta ya no restaura el store solo para contar pendientes.
 - ~~**27 vulnerabilidades de dependencias en el móvil** (1 crítica).~~ Resuelto en la Fase 0 con
   `expo install --fix` (22 paquetes al parche que el SDK 57 espera) más `npm audit fix`: **27 → 8,
   ninguna crítica**. Las 8 que quedan son de herramientas de build y solo se cierran saltando a
