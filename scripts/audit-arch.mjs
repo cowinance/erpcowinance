@@ -72,6 +72,24 @@ const LARGEST_DIR = 'apps/api/src';
  */
 const MAX_SERVICE_LINES = 1000;
 
+/**
+ * Techo de líneas por archivo del MÓVIL (gate). Mismo trinquete que el de la API y por la misma
+ * razón: `SyncContext.tsx` llegó a 1485 líneas —el doble del siguiente archivo y 485 por encima
+ * del techo que la API sí hacía cumplir— sin que nada lo frenara, porque el móvil quedaba fuera
+ * de este gate. Esa forma fue la CAUSA de que el archivo más crítico del cliente no tuviera un
+ * solo test: para probar el cálculo de un retiro había que montar React, Expo y el almacenamiento.
+ * Partirlo por sus costuras lo dejó en 738.
+ *
+ * Historial: 1485 (SyncContext.tsx, sin techo) → 800 al extraer sync-types, store-queries y
+ * capture-actions. El peor caso quedó en 773 (`manga.tsx`) y NO se bajó a ~780 a propósito: manga
+ * es una sola pantalla de trabajo y recortarla exigiría cortar contra la veta.
+ *
+ * Cubre `.ts` y `.tsx`: en el móvil la lógica vive en componentes, así que un techo solo para
+ * `.ts` no miraría donde el problema aparece.
+ */
+const MAX_MOBILE_FILE_LINES = 800;
+const MOBILE_DIR = 'apps/mobile/src';
+
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
 const red = (s) => `\x1b[31m${s}\x1b[0m`;
 const dim = (s) => `\x1b[2m${s}\x1b[0m`;
@@ -238,12 +256,12 @@ gate('cero ciclos de dependencia (madge)', madge.ok && cycles === 0, cycles >= 0
 // El techo es un TRINQUETE, no un objetivo: está apenas por encima del peor caso actual, así que
 // impide crecer pero no exige refactorizar hoy. Bajarlo es trabajo deliberado, y cada vez que se
 // baje queda registrado acá.
-function tsFiles(dir) {
+function tsFiles(dir, exts = ['.ts']) {
   const out = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...tsFiles(p));
-    else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) out.push(p);
+    if (statSync(p).isDirectory()) out.push(...tsFiles(p, exts));
+    else if (exts.some((e) => name.endsWith(e)) && !/\.(test|spec)\.tsx?$/.test(name)) out.push(p);
   }
   return out;
 }
@@ -260,6 +278,21 @@ gate(
 );
 if (overBudget.length > 0)
   console.log(dim('    partilo por caso de uso; ver LotsService, extraído de HerdService por esta misma razón.'));
+
+// Gate 4b: el mismo presupuesto, para el móvil.
+const mobileSizes = tsFiles(MOBILE_DIR, ['.ts', '.tsx'])
+  .map((f) => ({ f, n: readFileSync(f, 'utf8').split('\n').length }))
+  .sort((a, b) => b.n - a.n);
+const mobileOver = mobileSizes.filter((s) => s.n > MAX_MOBILE_FILE_LINES);
+gate(
+  `ningún archivo del móvil supera ${MAX_MOBILE_FILE_LINES} líneas`,
+  mobileOver.length === 0,
+  mobileOver.length === 0
+    ? `mayor: ${mobileSizes[0]?.n ?? 0}`
+    : mobileOver.map((s) => `${posix(s.f).replace(MOBILE_DIR + '/', '')} (${s.n})`).join(', '),
+);
+if (mobileOver.length > 0)
+  console.log(dim('    cortá por las costuras que el archivo ya tiene; ver store-queries y capture-actions, extraídos de SyncContext.'));
 
 // ───────────────────────── QUALITY INDICATORS ─────────────────────────
 console.log(bold('\n══ QUALITY INDICATORS ') + dim('(informan — nunca bloquean; delta vs baseline)'));

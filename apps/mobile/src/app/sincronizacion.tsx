@@ -12,6 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSync, ServerConflict } from '@/sync/SyncContext';
 import { Button, Card } from '@/components/ui';
 import { useSyncRefresh } from '@/components/refresh';
+import { borrarFallos, leerFallos } from '@/errors/crash-store';
+import { formatCrashes, type CrashRecord } from '@/errors/crash-log';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 const CONFLICT_LABEL: Record<string, string> = {
@@ -64,6 +66,7 @@ export default function SyncScreen() {
   const sync = useSync();
   const [conflicts, setConflicts] = useState<ServerConflict[] | null>(null);
   const [conflictsError, setConflictsError] = useState('');
+  const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const pending = sync.pendingDetail();
   // Sin `extra`: el efecto de abajo ya depende de `sync.lastSyncAt`, que el sync actualiza, así que
   // los conflictos se recargan solos cuando el gesto termina.
@@ -82,6 +85,11 @@ export default function SyncScreen() {
   useEffect(() => {
     load();
   }, [load, sync.lastSyncAt, sync.offlineSim]);
+
+  // Los fallos viven fuera del motor de sync (ver crash-store): se leen aparte, una sola vez.
+  useEffect(() => {
+    leerFallos().then(setCrashes);
+  }, []);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -137,9 +145,42 @@ export default function SyncScreen() {
           )}
         </Card>
 
+        {/*
+          Solo aparece si hubo fallos: una tarjeta que dice «ninguno» todos los días entrena a
+          ignorarla, y esta tiene que llamar la atención justamente el día que no está vacía.
+          El texto es seleccionable porque así es como va a llegar desde el campo — copiado y
+          pegado en un mensaje.
+        */}
+        {crashes.length > 0 && (
+          <Card>
+            <Text style={styles.cardTitle}>Fallos de la app ({crashes.length})</Text>
+            <Text style={{ fontSize: T.type.caption, color: T.ink3, marginBottom: T.space['2'] }}>
+              La app se trabó y se recuperó. Nada de esto afecta lo que está en cola. Copiá el detalle si hay que
+              reportarlo.
+            </Text>
+            <Text selectable style={{ fontFamily: 'monospace', fontSize: 11, color: T.ink2 }}>
+              {formatCrashes(crashes)}
+            </Text>
+            <View style={{ marginTop: T.space['2.5'] }}>
+              <Button
+                label="Borrar registro de fallos"
+                onPress={() => {
+                  borrarFallos().then(() => setCrashes([]));
+                }}
+              />
+            </View>
+          </Card>
+        )}
+
         <Text style={{ fontSize: T.type.caption, color: T.ink3, textAlign: 'center' }}>
           Último sync: {sync.lastSyncAt ? new Date(sync.lastSyncAt).toLocaleString('es-AR') : 'nunca'} · {sync.storageEngine}
         </Text>
+        {/* El identificador del dispositivo: sin esto, un reporte desde el campo no se puede atar a nada. */}
+        {sync.serverDeviceId && (
+          <Text selectable style={{ fontSize: T.type.caption, color: T.ink3, textAlign: 'center', fontFamily: 'monospace' }}>
+            Dispositivo {sync.serverDeviceId}
+          </Text>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

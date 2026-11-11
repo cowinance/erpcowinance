@@ -4,6 +4,7 @@ import { SyncProvider, useSync } from '@/sync/SyncContext';
 import { AccountProvider } from '@/account/AccountContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import { PushBridge } from '@/push/PushBridge';
+import { ErrorBoundary } from '@/errors/ErrorBoundary';
 import { useTheme } from '@/useTheme';
 
 function Gate() {
@@ -26,17 +27,22 @@ function Gate() {
 
 export default function RootLayout() {
   return (
-    <SyncProvider>
-      <AccountProvider>
-        {/*
-          `auto` y no `dark`: la barra de estado tiene que invertirse con el sistema. Estaba fija en
-          oscuro, así que en modo oscuro los iconos negros quedaban sobre un fondo negro —
-          invisibles.
-        */}
-        <StatusBar style="auto" />
-        <PushBridge />
-        <Gate />
-      </AccountProvider>
-    </SyncProvider>
+    // Por FUERA de los providers a propósito: lo que puede fallar incluye al propio motor de
+    // sincronización, y un límite montado adentro se caería con él. Acá queda una pantalla de
+    // recuperación aunque no arranque nada más.
+    <ErrorBoundary>
+      <SyncProvider>
+        <AccountProvider>
+          {/*
+            `auto` y no `dark`: la barra de estado tiene que invertirse con el sistema. Estaba fija en
+            oscuro, así que en modo oscuro los iconos negros quedaban sobre un fondo negro —
+            invisibles.
+          */}
+          <StatusBar style="auto" />
+          <PushBridge />
+          <Gate />
+        </AccountProvider>
+      </SyncProvider>
+    </ErrorBoundary>
   );
 }
