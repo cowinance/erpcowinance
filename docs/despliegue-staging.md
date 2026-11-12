@@ -80,10 +80,23 @@ git clone https://github.com/cowinance/erpcowinance.git && cd erpcowinance
 cp .env.staging.example .env
 ```
 
-Completar el `.env`: los dominios, los tres secretos (`openssl rand -base64 48`), el bucket, el
+Completar el `.env`: los dominios, los tres secretos, el bucket, el
 SMTP, y el SHA de las imágenes. **Se despliega un SHA, no `latest`**: así se sabe exactamente qué
 está corriendo y volver atrás es cambiar una línea. El SHA sale del workflow de Release, que
 publica cada commit de `main` después de probar el stack real.
+
+**Los secretos se generan EN EL SERVIDOR**, no en la máquina de desarrollo: así no pasan por el
+portapapeles, el historial del shell ni un chat. Y no todos con el mismo comando:
+
+```bash
+openssl rand -base64 48   # JWT_SECRET
+openssl rand -hex 32      # POSTGRES_PASSWORD y APP_DB_PASSWORD
+```
+
+La diferencia no es cosmética. Las dos contraseñas de base se interpolan dentro de una URI
+—`postgres://usuario:CLAVE@db:5432/...`— y base64 produce `+`, `/` y `=`, que rompen el parseo. El
+síntoma es un error de conexión a la base que no se parece en nada a su causa, en el primer
+arranque, cuando todavía no se sabe si lo que falla es la red, el compose o la imagen.
 
 ```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d --no-build
