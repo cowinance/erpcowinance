@@ -331,11 +331,12 @@ cambiarse:
 
 ### Lo que queda sin hacer de esta fase
 
-- **El `lint` del móvil no funciona**: `npm run lint` llama a `expo lint` y el proyecto no tiene las
-  dependencias de ESLint. Al instalarlas aparecen **40 hallazgos preexistentes**, casi todos
-  «cannot access refs during render» — relevante porque el proyecto tiene el React Compiler
-  activado. Es un trabajo propio, no un renglón de esta fase; se revirtió la instalación para no
-  dejar el repositorio con un linter que nadie atiende.
+- ~~**El `lint` del móvil no funciona.**~~ Resuelto: los 40 hallazgos están en cero y el linter es
+  un gate. No eran de estilo — eran reglas del React Compiler. El de fondo: el contexto de sync se
+  armaba leyendo refs durante el render y se mantenía al día con un contador manual, así que una
+  mutación sin `bump()` dejaba la pantalla con datos viejos sin ningún síntoma. Ahora la meta vive
+  en estado y una sola función escribe el ref (para los caminos asíncronos) y el estado (para el
+  render). El gate frenó a `SyncContext` en 809 líneas y salió `use-notificaciones`.
 - **Guantes y una sola mano** no se tocaron: hay que medir áreas de toque reales y el alcance del
   pulgar, y eso se hace con el teléfono en la mano, no leyendo código.
 
