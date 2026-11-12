@@ -1,6 +1,6 @@
 # Plan: la app móvil, de proyecto a producto
 
-**Fecha:** 2026-11-11 · **Estado: Fases 0 y 1 hechas salvo lo que pide un teléfono** · **Origen:** pedido del productor —
+**Fecha:** 2026-11-11 · **Estado: Fases 0, 1 y 2 hechas salvo lo que pide un teléfono y D-1** · **Origen:** pedido del productor —
 *«rehacer la app móvil, hacerla nativa para Android y iOS, hacerla más profesional»*
 
 > **Cómo leer este documento.** El pedido traía tres cosas juntas —rehacer, nativa, profesional— y
@@ -105,6 +105,10 @@ Define si alcanza con Bluetooth genérico (SPP/BLE) o hace falta envolver un SDK
 Allflex, Tru-Test y Datamars son los habituales y cada uno trae lo suyo. **Si la respuesta es sí,
 hay que pasar a *development builds* en la Fase 0, no en la 2** — porque Expo Go no carga módulos
 nativos propios.
+
+**Esta decisión ahora bloquea dos cosas, no una.** El OCR de caravanas sin código de barras
+necesita el mismo tipo de módulo nativo (ML Kit en Android, Vision en iOS). Conviene resolver las
+dos juntas: una sola vuelta de *development build* en vez de dos.
 
 ### D-2 · ¿Distribución por tienda o interna?
 
@@ -226,16 +230,54 @@ está fijado por tests; que matar la app de verdad no pierda nada depende de la 
 
 La fase que cambia el producto. Hoy el trabajo de campo se hace tecleando.
 
-1. **Lectura de caravana por cámara.** Código de barras donde exista; OCR del número visual donde
+1. ◐ **Lectura de caravana por cámara.** Código de barras donde exista; OCR del número visual donde
    no. Con confirmación antes de guardar: equivocarse de animal es peor que teclear.
-2. **Foto del animal** contra el módulo `media`, que ya está construido y sin usar.
-3. **Varilla RFID por Bluetooth** (según D-1). Acá está la única parte real de «hacerla más
+2. ✅ **Foto del animal** contra el módulo `media`, que ya está construido y sin usar.
+3. ⬜ **Varilla RFID por Bluetooth** (según D-1). Acá está la única parte real de «hacerla más
    nativa»: si el lector trae SDK nativo, se envuelve en un módulo propio y Expo lo carga sin
    problema. **Eso no es reescribir la app: es compilar distinto.**
-4. **La pestaña Mapa**, o se construye o se saca. Una pestaña que dice «en el futuro» ocupa el 20%
+4. ✅ **La pestaña Mapa**, o se construye o se saca. Una pestaña que dice «en el futuro» ocupa el 20%
    de la navegación sin dar nada.
 
 **Cómo se sabe que terminó:** una sesión de manga completa sin tocar el teclado.
+
+### Cómo quedó
+
+**Caravana por cámara.** Botón CÁMARA al lado de BUSCAR en la manga. El teclado no desaparece:
+leer es un atajo, no un reemplazo. Nada de lo que se lee se aplica solo — hay una confirmación que
+muestra **qué animal es**, no solo el número, y si la caravana no existe el botón queda bloqueado.
+Se escanean solo los formatos que aparecen en una caravana; más formatos es más chance de leer
+cualquier etiqueta del corral y darla por buena.
+
+**Falta el OCR**, que era la otra mitad del punto 1: sirve donde la caravana no tiene código de
+barras, que es la mayoría. Expo no trae OCR y hacerlo exige un módulo nativo (ML Kit o Vision) —
+o sea, lo mismo que pide D-1. Conviene resolverlo junto con el lector RFID y no antes.
+
+**Foto del animal.** La ficha lista las fotos y permite sacar una. Se achica antes de salir del
+teléfono con los mismos números que la web, y si el redimensionado falla se manda el original.
+**Las fotos no viajan en la cola de sincronización, y la pantalla lo dice antes de sacarlas**: el
+motor mueve filas y eventos, no archivos. Que alguien lo descubra al volver al casco sin la foto
+sería peor que no ofrecer la función.
+
+**Mapa.** Resultó construible: `paddocks.boundary` ya guarda el polígono. Usa el mismo lienzo de
+1000×700 que el editor de la web —dos mapas con geometrías distintas serían dos mapas— y por eso
+no necesita tiles ni señal. Se cachea al abrir la pestaña y sin conexión muestra la fecha del
+dato.
+
+El color de carga **es relativo al propio campo, y eso fue una corrección**. La primera versión
+usaba cortes absolutos —menos de 1 an/ha holgado, más de 2 cargado— y con los datos reales los
+seis potreros caían en la misma banda: el mapa quedaba de un solo color. El problema de fondo era
+peor que el síntoma: esos cortes eran agronomía inventada. La escala relativa no afirma qué carga
+es «buena» y sí contesta la pregunta de quien tiene un lote para mover.
+
+**La proporción de tests del móvil quedó en 0,20** con 191 tests en total.
+
+### Lo que NO se verificó
+
+Todo se probó contra la API local con la finca de prueba: el mapa dibuja los seis potreros, el
+toque abre el detalle, la ficha lista las fotos y una subida por API aparece como miniatura. Lo
+que **no** se puede probar sin un teléfono es lo que usa la cámara de verdad: leer un código de
+barras impreso y sacar una foto. Eso espera a la Fase 0 punto 4.
 
 ---
 
