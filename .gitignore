@@ -20,3 +20,12 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# Claves privadas. NUNCA en el repo.
+# Un .pem acá adentro se sube con un `git add -A` distraído, y una vez empujado a GitHub hay que
+# rotar la clave del servidor: borrarlo del historial no sirve, ya se publicó.
+*.pem
+*.key
+*.ppk
+id_rsa*
+id_ed25519*
