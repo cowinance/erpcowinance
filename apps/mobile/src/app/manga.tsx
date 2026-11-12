@@ -10,21 +10,18 @@
  * Movement/Heat/Service/Diagnosis), así que el contrato de sync no cambia.
  */
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { mangaCardAlerts, validateWeighing, type MangaAlert } from '@cowinance/domain';
+import { mangaCardAlerts, type MangaAlert } from '@cowinance/domain';
 import { useSync, AnimalRow } from '@/sync/SyncContext';
 import { FormScroll } from '@/components/ui';
+import { EscanerDeCaravana } from '@/camara/EscanerDeCaravana';
+import { ModeCapture } from '@/components/manga/ModeCapture';
+import { AMBER, GREEN, RED, styles, type Mode } from '@/components/manga/estilos';
 import * as haptics from '@/lib/haptics';
 
-const GREEN = '#4ADE80';
-const RED = '#F87171';
-const AMBER = '#FACC15';
-const CC_OPTIONS = [2, 2.5, 3, 3.5, 4, 4.5];
 const SCAN_DEBOUNCE_MS = 1500;
-
-type Mode = 'Pesaje' | 'Revisión' | 'Nota' | 'Tratamiento' | 'Vacunación' | 'Movimiento' | 'Reproducción';
 
 /**
  * Cada modo con la capacidad que hace falta para GUARDARLO.
@@ -48,7 +45,6 @@ const MODE_CAP: Record<Mode, string> = {
   Reproducción: 'reproduccion',
 };
 const MODES: Mode[] = ['Pesaje', 'Revisión', 'Nota', 'Tratamiento', 'Vacunación', 'Movimiento', 'Reproducción'];
-const NOTE_TEMPLATES = ['cojea', 'flaco', 'revisar ojo', 'revisar ubre', 'agresivo', 'sin novedad'];
 
 interface SessionRecord {
   key: string;
@@ -88,6 +84,7 @@ export default function Manga() {
   const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
   const tagRef = useRef<TextInput>(null);
   const lastScan = useRef<{ v: string; at: number }>({ v: '', at: 0 });
+  const [escaneando, setEscaneando] = useState(false);
 
   const lots = sync.lots();
   const vaccines = sync.products('vaccine');
@@ -283,6 +280,42 @@ export default function Manga() {
     );
   }
 
+  // El lector ocupa la pantalla entera: con el animal adelante no hay lugar para media pantalla
+  // de cámara. Al confirmar entra por el mismo camino que teclear —`findByTag`— así que la manga
+  // no aprende una segunda forma de encontrar un animal.
+  if (escaneando) {
+    return (
+      <EscanerDeCaravana
+        encabezado="Leer caravana"
+        resolver={(codigo) => {
+          const encontrado = sync.findByTag(codigo);
+          if (!encontrado) {
+            return { titulo: 'No hay ningún animal con esa caravana', detalle: 'Probá de nuevo o escribila a mano.', confirmable: false };
+          }
+          const lote = encontrado.lot_name ? ` · ${encontrado.lot_name}` : '';
+          return {
+            titulo: `${encontrado.tag ?? '—'}${encontrado.name ? ` · ${encontrado.name}` : ''}`,
+            detalle: `${encontrado.category ?? 'Sin categoría'}${lote}`,
+            confirmable: true,
+          };
+        }}
+        onConfirmar={(codigo) => {
+          const encontrado = sync.findByTag(codigo);
+          setEscaneando(false);
+          if (!encontrado) return;
+          setError('');
+          setAnimal(encontrado);
+          setTag('');
+          haptics.ok();
+        }}
+        onCerrar={() => {
+          setEscaneando(false);
+          focusTag();
+        }}
+      />
+    );
+  }
+
   // ── Captura ──
   return (
     <SafeAreaView style={styles.root}>
@@ -320,9 +353,24 @@ export default function Manga() {
               accessibilityLabel="Caravana del animal"
             />
             {!!error && <Text style={styles.error}>{error}</Text>}
-            <Pressable onPress={lookup} disabled={!tag.trim()} style={[styles.bigBtn, { backgroundColor: '#fff' }, !tag.trim() && { opacity: 0.3 }]}>
-              <Text style={[styles.bigBtnText, { color: '#000' }]}>BUSCAR</Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                onPress={lookup}
+                disabled={!tag.trim()}
+                style={[styles.bigBtn, { backgroundColor: '#fff', flex: 1, width: 'auto' }, !tag.trim() && { opacity: 0.3 }]}
+              >
+                <Text style={[styles.bigBtnText, { color: '#000' }]}>BUSCAR</Text>
+              </Pressable>
+              {/* El teclado nunca desaparece: leer es un atajo, no un reemplazo. */}
+              <Pressable
+                onPress={() => setEscaneando(true)}
+                style={[styles.bigBtn, styles.btnEscanear]}
+                accessibilityRole="button"
+                accessibilityLabel="Leer la caravana con la cámara"
+              >
+                <Text style={[styles.bigBtnText, { color: '#fff' }]}>CÁMARA</Text>
+              </Pressable>
+            </View>
 
             {/* Cambiar de modo entre animales */}
             <View style={styles.wrapRow}>
@@ -462,312 +510,3 @@ function AnimalCard({
   );
 }
 
-/** Captura por modo — cada una delega en la captura offline existente. */
-function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, warn, setWarn, confirmMsg, setConfirmMsg, onSaved, onFail }: any) {
-  const [kg, setKg] = useState('');
-  const [cc, setCc] = useState<number | null>(null);
-  const [note, setNote] = useState('');
-  const [productId, setProductId] = useState('');
-  const [dest, setDest] = useState('');
-  const [reproAction, setReproAction] = useState<'celo' | 'servicio' | 'diagnostico' | null>(null);
-  const [method, setMethod] = useState<'ai' | 'natural'>('ai');
-  const [sireId, setSireId] = useState('');
-  const [result, setResult] = useState<'pregnant' | 'empty'>('pregnant');
-
-  // ── Pesaje: MISMA regla de dominio que la web (validateWeighing) ──
-  if (mode === 'Pesaje') {
-    const days = animal.last_weighed_at ? Math.floor((Date.now() - new Date(animal.last_weighed_at).getTime()) / 86400000) : null;
-    const save = () => {
-      const v = validateWeighing({ weightKg: Number(kg), lastWeightKg: animal.last_weight_kg ?? null, daysSinceLast: days });
-      if (!v.ok) return onFail(v.error!.message.toUpperCase());
-      if (v.requiresConfirm && !confirmMsg) {
-        setConfirmMsg(v.confirm!.message);
-        setWarn(null);
-        haptics.warn();
-        return;
-      }
-      setWarn(v.warnings.length ? v.warnings[0].message : null);
-      sync.captureWeighing(animal.id, Number(kg), cc ?? undefined);
-      onSaved('Pesaje', `${kg} kg${cc ? ` · CC ${cc}` : ''}`);
-      setKg('');
-      setCc(null);
-    };
-    return (
-      <>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
-          <TextInput
-            value={kg}
-            onChangeText={(t) => { setKg(t); setConfirmMsg(null); setWarn(null); }}
-            onSubmitEditing={save}
-            keyboardType="decimal-pad"
-            placeholder="0"
-            placeholderTextColor="rgba(255,255,255,0.2)"
-            style={styles.kgInput}
-            accessibilityLabel="Peso en kilogramos"
-            autoFocus
-          />
-          <Text style={styles.kgUnit}>kg</Text>
-        </View>
-        <Text style={styles.stepLabel}>CONDICIÓN CORPORAL</Text>
-        <View style={styles.wrapRow}>
-          {CC_OPTIONS.map((v) => (
-            <Pressable key={v} onPress={() => setCc(cc === v ? null : v)} style={[styles.ccBtn, cc === v && { backgroundColor: GREEN }]}>
-              <Text style={[styles.ccText, cc === v && { color: '#000' }]}>{v}</Text>
-            </Pressable>
-          ))}
-        </View>
-        {!!warn && <Text style={styles.warn}>⚠ {warn}</Text>}
-        {!!confirmMsg && <Text style={styles.confirm}>⚠ {confirmMsg}</Text>}
-        <Pressable onPress={save} disabled={!kg} style={[styles.bigBtn, { backgroundColor: confirmMsg ? AMBER : GREEN }, !kg && { opacity: 0.3 }]}>
-          <Text style={[styles.bigBtnText, { color: '#000' }]}>{confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}</Text>
-        </Pressable>
-      </>
-    );
-  }
-
-  if (mode === 'Revisión' || mode === 'Nota') {
-    const isReview = mode === 'Revisión';
-    const save = () => {
-      const text = isReview ? `Revisado${note.trim() ? ` · ${note.trim()}` : ''}` : note.trim();
-      if (!text) return;
-      sync.captureNote(animal.id, text);
-      onSaved(isReview ? 'Revisión' : 'Nota', isReview ? 'revisado' : text.slice(0, 30));
-      setNote('');
-    };
-    return (
-      <>
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder={isReview ? 'Nota corta (opcional)' : 'Escribí una nota…'}
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          style={styles.textInput}
-          multiline={!isReview}
-        />
-        {!isReview && (
-          <View style={styles.wrapRow}>
-            {NOTE_TEMPLATES.map((t) => (
-              <Pressable key={t} onPress={() => setNote((n) => (n.trim() ? `${n.trim()} · ${t}` : t))} style={styles.pillSm}>
-                <Text style={styles.pillTextSm}>{t}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
-        <Pressable onPress={save} disabled={!isReview && !note.trim()} style={[styles.bigBtn, { backgroundColor: GREEN }, !isReview && !note.trim() && { opacity: 0.3 }]}>
-          <Text style={[styles.bigBtnText, { color: '#000' }]}>{isReview ? 'REVISADO ✓ Y SIGUIENTE' : 'GUARDAR NOTA'}</Text>
-        </Pressable>
-      </>
-    );
-  }
-
-  if (mode === 'Tratamiento' || mode === 'Vacunación') {
-    const list = mode === 'Vacunación' ? vaccines : meds;
-    const save = () => {
-      if (!productId) return;
-      const p = list.find((x: any) => x.id === productId);
-      if (mode === 'Vacunación') {
-        sync.captureVaccination(animal.id, productId);
-        onSaved('Vacunación', p?.name ?? 'vacuna');
-      } else {
-        const r = sync.captureTreatment(animal.id, productId);
-        onSaved('Tratamiento', `${p?.name ?? 'tratamiento'}${r?.meatUntil ? ` · retiro ${r.meatUntil.slice(5)}` : ''}`);
-      }
-      setProductId('');
-    };
-    return (
-      <>
-        {animal.status && animal.status !== 'active' && <Text style={styles.warn}>⚠ Animal no activo</Text>}
-        <Text style={styles.stepLabel}>{mode === 'Vacunación' ? 'VACUNA' : 'PRODUCTO'}</Text>
-        {list.length === 0 ? (
-          <Text style={styles.hint}>Sin productos en la base local. Sincronizá para traer el vademécum.</Text>
-        ) : (
-          <View style={styles.wrapRow}>
-            {list.slice(0, 10).map((p: any) => {
-              const on = productId === p.id;
-              return (
-                <Pressable key={p.id} onPress={() => setProductId(p.id)} style={[styles.pillSm, on && styles.pillOn]}>
-                  <Text style={[styles.pillTextSm, on && styles.pillTextOn]}>{p.name}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-        <Pressable onPress={save} disabled={!productId} style={[styles.bigBtn, { backgroundColor: GREEN }, !productId && { opacity: 0.3 }]}>
-          <Text style={[styles.bigBtnText, { color: '#000' }]}>{mode === 'Vacunación' ? 'GUARDAR VACUNA' : 'GUARDAR TRATAMIENTO'}</Text>
-        </Pressable>
-      </>
-    );
-  }
-
-  if (mode === 'Movimiento') {
-    const save = () => {
-      if (!dest) return;
-      const lot = lots.find((l: any) => l.id === dest);
-      sync.captureMovement(animal.id, dest === 'clear' ? null : dest);
-      onSaved('Movimiento', `→ ${dest === 'clear' ? 'sin lote' : lot?.name ?? 'lote'}`);
-      setDest('');
-    };
-    return (
-      <>
-        <Text style={styles.hint}>Actual: {animal.lot_name ?? 'sin lote'}</Text>
-        <Text style={styles.stepLabel}>LOTE DESTINO</Text>
-        <View style={styles.wrapRow}>
-          {lots.filter((l: any) => l.id !== animal.current_lot_id).slice(0, 10).map((l: any) => {
-            const on = dest === l.id;
-            return (
-              <Pressable key={l.id} onPress={() => setDest(l.id)} style={[styles.pillSm, on && styles.pillOn]}>
-                <Text style={[styles.pillTextSm, on && styles.pillTextOn]}>{l.name}</Text>
-              </Pressable>
-            );
-          })}
-          <Pressable onPress={() => setDest('clear')} style={[styles.pillSm, dest === 'clear' && styles.pillOn]}>
-            <Text style={[styles.pillTextSm, dest === 'clear' && styles.pillTextOn]}>Sacar del lote</Text>
-          </Pressable>
-        </View>
-        <Pressable onPress={save} disabled={!dest} style={[styles.bigBtn, { backgroundColor: GREEN }, !dest && { opacity: 0.3 }]}>
-          <Text style={[styles.bigBtnText, { color: '#000' }]}>MOVER Y SIGUIENTE</Text>
-        </Pressable>
-      </>
-    );
-  }
-
-  // Reproducción
-  if (animal.sex !== 'F') {
-    return <Text style={styles.hint}>Este animal es macho. Registrá el servicio desde la hembra eligiéndolo como toro.</Text>;
-  }
-  const runRepro = () => {
-    if (reproAction === 'celo') {
-      sync.captureHeat(animal.id);
-      onSaved('Celo', 'registrado');
-    } else if (reproAction === 'servicio') {
-      sync.captureService(animal.id, method, sireId || undefined);
-      onSaved('Servicio', method === 'ai' ? 'IA' : 'monta');
-    } else if (reproAction === 'diagnostico') {
-      const r = sync.captureDiagnosis(animal.id, result);
-      onSaved('Diagnóstico', result === 'pregnant' ? `preñada${r?.expectedDue ? ` · parto ${r.expectedDue.slice(5)}` : ''}` : 'vacía');
-    }
-    setReproAction(null);
-  };
-  return (
-    <>
-      <View style={styles.wrapRow}>
-        {(['celo', 'servicio', 'diagnostico'] as const).map((a) => {
-          const on = reproAction === a;
-          return (
-            <Pressable key={a} onPress={() => setReproAction(a)} style={[styles.pill, on && styles.pillOn]}>
-              <Text style={[styles.pillText, on && styles.pillTextOn]}>{a === 'diagnostico' ? 'Diagnóstico' : a === 'celo' ? 'Celo' : 'Servicio'}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      {reproAction === 'servicio' && (
-        <View style={{ width: '100%', gap: 8 }}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {(['ai', 'natural'] as const).map((m) => (
-              <Pressable key={m} onPress={() => setMethod(m)} style={[styles.pill, { flex: 1 }, method === m && styles.pillOn]}>
-                <Text style={[styles.pillText, method === m && styles.pillTextOn]}>{m === 'ai' ? 'IA' : 'Monta'}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {method === 'natural' && bulls.length > 0 && (
-            <View style={styles.wrapRow}>
-              {bulls.slice(0, 8).map((b: AnimalRow) => (
-                <Pressable key={b.id} onPress={() => setSireId(b.id)} style={[styles.pillSm, sireId === b.id && styles.pillOn]}>
-                  <Text style={[styles.pillTextSm, sireId === b.id && styles.pillTextOn]}>{b.tag ?? b.id.slice(0, 6)}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
-      {reproAction === 'diagnostico' && (
-        <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
-          {(['pregnant', 'empty'] as const).map((r) => (
-            <Pressable key={r} onPress={() => setResult(r)} style={[styles.pill, { flex: 1 }, result === r && styles.pillOn]}>
-              <Text style={[styles.pillText, result === r && styles.pillTextOn]}>{r === 'pregnant' ? 'Preñada' : 'Vacía'}</Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
-      <Pressable onPress={runRepro} disabled={!reproAction} style={[styles.bigBtn, { backgroundColor: GREEN }, !reproAction && { opacity: 0.3 }]}>
-        <Text style={[styles.bigBtnText, { color: '#000' }]}>{reproAction ? 'GUARDAR Y SIGUIENTE' : 'ELEGÍ UNA ACCIÓN'}</Text>
-      </Pressable>
-    </>
-  );
-}
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000' },
-  setupBody: { padding: 24, gap: 14, alignItems: 'center', paddingBottom: 48 },
-  kicker: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '700', letterSpacing: 3 },
-  setupTitle: { color: '#fff', fontSize: 26, fontWeight: '800', textAlign: 'center' },
-  muted: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center' },
-  fieldLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '700', letterSpacing: 2, alignSelf: 'flex-start', marginTop: 6 },
-  // `minHeight` como su vecino `textInput`, que ya lo tenía: son el mismo campo y estaban escritos
-  // distinto. Con `height` el texto del sistema en grande desbordaba la caja.
-  setupInput: {
-    width: '100%', minHeight: 52, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 12,
-    paddingHorizontal: 14, color: '#fff', fontSize: 18, backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  textInput: {
-    width: '100%', minHeight: 52, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12, color: '#fff', fontSize: 18, backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, width: '100%', justifyContent: 'center' },
-  pill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
-  pillSm: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  pillOn: { backgroundColor: GREEN, borderColor: GREEN },
-  pillText: { color: 'rgba(255,255,255,0.85)', fontSize: 16, fontWeight: '700' },
-  pillTextSm: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
-  pillTextOn: { color: '#000' },
-  bigBtn: { minHeight: 68, paddingVertical: 12, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  bigBtnText: { fontSize: 20, fontWeight: '800' },
-  link: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textDecorationLine: 'underline', marginTop: 8 },
-  topBar: {
-    minHeight: 56, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.2)', gap: 8,
-  },
-  dot: { width: 9, height: 9, borderRadius: 5 },
-  topLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '700', flexShrink: 1 },
-  modeChip: { backgroundColor: 'rgba(74,222,128,0.2)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  modeChipText: { color: GREEN, fontSize: 12, fontWeight: '700' },
-  counter: { fontSize: 17, fontWeight: '700', fontFamily: 'monospace' },
-  counterUnit: { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '400' },
-  exitBtn: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
-  body: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 18, paddingHorizontal: 20, paddingVertical: 24 },
-  stepLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '700', letterSpacing: 2 },
-  sectionLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
-  tagInput: {
-    width: 260, borderBottomWidth: 4, borderBottomColor: 'rgba(255,255,255,0.4)', color: '#fff',
-    fontSize: 56, fontWeight: '700', fontFamily: 'monospace', textAlign: 'center', paddingVertical: 4,
-  },
-  kgInput: {
-    width: 200, borderBottomWidth: 4, borderBottomColor: 'rgba(255,255,255,0.4)', color: '#fff',
-    fontSize: 48, fontWeight: '700', fontFamily: 'monospace', textAlign: 'center', paddingVertical: 4,
-  },
-  kgUnit: { color: 'rgba(255,255,255,0.5)', fontSize: 22, fontWeight: '700', paddingBottom: 10 },
-  ccBtn: { minWidth: 52, minHeight: 52, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  ccText: { color: 'rgba(255,255,255,0.8)', fontSize: 18, fontWeight: '700' },
-  error: { color: RED, fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  warn: { color: AMBER, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-  confirm: { color: AMBER, fontSize: 16, fontWeight: '700', textAlign: 'center' },
-  hint: { color: 'rgba(255,255,255,0.35)', fontSize: 13, textAlign: 'center' },
-  card: { width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, padding: 18, gap: 4 },
-  cardTag: { color: GREEN, fontSize: 46, fontWeight: '800', fontFamily: 'monospace' },
-  cardSub: { color: 'rgba(255,255,255,0.7)', fontSize: 16 },
-  cardFacts: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 },
-  factLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  factValue: { color: '#fff', fontSize: 17, fontFamily: 'monospace', marginTop: 2 },
-  alertRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  alertChip: { backgroundColor: AMBER, color: '#000', fontSize: 13, fontWeight: '800', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, overflow: 'hidden' },
-  // Rojo para lo que impide seguir (retiro, caso abierto); ámbar para lo que conviene resolver.
-  alertChipDanger: { backgroundColor: RED, color: '#fff' },
-  statRow: { flexDirection: 'row', gap: 10, width: '100%' },
-  stat: { flex: 1, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 12 },
-  statValue: { fontSize: 30, fontWeight: '800', fontFamily: 'monospace' },
-  statLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 },
-  recRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, width: '100%' },
-  recTag: { color: GREEN, fontSize: 14, fontWeight: '700', fontFamily: 'monospace' },
-  recDetail: { color: 'rgba(255,255,255,0.6)', fontSize: 13, flex: 1 },
-  recTime: { color: 'rgba(255,255,255,0.35)', fontSize: 12 },
-});

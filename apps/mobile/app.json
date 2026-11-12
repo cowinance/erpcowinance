@@ -44,6 +44,13 @@
       ],
       "expo-sqlite",
       "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cowinance usa la cámara para leer la caravana del animal y sacarle fotos.",
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-image",
       "expo-status-bar",
       "expo-web-browser"
