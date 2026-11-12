@@ -14,6 +14,7 @@ import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 import { formatDate } from '@/lib/format';
 import { farmToday } from '@/lib/date';
+import { bucketForDue } from '@/lib/task-buckets';
 
 interface Task {
   id: string;
@@ -61,19 +62,6 @@ const CLOSED_TABS = [
   { key: 'done', label: 'Completadas' },
   { key: 'canceled', label: 'Canceladas' },
 ] as const;
-
-/** Bucket al que cae una fecha (espeja la derivación del backend; acá solo sirve para navegar). */
-function bucketForDue(due: string | null): string {
-  if (!due) return 'nodate';
-  const today = farmToday();
-  const d = due.slice(0, 10);
-  if (d < today) return 'overdue';
-  if (d === today) return 'today';
-  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-  if (d <= in7) return 'next7';
-  const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10);
-  return d <= endOfMonth ? 'month' : 'later';
-}
 
 export function TasksBoard() {
   const [tab, setTab] = useState<string>('today');
@@ -238,7 +226,7 @@ export function TasksBoard() {
           assignees={assignees}
           onCreated={(due: string | null) => {
             setCreating(false);
-            setTab(bucketForDue(due)); // si no, una tarea sin fecha «desaparece» estando en Hoy
+            setTab(bucketForDue(due, farmToday())); // si no, una tarea sin fecha «desaparece» estando en Hoy
             load();
           }}
         />
