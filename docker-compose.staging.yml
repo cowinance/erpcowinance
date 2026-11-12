@@ -1,0 +1,51 @@
+# Staging: el stack de producción + TLS.
+#
+# Se usa SUMADO al compose de producción, no en su lugar — así el entorno de prueba corre
+# exactamente la misma definición de servicios que iría a producción, y lo único que cambia es que
+# adelante hay un proxy:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d --no-build
+#
+# Detalle que NO es opcional, y por eso está acá arriba: en el `.env` hay que dejar los puertos de
+# la API y de la web escuchando SOLO en el bucle local —
+#
+#   API_PORT=127.0.0.1:3001
+#   WEB_PORT=127.0.0.1:3000
+#
+# Sin eso quedan publicados en todas las interfaces y cualquiera puede hablarle a la API por HTTP
+# en claro, salteándose el TLS que este archivo existe para poner. Compose no permite QUITAR un
+# mapeo de puertos desde un archivo de superposición (las listas se suman), así que la forma de
+# acotarlo es esa variable. Ver `docs/despliegue-staging.md`.
+
+name: cowinance
+
+services:
+  caddy:
+    # Tag de minor flotante a propósito: la superficie de configuración de Caddy 2 es estable, y
+    # fijar el patch exacto significaría actualizarlo a mano con cada arreglo de seguridad de TLS
+    # — que es justo lo que no conviene atrasar en lo único expuesto a internet.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?definí WEB_DOMAIN en el .env — p. ej. staging.cowinance.com}
+      API_DOMAIN: ${API_DOMAIN:?definí API_DOMAIN en el .env — p. ej. api.staging.cowinance.com}
+      ACME_EMAIL: ${ACME_EMAIL:?definí ACME_EMAIL en el .env — llegan los avisos de vencimiento}
+    ports:
+      - '80:80'
+      # El 80 no se puede cerrar: es por donde ACME valida el dominio para emitir el certificado.
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # VOLUMEN NOMBRADO, no efímero: acá viven los certificados. Si se pierden en cada despliegue,
+      # Caddy los vuelve a pedir, y Let's Encrypt limita a 5 certificados iguales por semana. Se
+      # descubre tarde y mal: el sitio deja de cargar a mitad de la semana.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+      - web
+
+volumes:
+  caddy-data:
+  caddy-config:

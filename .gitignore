@@ -4,6 +4,10 @@ dist/
 .data/
 .env
 .env.local
+# Cualquier .env concreto queda fuera; los .example SÍ se versionan.
+.env.*
+!.env.example
+!.env.staging.example
 *.log
 .DS_Store
 

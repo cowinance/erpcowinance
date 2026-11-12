@@ -1,0 +1,42 @@
+# Proxy inverso y TLS del entorno de staging.
+#
+# POR QUÉ HACE FALTA, y no es una comodidad: la app móvil no puede hablar con una API en claro.
+# Android bloquea el tráfico HTTP sin cifrar en las compilaciones de release, así que un APK
+# apuntado a `http://` falla al entrar y no dice por qué. Y del lado de la web, las cookies de
+# sesión marcan `secure` según `X-Forwarded-Proto`: sin un proxy que lo mande, o viajan sin esa
+# marca o no viajan.
+#
+# Caddy emite y renueva el certificado solo (ACME / Let's Encrypt). Lo único que hace falta es que
+# los dos dominios resuelvan a este servidor y que los puertos 80 y 443 estén abiertos: el 80 no es
+# opcional, es por donde se valida el dominio.
+
+{
+	# Avisos de vencimiento de certificado. Si falla una renovación, llega acá.
+	email {$ACME_EMAIL}
+}
+
+# ── La web ───────────────────────────────────────────────────────────────────
+#
+# El navegador NUNCA habla con la API directamente: la web la expone en su propio origen bajo
+# `/api/cw`. Por eso acá no hace falta CORS ni nada especial.
+{$WEB_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+# ── La API ───────────────────────────────────────────────────────────────────
+#
+# Este host existe para el TELÉFONO. La web no lo usa —llega a la API por la red interna del
+# compose— así que el día que no haya app móvil, este bloque se puede borrar entero.
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	# Las fotos del animal viajan en base64 dentro de un JSON, que infla un 33%: una foto de 12 MB
+	# son ~16 MB de cuerpo. El límite del parser de la API está en 20 MB; acá va un poco por encima
+	# para que el rechazo llegue de la API, con su mensaje, y no del proxy como un 413 sin explicar.
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy api:3001
+}
