@@ -16,10 +16,30 @@ rompe en producción: TLS, un proxy adelante, almacenamiento de objetos, correo 
 | | Por qué |
 |---|---|
 | Un servidor con Docker | 2 GB de RAM. Ver la nota de abajo sobre el tamaño. |
-| Dos subdominios apuntando a él | `staging.…` para la web y `api.staging.…` para el teléfono. **El DNS tiene que resolver antes de levantar**: Caddy valida el dominio al arrancar. |
+| Dos subdominios apuntando a él | Uno para la web y otro para el teléfono. **El DNS tiene que resolver antes de levantar**: Caddy valida el dominio al arrancar. |
 | Puertos 80 y 443 abiertos | El 80 no es opcional: es por donde se valida el dominio para emitir el certificado. |
 | Un bucket de objetos privado | Sin esto las fotos del animal se pierden en cada despliegue. |
 | Un SMTP | Sin esto no llega la verificación de email ni el reset de contraseña. |
+
+### El entorno que existe hoy
+
+| | |
+|---|---|
+| Instancia | `cowinance_control` — AWS Lightsail, región `us-east-1` |
+| IP estática | `34.234.101.232` |
+| Web | `control.cowinance.com` |
+| API (la que consume el teléfono) | `api.control.cowinance.com` |
+| Clave SSH | `~/.ssh/LightsailDefaultKey-us-east-1.pem` |
+
+**`staging.cowinance.com` NO es de este proyecto.** Resuelve a `34.203.135.101` y pertenece a otro
+sistema del mismo dueño. Queda escrito acá porque el nombre invita a repuntarlo y hacerlo lo
+rompería; de ahí que este entorno se llame `control` y no `staging`.
+
+La clave SSH es la **predeterminada de la región**: Lightsail crea una sola por región y por
+cuenta, así que esa misma clave abre también las instancias de los otros proyectos en `us-east-1`.
+Conviene crear un par propio para este servidor y sacar el predeterminado de su
+`authorized_keys` — borrar la clave desde la consola de AWS **no** la quita de las instancias que
+ya están corriendo.
 
 ### Sobre el tamaño del servidor
 
@@ -75,7 +95,7 @@ servidor. Si las construyera ahí, estaría corriendo algo que nunca pasó por C
 Comprobar:
 
 ```bash
-curl https://api.staging.cowinance.com/v1/healthz && curl https://api.staging.cowinance.com/v1/readyz
+curl https://api.control.cowinance.com/v1/healthz && curl https://api.control.cowinance.com/v1/readyz
 ```
 
 ---
@@ -89,8 +109,8 @@ rehacerlo.
 1. El servidor arriba y respondiendo por HTTPS.
 2. En `apps/mobile/.env.local` (no se versiona):
    ```
-   EXPO_PUBLIC_API_URL=https://api.staging.cowinance.com/v1
-   EXPO_PUBLIC_WEB_URL=https://staging.cowinance.com
+   EXPO_PUBLIC_API_URL=https://api.control.cowinance.com/v1
+   EXPO_PUBLIC_WEB_URL=https://control.cowinance.com
    ```
 3. `eas login` — lo hace una persona, no la herramienta.
 4. `eas init` — vincula el repositorio y escribe el `projectId`.

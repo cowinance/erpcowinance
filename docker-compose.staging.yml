@@ -27,8 +27,8 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
-      WEB_DOMAIN: ${WEB_DOMAIN:?definí WEB_DOMAIN en el .env — p. ej. staging.cowinance.com}
-      API_DOMAIN: ${API_DOMAIN:?definí API_DOMAIN en el .env — p. ej. api.staging.cowinance.com}
+      WEB_DOMAIN: ${WEB_DOMAIN:?definí WEB_DOMAIN en el .env — p. ej. control.cowinance.com}
+      API_DOMAIN: ${API_DOMAIN:?definí API_DOMAIN en el .env — p. ej. api.control.cowinance.com}
       ACME_EMAIL: ${ACME_EMAIL:?definí ACME_EMAIL en el .env — llegan los avisos de vencimiento}
     ports:
       - '80:80'
