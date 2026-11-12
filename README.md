@@ -495,7 +495,7 @@ se propagan por pull a dispositivos vía **changesets de origen servidor** ([ADR
 - **Login con JWT** (access 15 min + refresh 7 días con **rotación y detección de reuso**): el emisor dev
   vive en la API con el mismo shape de claims que un IdP OIDC (en producción se reemplaza por
   Keycloak/Auth0 cambiando solo la clave de verificación del interceptor).
-- **RLS activa y forzada** en 143 tablas de dominio (`apps/api/src/db/rls.ts` es la fuente única):
+- **RLS activa y forzada** en 142 tablas de dominio (`apps/api/src/db/rls.ts` es la fuente única):
   cada request corre en una transacción con `SET LOCAL app.tenant_id`; sin contexto, cero filas.
   Verificado con dos tenants (`cowinance@gmail.com / cowinance` — Grupo La Esperanza;
   `maria@elsaman.com / saman1234` — El Samán): cada uno ve solo su hato y el acceso cruzado por id
