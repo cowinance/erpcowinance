@@ -102,6 +102,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncResult, setLastSyncResult] = useState<string>();
   /**
+   * Lo que el disco NO pudo guardar. Null mientras todo escriba bien, que es siempre salvo
+   * problema real del dispositivo.
+   *
+   * Esto no se puede arreglar desde la app —si no hay espacio, no hay espacio—, así que lo único
+   * honesto es avisar a tiempo: mientras la app siga abierta lo capturado está en memoria y se
+   * puede sincronizar; si se cierra, se pierde.
+   */
+  const [falloDePersistencia, setFalloDePersistencia] = useState<{ fallos: number; detalle: string } | null>(null);
+  /**
    * Avisa que algo cambió por fuera de React. Estable a propósito: viaja como dependencia de casi
    * todos los callbacks del provider, y si cambiara de identidad en cada render los arrastraría a
    * todos con él.
@@ -122,6 +131,51 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const pushConflictsRef = useRef(0);
 
   /**
+   * UNA sola rotación de refresh a la vez. Las demás esperan a la que ya está en vuelo.
+   *
+   * El refresh del servidor es de un solo uso y **detecta el reuso**: si llega dos veces el mismo
+   * token, asume robo y revoca TODAS las sesiones del usuario (`auth.refresh_reused`). Eso del
+   * lado del servidor está bien y no se toca.
+   *
+   * El problema era de este lado. El token de acceso dura 15 minutos y había cuatro disparadores
+   * de sincronización sin candado —el temporizador de 60 s, la vuelta al primer plano, el debounce
+   * tras capturar y el botón—, más la agenda y las notificaciones. Dos peticiones que recibieran
+   * 401 a la vez leían el MISMO `refreshToken` y lo mandaban las dos: la segunda hacía saltar la
+   * detección de reuso y la persona quedaba afuera de todos lados.
+   *
+   * En el campo eso es lo peor que puede pasar: vuelve la señal después de dos horas en el
+   * potrero, la app pasa a primer plano, y en vez de subir el día pide la contraseña.
+   */
+  const refrescoRef = useRef<Promise<boolean> | null>(null);
+  const rotarSesion = useCallback((): Promise<boolean> => {
+    if (refrescoRef.current) return refrescoRef.current;
+    const token = metaRef.current?.refreshToken;
+    if (!token) return Promise.resolve(false);
+    const intento = (async () => {
+      try {
+        const r = await fetch(`${API_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: token }),
+        });
+        if (!r.ok) return false;
+        const j = await r.json();
+        aplicarMeta({ ...metaRef.current, accessToken: j.access_token, refreshToken: j.refresh_token });
+        // Se persiste ANTES de volver a usarlo: si la app muere acá, al abrir tiene el token nuevo
+        // y no el que el servidor ya consumió.
+        await almacen.saveMeta(metaRef.current!);
+        return true;
+      } catch {
+        return false; // sin señal: no es una sesión inválida, es que no se pudo preguntar
+      } finally {
+        refrescoRef.current = null;
+      }
+    })();
+    refrescoRef.current = intento;
+    return intento;
+  }, [almacen, aplicarMeta]);
+
+  /**
    * Fetch autenticado: Bearer del meta persistido; ante 401 intenta UNA
    * rotación de refresh y reintenta; si sigue 401 → pantalla de login.
    */
@@ -137,17 +191,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       });
     let res = await doFetch();
     if (res.status === 401 && metaRef.current?.refreshToken) {
-      const r = await fetch(`${API_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: metaRef.current.refreshToken }),
-      });
-      if (r.ok) {
-        const j = await r.json();
-        aplicarMeta({ ...metaRef.current, accessToken: j.access_token, refreshToken: j.refresh_token });
-        await almacen.saveMeta(metaRef.current);
-        res = await doFetch();
-      }
+      if (await rotarSesion()) res = await doFetch();
     }
     if (res.status === 401) {
       aplicarMeta({ ...metaRef.current, accessToken: undefined, refreshToken: undefined });
@@ -155,7 +199,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setStatus('login');
     }
     return res;
-  }, [almacen, aplicarMeta]);
+  }, [almacen, aplicarMeta, rotarSesion]);
 
   /**
    * Única función de mutación/persistencia de meta (D8): el mutator parte SIEMPRE del valor
@@ -208,47 +252,64 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     [authFetch],
   );
 
-  const syncNow = useCallback(async (): Promise<{ pushed: number; pulled: number } | { error: string }> => {
+  /**
+   * Una sincronización a la vez. Quien llegue mientras hay una en vuelo se cuelga de esa.
+   *
+   * `syncing` es estado de render, no un candado: cuatro disparadores —el temporizador de 60 s, la
+   * vuelta al primer plano, el debounce tras capturar y el botón— podían solaparse. Dos vueltas
+   * simultáneas no se pisaban los datos (la cola ya se filtra por lo enviado), pero duplicaban el
+   * uso de radio y, sobre todo, eran la forma de hacer saltar la detección de reuso del refresh
+   * y dejar a la persona sin sesión. Ver `rotarSesion`.
+   */
+  const syncEnVueloRef = useRef<Promise<{ pushed: number; pulled: number } | { error: string }> | null>(null);
+
+  const syncNow = useCallback((): Promise<{ pushed: number; pulled: number } | { error: string }> => {
     const d = deviceRef.current;
-    if (!d || !metaRef.current) return { error: 'sin dispositivo' };
+    if (!d || !metaRef.current) return Promise.resolve({ error: 'sin dispositivo' });
     if (offlineRef.current) {
       const msg = 'Sin señal (simulada) — los registros quedan en cola';
       setLastSyncResult(msg);
-      return { error: msg };
+      return Promise.resolve({ error: msg });
     }
-    setSyncing(true);
-    pushConflictsRef.current = 0;
-    try {
-      const result = await d.sync(transport);
-      // Cache-on-sync de la agenda (P4-2), best-effort: si el fetch falla se conserva el
-      // snapshot anterior — el sync (push/pull) ya fue exitoso y la agenda es secundaria.
-      let agenda = metaRef.current.agenda;
-      let agendaAt = metaRef.current.agendaAt;
+    if (syncEnVueloRef.current) return syncEnVueloRef.current;
+    const corrida = (async () => {
+      setSyncing(true);
+      pushConflictsRef.current = 0;
       try {
-        const r = await authFetch('/agenda');
-        if (r.ok) {
-          agenda = (await r.json()) as AgendaItem[];
-          agendaAt = new Date().toISOString();
+        const result = await d.sync(transport);
+        // Cache-on-sync de la agenda (P4-2), best-effort: si el fetch falla se conserva el
+        // snapshot anterior — el sync (push/pull) ya fue exitoso y la agenda es secundaria.
+        let agenda = metaRef.current?.agenda;
+        let agendaAt = metaRef.current?.agendaAt;
+        try {
+          const r = await authFetch('/agenda');
+          if (r.ok) {
+            agenda = (await r.json()) as AgendaItem[];
+            agendaAt = new Date().toISOString();
+          }
+        } catch {
+          /* red: se mantiene el cache previo */
         }
-      } catch {
-        /* red: se mantiene el cache previo */
+        await persistMeta((prev) => ({ ...prev, lastSyncAt: new Date().toISOString(), agenda, agendaAt }));
+        // Cache-on-sync del feed in_app (P7-4.c), best-effort e independiente: su fallo no
+        // afecta el push/pull ya exitoso. refreshNotifications encapsula su propio try/catch.
+        await refreshNotifications();
+        const conflictNote = pushConflictsRef.current
+          ? ` · ${pushConflictsRef.current} conflicto${pushConflictsRef.current === 1 ? '' : 's'} en revisión`
+          : '';
+        setLastSyncResult(`Sync OK — ${result.pushed} subidos, ${result.pulled} recibidos${conflictNote}`);
+        bump();
+        return result;
+      } catch (e: any) {
+        setLastSyncResult(`Error de sync: ${e.message}`);
+        return { error: e.message };
+      } finally {
+        setSyncing(false);
+        syncEnVueloRef.current = null;
       }
-      await persistMeta((prev) => ({ ...prev, lastSyncAt: new Date().toISOString(), agenda, agendaAt }));
-      // Cache-on-sync del feed in_app (P7-4.c), best-effort e independiente: su fallo no
-      // afecta el push/pull ya exitoso. refreshNotifications encapsula su propio try/catch.
-      await refreshNotifications();
-      const conflictNote = pushConflictsRef.current
-        ? ` · ${pushConflictsRef.current} conflicto${pushConflictsRef.current === 1 ? '' : 's'} en revisión`
-        : '';
-      setLastSyncResult(`Sync OK — ${result.pushed} subidos, ${result.pulled} recibidos${conflictNote}`);
-      bump();
-      return result;
-    } catch (e: any) {
-      setLastSyncResult(`Error de sync: ${e.message}`);
-      return { error: e.message };
-    } finally {
-      setSyncing(false);
-    }
+    })();
+    syncEnVueloRef.current = corrida;
+    return corrida;
   }, [transport, authFetch, persistMeta, refreshNotifications, bump]);
 
   const scheduleSync = useCallback(() => {
@@ -326,6 +387,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     init();
   }, [init]);
+
+  // El almacenamiento avisa cuando una escritura no entró; de ahí sale la advertencia en pantalla.
+  useEffect(() => {
+    return almacen.alFallarEscritura((fallos, detalle) => setFalloDePersistencia({ fallos, detalle }));
+  }, [almacen]);
 
   /** Operaciones locales sin subir del store actual (dueño previo), sin hidratarlo. */
   const savedPendingCount = useCallback(async (): Promise<number> => {
@@ -579,6 +645,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       lastSyncAt: metaVisible?.lastSyncAt,
       lastSyncResult,
       storageEngine: almacen.engine,
+      falloDePersistencia,
       pendingCount,
       offlineSim,
       syncing,
@@ -701,7 +768,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         init();
       },
     };
-  }, [status, errorMsg, version, metaVisible, pendingCount, almacen, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, switchOrganization, authFetch, markNotificationRead, refreshNotifications, scheduleNotificationsRefresh, syncPushToken, aplicarMeta, bump]);
+  }, [status, errorMsg, version, metaVisible, pendingCount, falloDePersistencia, almacen, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, switchOrganization, authFetch, markNotificationRead, refreshNotifications, scheduleNotificationsRefresh, syncPushToken, aplicarMeta, bump]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

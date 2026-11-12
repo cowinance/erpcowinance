@@ -144,3 +144,104 @@ describe('SyncDevice · la cola sobrevive a un servidor que no responde', () => 
     expect(revivido.pendingChangesets.map((c) => c.seq)).toEqual([1, 2]);
   });
 });
+
+/**
+ * O-1 de la auditoría del ciclo sin señal (12-11-2026).
+ *
+ * `sync()` vaciaba la cola entera al volver del push, en vez de sacar lo que había enviado. Lo que
+ * se capturaba mientras la radio subía lo anterior —el caso normal en un corral— desaparecía de la
+ * cola sin haber viajado, y el contador pasaba a cero: la app decía «todo al día» sobre un registro
+ * que el servidor nunca vio.
+ */
+describe('SyncDevice · capturar mientras la cola está subiendo', () => {
+  const sinPull = async (): Promise<PullResult> => ({ changesets: [], cursor: 0 });
+
+  it('lo capturado durante el push sigue en cola y sube en la siguiente vuelta', async () => {
+    const d = new SyncDevice('dev-corral');
+    const enviados: number[][] = [];
+    let soltarLaRed!: () => void;
+    const red = new Promise<void>((resolver) => (soltarLaRed = resolver));
+
+    const transport = {
+      push: async (changesets: { seq: number }[]): Promise<PushResult> => {
+        // La foto del lote se toma acá, antes de esperar: es lo que realmente viaja.
+        enviados.push(changesets.map((c) => c.seq));
+        await red;
+        return { accepted: changesets.length, deduped: 0, conflicts: [], serverCursor: 1 };
+      },
+      pull: sinPull,
+    };
+
+    d.addEvent('weighings', 'w1', { weight_kg: 400 });
+    d.commit();
+
+    const enVuelo = d.sync(transport);
+    // El peón no espera a la radio: pesa el siguiente animal.
+    d.addEvent('weighings', 'w2', { weight_kg: 410 });
+    d.commit();
+    soltarLaRed();
+    await enVuelo;
+
+    expect(enviados[0]).toEqual([1]); // la primera subida llevó solo la pesada que existía
+    expect(d.pendingCount).toBe(1); // la segunda NO se borró
+    expect(d.pendingChangesets.map((c) => c.seq)).toEqual([2]);
+
+    const segunda = await d.sync(transport);
+    expect(segunda.pushed).toBe(1);
+    expect(enviados[1]).toEqual([2]);
+    expect(d.pendingCount).toBe(0);
+  });
+
+  it('el aviso de descarte a disco nombra solo los changesets que viajaron', async () => {
+    const d = new SyncDevice('dev-corral');
+    const descartados: number[][] = [];
+    let soltarLaRed!: () => void;
+    const red = new Promise<void>((resolver) => (soltarLaRed = resolver));
+    d.listener = (m) => {
+      if (m.kind === 'flushed') descartados.push(m.seqs);
+    };
+
+    const transport = {
+      push: async (changesets: { seq: number }[]): Promise<PushResult> => {
+        await red;
+        return { accepted: changesets.length, deduped: 0, conflicts: [], serverCursor: 1 };
+      },
+      pull: sinPull,
+    };
+
+    d.addEvent('weighings', 'w1', { weight_kg: 400 });
+    d.commit();
+    const enVuelo = d.sync(transport);
+    d.addEvent('weighings', 'w2', { weight_kg: 410 });
+    d.commit();
+    soltarLaRed();
+    await enVuelo;
+
+    // Si el borrado en disco incluyera el 2, el registro moriría también al reiniciar la app.
+    expect(descartados).toEqual([[1]]);
+  });
+
+  it('dos syncs concurrentes no dejan nada atrás', async () => {
+    const d = new SyncDevice('dev-corral');
+    const recibidos: number[] = [];
+    const transport = {
+      push: async (changesets: { seq: number }[]): Promise<PushResult> => {
+        await new Promise((resolver) => setTimeout(resolver, 10));
+        for (const c of changesets) recibidos.push(c.seq);
+        return { accepted: changesets.length, deduped: 0, conflicts: [], serverCursor: 1 };
+      },
+      pull: sinPull,
+    };
+
+    d.addEvent('weighings', 'w1', { weight_kg: 400 });
+    d.commit();
+    const a = d.sync(transport);
+    d.addEvent('weighings', 'w2', { weight_kg: 410 });
+    d.commit();
+    const b = d.sync(transport);
+    await Promise.all([a, b]);
+
+    expect(d.pendingCount).toBe(0);
+    expect([...new Set(recibidos)].sort()).toEqual([1, 2]);
+  });
+});

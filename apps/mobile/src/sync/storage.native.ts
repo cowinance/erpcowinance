@@ -7,6 +7,7 @@
 import * as SQLite from 'expo-sqlite';
 import type { Changeset, DeviceMutation, SerializedDevice } from '@cowinance/sync-core';
 import type { DeviceStorage, PersistedMeta } from './storage.types';
+import { crearColaDeEscritura } from './cola-de-escritura';
 
 const SCHEMA = `
   PRAGMA journal_mode = WAL;
@@ -25,11 +26,9 @@ const SCHEMA = `
 
 export function createStorage(): DeviceStorage {
   let db: SQLite.SQLiteDatabase | null = null;
-  // Cola de escritura: serializa las mutaciones para preservar el orden
-  let queue: Promise<unknown> = Promise.resolve();
-  const enqueue = (fn: () => Promise<unknown>) => {
-    queue = queue.then(fn, fn);
-  };
+  // Serializa las mutaciones y CUENTA las que no entran al disco. Ver `cola-de-escritura`.
+  const cola = crearColaDeEscritura();
+  const enqueue = (fn: () => Promise<unknown>) => cola.encolar(fn);
 
   const setKv = (k: string, v: string) => db!.runAsync('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)', k, v);
   const getKv = async (k: string) => (await db!.getFirstAsync<{ v: string }>('SELECT v FROM kv WHERE k = ?', k))?.v ?? null;
@@ -69,8 +68,12 @@ export function createStorage(): DeviceStorage {
     }
   };
 
-  return {
+  const almacen: DeviceStorage = {
     engine: 'SQLite',
+    get fallosDeEscritura() {
+      return cola.fallos;
+    },
+    alFallarEscritura: (aviso) => cola.alFallar(aviso),
     async init() {
       db = await SQLite.openDatabaseAsync('cowinance.db');
       await db.execAsync(SCHEMA);
@@ -81,7 +84,7 @@ export function createStorage(): DeviceStorage {
     },
     async saveMeta(meta) {
       enqueue(() => setKv('meta', JSON.stringify(meta)));
-      await queue;
+      await cola.vaciar();
     },
     async loadDevice() {
       const deviceId = await getKv('device_id');
@@ -118,6 +121,8 @@ export function createStorage(): DeviceStorage {
     async reset() {
       if (!db) return;
       await db.execAsync('DELETE FROM kv; DELETE FROM rows; DELETE FROM events; DELETE FROM pending;');
+      cola.reiniciar();
     },
   };
+  return almacen;
 }

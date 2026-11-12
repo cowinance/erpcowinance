@@ -133,6 +133,13 @@ export interface SyncCtx {
   lastSyncAt?: string;
   lastSyncResult?: string;
   storageEngine: string;
+  /**
+   * Escrituras locales que no entraron al disco, con el motivo de la última. Null es lo normal.
+   *
+   * Mientras no sea null, lo capturado en esta sesión puede estar SOLO en memoria: se ve en la
+   * pantalla y se puede sincronizar, pero no sobrevive a cerrar la app.
+   */
+  falloDePersistencia: { fallos: number; detalle: string } | null;
   pendingCount: number;
   offlineSim: boolean;
   syncing: boolean;

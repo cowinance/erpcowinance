@@ -121,6 +121,25 @@ export default function Home() {
           </View>
         )}
 
+        {/*
+          El disco del teléfono no está aceptando escrituras — casi siempre, memoria llena. Va
+          ARRIBA de todo y en rojo porque invalida la promesa de la app: lo capturado se ve en la
+          pantalla pero puede no estar guardado. Mientras la app siga abierta se puede sincronizar
+          y queda a salvo; si se cierra antes, se pierde. No hay nada que la app pueda hacer sola.
+        */}
+        {sync.falloDePersistencia && (
+          <View style={styles.storageBanner}>
+            <Text style={{ color: '#fff', fontSize: T.type.body, fontWeight: '700' }}>
+              No se está pudiendo guardar en el teléfono
+            </Text>
+            <Text style={{ color: '#fff', fontSize: T.type.label, marginTop: T.space['1'] }}>
+              {sync.falloDePersistencia.fallos}{' '}
+              {sync.falloDePersistencia.fallos === 1 ? 'escritura falló' : 'escrituras fallaron'}. Sincronizá ahora:
+              lo de esta sesión puede perderse al cerrar la app. Suele ser falta de espacio.
+            </Text>
+          </View>
+        )}
+
         {/* Atención prioritaria — compacta, arriba de todo (online) */}
         {priority.length > 0 && (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
@@ -196,6 +215,7 @@ const makeStyles = (T: Theme) =>
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.canvas },
   h1: { fontSize: T.type.title, fontWeight: '700', color: T.ink },
   offlineBanner: { backgroundColor: T.warning, borderRadius: T.radiusSm, paddingVertical: T.space['2'], paddingHorizontal: T.space['3'] },
+  storageBanner: { backgroundColor: T.danger, borderRadius: T.radiusSm, paddingVertical: T.space['2'], paddingHorizontal: T.space['3'] },
   priChip: {
     flexGrow: 1,
     minWidth: '30%',

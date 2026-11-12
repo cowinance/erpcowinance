@@ -6,6 +6,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { SerializedDevice, SyncDevice } from '@cowinance/sync-core';
 import type { DeviceStorage, PersistedMeta } from './storage.types';
+import { crearColaDeEscritura } from './cola-de-escritura';
 
 const DEVICE_KEY = 'cowinance.device.v1';
 const META_KEY = 'cowinance.meta.v1';
@@ -13,14 +14,25 @@ const META_KEY = 'cowinance.meta.v1';
 export function createStorage(): DeviceStorage {
   let device: SyncDevice | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // Misma cola que el adaptador nativo: acá el fallo es aún más probable, porque AsyncStorage en
+  // navegador tiene cuota.
+  const cola = crearColaDeEscritura();
 
   const flush = () => {
     if (!device) return;
-    AsyncStorage.setItem(DEVICE_KEY, JSON.stringify(device.serialize())).catch(() => {});
+    // Se serializa ACÁ y no dentro de la tarea encolada: si entretanto corre un `reset()`, la
+    // tarea encontraría `device` en null y el error se contaría como fallo de disco, que es
+    // mentira. El snapshot es el del momento del debounce, como siempre fue.
+    const instantanea = JSON.stringify(device.serialize());
+    cola.encolar(() => AsyncStorage.setItem(DEVICE_KEY, instantanea));
   };
 
-  return {
+  const almacen: DeviceStorage = {
     engine: 'AsyncStorage (web)',
+    get fallosDeEscritura() {
+      return cola.fallos;
+    },
+    alFallarEscritura: (aviso) => cola.alFallar(aviso),
     async init() {},
     async loadMeta() {
       const raw = await AsyncStorage.getItem(META_KEY);
@@ -42,7 +54,9 @@ export function createStorage(): DeviceStorage {
     },
     async reset() {
       device = null;
+      cola.reiniciar();
       await AsyncStorage.multiRemove([DEVICE_KEY, META_KEY]);
     },
   };
+  return almacen;
 }

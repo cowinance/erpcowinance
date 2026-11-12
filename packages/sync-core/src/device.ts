@@ -99,10 +99,27 @@ export class SyncDevice {
 
     let pushed = 0;
     if (this.pending.length) {
-      const flushedSeqs = this.pending.map((c) => c.seq);
-      const res = await transport.push(this.pending);
+      /**
+       * Se saca de la cola EXACTAMENTE lo que se envió, nunca la cola entera.
+       *
+       * El arreglo se serializa al armar la petición, o sea al principio del `await`. Todo lo que
+       * se capture durante la ida al servidor entra a `this.pending` después de esa foto — y un
+       * `this.pending = []` al volver lo borraba sin haberlo enviado nunca.
+       *
+       * En el campo eso es exactamente lo que pasa: el peón sigue pesando mientras la radio sube
+       * lo anterior. El changeset sobrevivía en SQLite (el evento `flushed` solo borra los `seq`
+       * que viajaron), así que reaparecía al reiniciar la app; hasta entonces el contador marcaba
+       * cero y la pantalla decía «todo al día». Perder el dato habría sido grave; mentir sobre
+       * haberlo subido es peor, porque nadie revisa una cola que el teléfono informa vacía.
+       *
+       * El `seq` alcanza como identidad: es monotónico y único por dispositivo.
+       */
+      const enviados = this.pending.slice();
+      const flushedSeqs = enviados.map((c) => c.seq);
+      const res = await transport.push(enviados);
       pushed = res.accepted + res.deduped;
-      this.pending = [];
+      const subidos = new Set(flushedSeqs);
+      this.pending = this.pending.filter((c) => !subidos.has(c.seq));
       this.listener?.({ kind: 'flushed', seqs: flushedSeqs });
     }
 

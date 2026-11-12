@@ -103,6 +103,26 @@ export default function SyncScreen() {
         </Pressable>
         <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Sincronización</Text>
 
+        {/*
+          Antes que la cola: si el disco no acepta escrituras, el número de la cola de abajo es
+          optimista — hay capturas que solo están en memoria. Acá va el motivo técnico completo,
+          que es lo que sirve cuando alguien llama a pedir ayuda.
+        */}
+        {sync.falloDePersistencia && (
+          <Card>
+            <Text style={[styles.cardTitle, { color: T.danger }]}>No se está pudiendo guardar en el teléfono</Text>
+            <Text style={{ fontSize: T.type.body, color: T.ink2, marginTop: T.space['1'] }}>
+              Fallaron {sync.falloDePersistencia.fallos}{' '}
+              {sync.falloDePersistencia.fallos === 1 ? 'escritura' : 'escrituras'} en la base local. Lo capturado
+              en esta sesión se ve en pantalla, pero puede no estar guardado: sincronizá antes de cerrar la app.
+              La causa habitual es falta de espacio en el teléfono.
+            </Text>
+            <Text style={{ fontSize: T.type.label, color: T.ink3, marginTop: T.space['1'] }}>
+              {sync.falloDePersistencia.detalle}
+            </Text>
+          </Card>
+        )}
+
         <Card>
           <Text style={styles.cardTitle}>Pendiente de subir ({pending.length})</Text>
           {pending.length === 0 ? (

@@ -82,6 +82,27 @@ export interface PersistedMeta {
 export interface DeviceStorage {
   /** Nombre visible en el Menú (diagnóstico). */
   readonly engine: string;
+  /**
+   * Cuántas mutaciones NO se pudieron escribir en disco desde que arrancó la app.
+   *
+   * La premisa entera de esta app es que lo capturado sobrevive en el dispositivo hasta que haya
+   * señal. Las escrituras son asíncronas y nadie las espera —así es como la captura es instantánea
+   * aunque la base esté ocupada—, de modo que un fallo (disco lleno, base bloqueada o corrupta) no
+   * tiene a dónde llegar: la fila quedaba aplicada en memoria, visible en la pantalla, y moría al
+   * cerrar la app sin que nada lo dijera.
+   *
+   * Un teléfono de campo con la memoria llena es lo normal, no lo excepcional. Si la premisa no se
+   * puede cumplir, lo mínimo es decirlo.
+   */
+  readonly fallosDeEscritura: number;
+  /**
+   * Suscribe el aviso de fallo de escritura; devuelve la función de baja.
+   *
+   * Es un método y no una propiedad asignable a propósito: el almacenamiento vive en un
+   * `useState` del provider y asignarle campos desde un efecto es mutar un valor de estado —
+   * el compilador de React lo rechaza, y con razón.
+   */
+  alFallarEscritura(aviso: (fallos: number, detalle: string) => void): () => void;
   init(): Promise<void>;
   loadMeta(): Promise<PersistedMeta | null>;
   saveMeta(meta: PersistedMeta): Promise<void>;
