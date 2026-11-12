@@ -44,6 +44,13 @@ RUN node -e "const fs=require('fs'); for (const p of ['domain','sync-core','desi
 
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 
+# El driver de archivos `local` —que es el DEFAULT— escribe en `.data/uploads/<tenant>/`. `/app` es
+# de root y el proceso corre como `node`, así que sin esta carpeta ya creada y con dueño, la
+# primera subida muere con `EACCES: mkdir` y devuelve un 500 sin explicación. Se descubrió al
+# probar el despliegue con TLS: el README decía que con `local` los archivos se PIERDEN en el
+# próximo deploy, que es cierto, pero antes de eso directamente no se guardaban.
+RUN mkdir -p /app/.data/uploads && chown -R node:node /app/.data
+
 # Sin root: `node` (uid 1000) ya existe en la imagen oficial.
 USER node
 

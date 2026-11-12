@@ -140,6 +140,12 @@ cache de Next dev corrompido: `npm run clean:web` y reiniciar. No es un error de
 
 ## Despliegue con Docker
 
+> **¿Un servidor de verdad, con HTTPS?** Lo de acá abajo levanta el stack en local, sin TLS. Para
+> un entorno al que pueda llegar un teléfono —que es lo que hace falta para probar la app móvil—
+> está [docs/despliegue-staging.md](docs/despliegue-staging.md): el mismo stack más un proxy con
+> certificado automático. Android bloquea HTTP sin cifrar en las compilaciones de release, así que
+> ahí el TLS no es opcional.
+
 Stack completo (PostgreSQL 17 + PostGIS · api-core · web) con las mismas imágenes que irían a un
 servidor:
 
@@ -190,6 +196,12 @@ desarrollo el arranque avisa exactamente qué queda roto:
 | Variable | Default | Qué pasa si se deja así en producción |
 |---|---|---|
 | `STORAGE_DRIVER` | `local` | Las fotos y documentos van al disco del contenedor: se pierden en el próximo deploy y no los ve otra instancia. Con `s3` (AWS, Cloudflare R2, MinIO, Backblaze B2) viven fuera del proceso. |
+
+> **Sobre `local` en Docker.** Hasta el 12-11 la subida de archivos con el driver `local` devolvía
+> **500** dentro del contenedor: `/app` es de root, el proceso corre como `node` y la carpeta
+> `.data/uploads` no existía, así que el primer `mkdir` moría con `EACCES`. El Dockerfile ahora la
+> crea con dueño. Lo que sigue en pie es la limitación de siempre: con `local` los archivos viven
+> en el contenedor y se pierden en el próximo deploy.
 | `EMAIL_PROVIDER` | `log` | El correo se **imprime**: la verificación de email y el reset de contraseña no le llegan al usuario. Con `smtp` se envía de verdad, contra cualquier proveedor. |
 | `APP_BASE_URL` | `http://localhost:3000` | El correo sale, pero el **enlace** apunta a localhost: no funciona en el teléfono de quien lo recibe. Es el más difícil de diagnosticar, porque el mail llegó. |
 | `API_INTERNAL_URL` | `http://localhost:3001/v1` | La web no llega a la API. Se lee **al arrancar** (no se inlinea): corregirla es reiniciar, sin reconstruir. Desde el contenedor web el host es el nombre del servicio (`api`), no `localhost`; con web y API en el mismo host, `127.0.0.1`. Con este default la web **no arranca** (guardia de arranque). |
