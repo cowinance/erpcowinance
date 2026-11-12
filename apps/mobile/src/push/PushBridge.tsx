@@ -22,8 +22,15 @@ import { resolvePushDestination } from './deep-link';
 export function PushBridge() {
   const sync = useSync();
   // Ref siempre-actual: evita re-montar efectos por el nuevo objeto de contexto en cada render.
+  //
+  // La asignación va en un efecto y no en el cuerpo del componente: escribir un ref MIENTRAS se
+  // dibuja es un efecto secundario durante el render, y con el React Compiler activado eso puede
+  // correr más veces de las esperadas o quedar a medias. Pasarlo al efecto no cambia nada acá,
+  // porque los callbacks de abajo solo se invocan después —desde efectos y desde el sistema—.
   const syncRef = useRef(sync);
-  syncRef.current = sync;
+  useEffect(() => {
+    syncRef.current = sync;
+  });
   const deviceId = sync.serverDeviceId;
 
   const bridge = useMemo<PushSyncBridge>(

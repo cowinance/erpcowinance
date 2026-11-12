@@ -10,7 +10,7 @@
  * Movement/Heat/Service/Diagnosis), así que el contrato de sync no cambia.
  */
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { mangaCardAlerts, type MangaAlert } from '@cowinance/domain';
@@ -19,6 +19,7 @@ import { FormScroll } from '@/components/ui';
 import { EscanerDeCaravana } from '@/camara/EscanerDeCaravana';
 import { ModeCapture } from '@/components/manga/ModeCapture';
 import { AMBER, GREEN, RED, styles, type Mode } from '@/components/manga/estilos';
+import { diasDesde, useAhora } from '@/lib/ahora';
 import * as haptics from '@/lib/haptics';
 
 const SCAN_DEBOUNCE_MS = 1500;
@@ -74,6 +75,8 @@ export default function Manga() {
   const [sessionName, setSessionName] = useState('');
   const [targetLot, setTargetLot] = useState<{ id: string; name: string } | null>(null);
   const [startedAt, setStartedAt] = useState(0);
+  /** Instante en que se cerró la sesión. El resumen no puede seguir contando mientras se mira. */
+  const [endedAt, setEndedAt] = useState(0);
   const [records, setRecords] = useState<SessionRecord[]>([]);
   const [errors, setErrors] = useState(0);
 
@@ -130,7 +133,7 @@ export default function Manga() {
   }
 
   const saved = records.length;
-  const mins = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+  const mins = Math.max(1, Math.round(((endedAt || startedAt) - startedAt) / 60000));
 
   /**
    * Un rol sin ninguna captura —el contador— no entra a la manga.
@@ -206,6 +209,7 @@ export default function Manga() {
             accessibilityRole="button"
             onPress={() => {
               setStartedAt(Date.now());
+              setEndedAt(0);
               setRecords([]);
               setErrors(0);
               setPhase('capture');
@@ -334,7 +338,7 @@ export default function Manga() {
           <Text style={{ color: errors ? RED : 'rgba(255,255,255,0.3)' }}>{errors}</Text>
           <Text style={styles.counterUnit}> err</Text>
         </Text>
-        <Pressable accessibilityRole="button" onPress={() => setPhase('summary')} style={styles.exitBtn}>
+        <Pressable accessibilityRole="button" onPress={() => { setEndedAt(Date.now()); setPhase('summary'); }} style={styles.exitBtn}>
           <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>Salir</Text>
         </Pressable>
       </View>
@@ -448,9 +452,8 @@ function AnimalCard({
   sync: ReturnType<typeof useSync>;
   onAlertPress: (mode: Mode) => void;
 }) {
-  const days = animal.last_weighed_at
-    ? Math.floor((Date.now() - new Date(animal.last_weighed_at).getTime()) / 86400000)
-    : null;
+  const ahora = useAhora();
+  const days = diasDesde(animal.last_weighed_at, ahora);
   const facts: [string, string][] = [];
   if (animal.last_weight_kg != null) facts.push(['ÚLTIMO PESO', `${Math.round(animal.last_weight_kg)} kg${days != null ? ` · hace ${days} d` : ''}`]);
   facts.push(['LOTE', animal.lot_name ?? 'sin lote']);

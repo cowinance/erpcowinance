@@ -47,19 +47,26 @@ export default function Home() {
   // Vive en un callback y no suelta adentro del efecto porque tirar hacia abajo también tiene que
   // recomponerla: este bloque NO viaja en el sync —es un endpoint aparte— así que un sync a secas
   // dejaría el resto de la pantalla al día y la atención prioritaria vieja.
+  // Se desestructura para que las dependencias sean los valores que se usan y no el objeto de
+  // contexto entero: el objeto `sync` cambia de identidad en cada aviso del motor, y depender de
+  // él haría que esta pantalla volviera a pedir /dashboard/home tras cada sincronización.
+  const { status: estadoSync, authFetch } = sync;
   const cargarPrioridad = useCallback(async () => {
-    if (sync.status !== 'ready') return;
+    if (estadoSync !== 'ready') return;
     try {
-      const r = await sync.authFetch('/dashboard/home');
+      const r = await authFetch('/dashboard/home');
       if (!r.ok) return;
       const d = await r.json();
       if (Array.isArray(d?.priority)) setPriority(d.priority);
     } catch {
       /* sin conexión: se conserva lo último que se pudo componer */
     }
-  }, [sync.status, sync.authFetch]);
+  }, [estadoSync, authFetch]);
 
   useEffect(() => {
+    // Carga asíncrona: el `setState` ocurre DESPUÉS del primer `await`, no mientras corre el
+    // efecto. La regla no puede ver a través del await y lo reporta igual.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     cargarPrioridad();
   }, [cargarPrioridad]);
 

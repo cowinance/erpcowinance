@@ -8,7 +8,7 @@
  * Lo que agrega el móvil es la pregunta del campo: «¿a qué potrero muevo este lote?». De ahí el
  * color por carga animal y el detalle al tocar, en vez de herramientas de dibujo.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -78,11 +78,6 @@ export default function Mapa() {
     }, [cargar]),
   );
 
-  // Si el potrero elegido dejó de existir en el refresco, el detalle no puede quedar colgado.
-  useEffect(() => {
-    if (elegido && !potreros?.some((p) => p.id === elegido)) setElegido(null);
-  }, [elegido, potreros]);
-
   if (!puedeVer) {
     return (
       <SafeAreaView style={styles.centro}>
@@ -96,6 +91,8 @@ export default function Mapa() {
   const dibujados = (potreros ?? []).filter((p) => anilloDe(p));
   // La escala se calcula sobre TODOS los potreros, no solo los dibujados: la comparación es del campo.
   const carga = clasificarPorCarga(potreros ?? []);
+  // Se resuelve contra la lista ACTUAL: si el potrero elegido desapareció en un refresco, el
+  // detalle simplemente no se muestra. Derivarlo evita tener que sincronizar dos estados.
   const detalle = potreros?.find((p) => p.id === elegido) ?? null;
 
   return (

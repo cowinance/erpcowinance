@@ -13,7 +13,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useSync, TaskRow } from '@/sync/SyncContext';
+import { useSync } from '@/sync/SyncContext';
 import { FormScroll, Button } from '@/components/ui';
 import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';

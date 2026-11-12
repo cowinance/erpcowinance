@@ -46,11 +46,23 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   const [refreshing, setRefreshing] = useState(false);
   const inFlight = useRef(false);
 
+  /**
+   * Con la sesión cerrada no se muestra NADA del usuario anterior (condición 12).
+   *
+   * Antes esto se hacía borrando el estado desde un efecto al pasar al estado «login».
+   * Sincronizar dos estados así deja una ventana —el render en que ya se cerró sesión pero el
+   * efecto todavía no corrió— en la que el nombre viejo sigue en pantalla. Derivarlo cierra esa
+   * ventana: no hay instante en que la sesión esté cerrada y los datos se sigan viendo.
+   */
+  const cerrado = sync.status === 'login';
+  const visible = cerrado ? null : fetched;
+
   // Nombre/email efectivos: lo de /auth/me si llegó; si no, la meta persistida
   // (arranque en frío) → sin nombre hardcodeado. Cae a undefined → saludo neutral.
-  const name = fetched?.name ?? sync.userName;
-  const email = fetched?.email ?? sync.userEmail;
-  const role = fetched?.role;
+  const name = visible?.name ?? sync.userName;
+  const email = visible?.email ?? sync.userEmail;
+  const role = visible?.role;
+  const emailVerificadoVisible: Verified = cerrado ? 'unknown' : emailVerified;
 
   const refresh = useCallback(async () => {
     if (inFlight.current || sync.status !== 'ready') return;
@@ -74,16 +86,11 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
 
   // Carga tras login exitoso o restauración de sesión válida (status → ready).
   useEffect(() => {
+    // Carga asíncrona: el `setState` ocurre DESPUÉS del primer `await`, no mientras corre el
+    // efecto. La regla no puede ver a través del await y lo reporta igual.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (sync.status === 'ready') refresh();
   }, [sync.status, refresh]);
-
-  // Limpieza al cerrar sesión: no dejar datos del usuario anterior (condición 12).
-  useEffect(() => {
-    if (sync.status === 'login') {
-      setFetched(null);
-      setEmailVerified('unknown');
-    }
-  }, [sync.status]);
 
   // Refresco al volver a foreground (dedupe vía inFlight en refresh()).
   useEffect(() => {
@@ -109,8 +116,8 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   }, [email]);
 
   const value = useMemo<AccountCtx>(
-    () => ({ name, email, role, emailVerified, refreshing, refresh, resendVerification }),
-    [name, email, role, emailVerified, refreshing, refresh, resendVerification],
+    () => ({ name, email, role, emailVerified: emailVerificadoVisible, refreshing, refresh, resendVerification }),
+    [name, email, role, emailVerificadoVisible, refreshing, refresh, resendVerification],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

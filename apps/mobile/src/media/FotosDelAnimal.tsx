@@ -54,6 +54,9 @@ export function FotosDelAnimal({ animalId }: { animalId: string }) {
   }, [animalId, puedeVer, sync]);
 
   useEffect(() => {
+    // Carga asíncrona: el `setState` ocurre DESPUÉS del primer `await`, no mientras corre el
+    // efecto. La regla no puede ver a través del await y lo reporta igual.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     cargar();
   }, [cargar]);
 

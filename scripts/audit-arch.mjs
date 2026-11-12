@@ -292,6 +292,22 @@ gate('tests (vitest run)', testRun.ok, testsPassed ? `${testsPassed} passed` : '
     console.log(dim('    con texto visible alcanza accessibilityRole; un ícono solo necesita accessibilityLabel.'));
 }
 
+// Gate 2e: el linter del móvil, en cero.
+//
+// POR QUÉ ES UN GATE. El script `lint` existía desde el principio y NUNCA había corrido: faltaban
+// las dependencias de ESLint, así que `npm run lint` fallaba y nadie lo notó. Al habilitarlo
+// aparecieron 40 errores acumulados, casi todos del React Compiler —que este proyecto tiene
+// activado— sobre leer refs durante el render y encadenar renders desde efectos. Un linter que
+// no corre es peor que no tener linter: da la impresión de que algo mira.
+//
+// Cero ADVERTENCIAS además de cero errores (`--max-warnings 0`): las advertencias de
+// `exhaustive-deps` son justamente las que preceden a un bug de datos viejos en pantalla.
+{
+  const r = trySh('npm run lint --prefix apps/mobile -- --max-warnings 0');
+  gate('el móvil pasa su linter (0 errores, 0 advertencias)', r.ok, r.ok ? '' : 'corré: npm run lint --prefix apps/mobile');
+  if (!r.ok) console.log(dim(r.out.split('\n').slice(-12).join('\n')));
+}
+
 // Gate 3: cero dependencias circulares (madge).
 const madge = trySh(`npx madge --extensions ts --circular --json ${LARGEST_DIR}`);
 let cycles = -1;

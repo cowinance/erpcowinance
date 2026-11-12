@@ -1,8 +1,7 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable } from 'react-native';
 import { useSync } from '@/sync/SyncContext';
 import { Card } from '@/components/ui';
 import { FotosDelAnimal } from '@/media/FotosDelAnimal';

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { validateWeighing } from '@cowinance/domain';
+import { diasDesde, useAhora } from '@/lib/ahora';
 import * as haptics from '@/lib/haptics';
 import type { AnimalRow } from '@/sync/SyncContext';
 import { AMBER, CC_OPTIONS, GREEN, styles } from './estilos';
@@ -19,10 +20,12 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
   const [method, setMethod] = useState<'ai' | 'natural'>('ai');
   const [sireId, setSireId] = useState('');
   const [result, setResult] = useState<'pregnant' | 'empty'>('pregnant');
+  // Instante estable: leer el reloj durante el render haría impuro el componente.
+  const ahora = useAhora();
 
   // ── Pesaje: MISMA regla de dominio que la web (validateWeighing) ──
   if (mode === 'Pesaje') {
-    const days = animal.last_weighed_at ? Math.floor((Date.now() - new Date(animal.last_weighed_at).getTime()) / 86400000) : null;
+    const days = diasDesde(animal.last_weighed_at, ahora);
     const save = () => {
       const v = validateWeighing({ weightKg: Number(kg), lastWeightKg: animal.last_weight_kg ?? null, daysSinceLast: days });
       if (!v.ok) return onFail(v.error!.message.toUpperCase());

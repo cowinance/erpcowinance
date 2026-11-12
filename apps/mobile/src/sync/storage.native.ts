@@ -5,7 +5,7 @@
  * registros sin serializar snapshots completos.
  */
 import * as SQLite from 'expo-sqlite';
-import type { Changeset, DeviceMutation, SerializedDevice, SyncDevice } from '@cowinance/sync-core';
+import type { Changeset, DeviceMutation, SerializedDevice } from '@cowinance/sync-core';
 import type { DeviceStorage, PersistedMeta } from './storage.types';
 
 const SCHEMA = `

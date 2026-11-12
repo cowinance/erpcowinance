@@ -44,19 +44,9 @@ import {
   stageWeighing,
 } from './capture-actions';
 import { decidirCambioDeFinca, decidirIngreso } from './session-rules';
+import { useNotificaciones } from './use-notificaciones';
 import type { PulledChangesetWire, ServerConflict, SyncCtx } from './sync-types';
-import {
-  type CachedNotification,
-  type NotificationCacheState,
-  addReadPending,
-  classifyReadPost,
-  countUnread,
-  hydrateCachedNotifications,
-  normalizeReadPending,
-  prunePending,
-  reconcileView,
-  reduceRefresh,
-} from './notification-cache';
+import { type CachedNotification, countUnread, reconcileView } from './notification-cache';
 export type { AgendaItem } from './storage.types';
 export type { CachedNotification } from './notification-cache';
 // Las pantallas siguen importando los tipos desde acá: el contrato público del módulo no cambia
@@ -85,20 +75,49 @@ export const useSync = () => {
 };
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
-  const storageRef = useRef<DeviceStorage>(createStorage());
+  const [almacen] = useState<DeviceStorage>(createStorage);
   const deviceRef = useRef<SyncDevice | null>(null);
+  /**
+   * La meta vive en DOS lugares a propósito, y una sola función escribe los dos.
+   *
+   * El ref es lo que leen los caminos asíncronos —authFetch, syncNow, el refresh de
+   * notificaciones—, donde hace falta el valor más reciente sin esperar a que React vuelva a
+   * dibujar. El estado es lo que lee el render.
+   *
+   * Antes solo existía el ref y el render lo leía directo, manteniéndose al día con un contador
+   * manual (`bump()`). Funcionaba mientras nadie se olvidara de llamarlo: una mutación sin bump
+   * dejaba la pantalla mostrando datos viejos sin ningún síntoma. Con el estado de por medio esa
+   * clase de error desaparece.
+   */
   const metaRef = useRef<PersistedMeta | null>(null);
+  const [metaVisible, setMetaVisible] = useState<PersistedMeta | null>(null);
   const offlineRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const notifRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [status, setStatus] = useState<'boot' | 'login' | 'ready' | 'error'>('boot');
   const [errorMsg, setErrorMsg] = useState<string>();
   const [version, setVersion] = useState(0);
   const [offlineSim, setOfflineSimState] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncResult, setLastSyncResult] = useState<string>();
-  const bump = () => setVersion((v) => v + 1);
+  /**
+   * Avisa que algo cambió por fuera de React. Estable a propósito: viaja como dependencia de casi
+   * todos los callbacks del provider, y si cambiara de identidad en cada render los arrastraría a
+   * todos con él.
+   */
+  const bump = useCallback(() => {
+    // El contador de pendientes también sale del dispositivo, que es mutable: se refresca acá,
+    // en el mismo punto en que ya se avisaba que algo cambió.
+    setPendingCount(deviceRef.current?.pendingCount ?? 0);
+    setVersion((v) => v + 1);
+  }, []);
+
+  /** Única forma de cambiar la meta: escribe el ref (lectores asíncronos) y el estado (render). */
+  const aplicarMeta = useCallback((next: PersistedMeta | null) => {
+    metaRef.current = next;
+    setMetaVisible(next);
+  }, []);
 
   const pushConflictsRef = useRef(0);
 
@@ -125,18 +144,18 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       });
       if (r.ok) {
         const j = await r.json();
-        metaRef.current = { ...metaRef.current, accessToken: j.access_token, refreshToken: j.refresh_token };
-        await storageRef.current.saveMeta(metaRef.current);
+        aplicarMeta({ ...metaRef.current, accessToken: j.access_token, refreshToken: j.refresh_token });
+        await almacen.saveMeta(metaRef.current);
         res = await doFetch();
       }
     }
     if (res.status === 401) {
-      metaRef.current = { ...metaRef.current, accessToken: undefined, refreshToken: undefined };
-      await storageRef.current.saveMeta(metaRef.current!);
+      aplicarMeta({ ...metaRef.current, accessToken: undefined, refreshToken: undefined });
+      await almacen.saveMeta(metaRef.current!);
       setStatus('login');
     }
     return res;
-  }, []);
+  }, [almacen, aplicarMeta]);
 
   /**
    * Única función de mutación/persistencia de meta (D8): el mutator parte SIEMPRE del valor
@@ -145,95 +164,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
    */
   const persistMeta = useCallback(async (mutate: (prev: PersistedMeta) => PersistedMeta) => {
     if (!metaRef.current) return;
-    metaRef.current = mutate(metaRef.current);
-    await storageRef.current.saveMeta(metaRef.current);
-  }, []);
+    aplicarMeta(mutate(metaRef.current));
+    await almacen.saveMeta(metaRef.current);
+  }, [almacen, aplicarMeta]);
 
-  /**
-   * Cache-on-sync del feed in_app (P7-4.c), best-effort e independiente del sync CRDT. Orden (D4):
-   * 1) flush de POST /read pendientes; 2) GET /notifications; 3) reduce + persist. Un fallo de red
-   * conserva snapshot, timestamp y read-set previos; nunca sustituye el cache por []. Reutilizable
-   * por syncNow y por la pantalla al enfocarse.
-   */
-  const refreshNotifications = useCallback(async () => {
-    if (!metaRef.current) return;
-    try {
-      const pending = normalizeReadPending(metaRef.current.notificationReadPending);
-      const resolved: string[] = [];
-      for (const id of pending) {
-        try {
-          const r = await authFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
-          const c = classifyReadPost(r.status);
-          if (c === 'confirmed' || c === 'gone') resolved.push(id); // 404 → ya inaccesible, no reintentar
-        } catch {
-          /* red/timeout: se conserva el pendiente, se reconcilia en el próximo sync */
-        }
-      }
-      let snapshot: CachedNotification[] | null = null;
-      try {
-        const r = await authFetch('/notifications');
-        if (r.ok) snapshot = hydrateCachedNotifications(await r.json());
-      } catch {
-        /* red: se mantiene el snapshot previo */
-      }
-      const nowIso = new Date().toISOString();
-      await persistMeta((prev) => {
-        const prevState: NotificationCacheState = {
-          notifications: prev.notifications ?? [],
-          notificationsAt: prev.notificationsAt,
-          notificationReadPending: normalizeReadPending(prev.notificationReadPending),
-        };
-        const next = reduceRefresh(prevState, { postedResolved: resolved, snapshot, nowIso });
-        return { ...prev, notifications: next.notifications, notificationsAt: next.notificationsAt, notificationReadPending: next.notificationReadPending };
-      });
-      bump();
-    } catch {
-      /* el cache es best-effort: ningún fallo aquí aborta ni ensucia el sync principal */
-    }
-  }, [authFetch, persistMeta]);
-
-  /**
-   * Sincroniza el token Expo con el servidor (P7 F2.a): POST /sync/devices/:id/push-token +
-   * persiste `lastPushToken` (optimización local de idempotencia). No prompta permisos ni toca
-   * el SO — eso vive en la capa nativa; acá solo la parte autenticada/persistente.
-   */
-  const syncPushToken = useCallback(
-    async (token: string) => {
-      const deviceId = metaRef.current?.serverDeviceId;
-      if (!deviceId || !token) return;
-      const res = await authFetch(`/sync/devices/${deviceId}/push-token`, { method: 'POST', body: JSON.stringify({ push_token: token }) });
-      if (!res.ok) throw new Error(`push-token → ${res.status}`);
-      await persistMeta((prev) => ({ ...prev, lastPushToken: token }));
-      bump();
-    },
-    [authFetch, persistMeta],
-  );
-
-  /**
-   * Marca una notificación como leída (P7-4.c): 1) read-set local + persist inmediatos (badge baja
-   * al instante); 2) POST /read best-effort; si confirma o 404, poda el pendiente. NO navega (eso
-   * es la pantalla, c.2) ni bloquea por estar offline: la intención queda en la cola local.
-   */
-  const markNotificationRead = useCallback(
-    async (id: string) => {
-      if (!id) return;
-      await persistMeta((prev) => ({ ...prev, notificationReadPending: addReadPending(prev.notificationReadPending, id) }));
-      bump();
-      try {
-        const r = await authFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
-        const c = classifyReadPost(r.status);
-        if (c === 'confirmed' || c === 'gone') {
-          await persistMeta((prev) => ({
-            ...prev,
-            notificationReadPending: prunePending({ pending: prev.notificationReadPending, resolved: [id], snapshot: prev.notifications ?? [] }),
-          }));
-        }
-      } catch {
-        /* red: se conserva el pendiente para el próximo refresh */
-      }
-    },
-    [authFetch, persistMeta],
-  );
+  const { refreshNotifications, markNotificationRead, syncPushToken, scheduleNotificationsRefresh } =
+    useNotificaciones({ authFetch, persistMeta, metaRef, offlineRef, bump, debounceMs: POST_CAPTURE_DEBOUNCE_MS });
 
   const transport = useMemo(
     () => ({
@@ -313,7 +249,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setSyncing(false);
     }
-  }, [transport, authFetch, persistMeta, refreshNotifications]);
+  }, [transport, authFetch, persistMeta, refreshNotifications, bump]);
 
   const scheduleSync = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -322,24 +258,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     }, POST_CAPTURE_DEBOUNCE_MS);
   }, [syncNow]);
 
-  /**
-   * Refresh del feed in_app con anti-ráfaga (P7 F2.b): coalesce una ráfaga de pushes en un solo
-   * refresh (debounce trailing, mismo patrón que scheduleSync), en vez de disparar N refrescos.
-   * No fuerza un sync CRDT completo.
-   */
-  const scheduleNotificationsRefresh = useCallback(() => {
-    if (notifRefreshDebounceRef.current) clearTimeout(notifRefreshDebounceRef.current);
-    notifRefreshDebounceRef.current = setTimeout(() => {
-      if (!offlineRef.current) refreshNotifications();
-    }, POST_CAPTURE_DEBOUNCE_MS);
-  }, [refreshNotifications]);
-
   const init = useCallback(async () => {
     try {
-      const storage = storageRef.current;
+      const storage = almacen;
       await storage.init();
       const [meta, saved] = await Promise.all([storage.loadMeta(), storage.loadDevice()]);
-      metaRef.current = meta;
+      aplicarMeta(meta);
       // Arranque en frío, quizá sin señal: la zona de la finca sale de lo persistido, no de la red.
       setFarmTimeZone(meta?.farmTimeZone);
 
@@ -375,7 +299,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       storage.attach(d); // antes de hidratar: las filas del snapshot se persisten como mutaciones
       d.hydrate(snapshot.rows ?? snapshot.animals, snapshot.cursor);
       deviceRef.current = d;
-      metaRef.current = {
+      const nueva: PersistedMeta = {
         ...metaRef.current,
         serverDeviceId: device.id,
         farmName: snapshot.farm?.name,
@@ -384,32 +308,36 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         capabilities: snapshot.capabilities ?? undefined,
         lastSyncAt: new Date().toISOString(),
       };
+      aplicarMeta(nueva);
       // Antes de `setStatus('ready')`: a partir de ahí se puede capturar, y capturar FECHA.
-      setFarmTimeZone(metaRef.current.farmTimeZone);
-      await storage.saveMeta(metaRef.current);
+      setFarmTimeZone(nueva.farmTimeZone);
+      await storage.saveMeta(nueva);
       setStatus('ready');
       bump();
     } catch (e: any) {
       setErrorMsg(e.message);
       setStatus('error');
     }
-  }, [authFetch]);
+  }, [authFetch, almacen, aplicarMeta, bump]);
 
   useEffect(() => {
+    // Carga asíncrona: el `setState` ocurre DESPUÉS del primer `await`, no mientras corre el
+    // efecto. La regla no puede ver a través del await y lo reporta igual.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     init();
   }, [init]);
 
   /** Operaciones locales sin subir del store actual (dueño previo), sin hidratarlo. */
   const savedPendingCount = useCallback(async (): Promise<number> => {
     if (deviceRef.current) return deviceRef.current.pendingCount;
-    const saved = await storageRef.current.loadDevice();
+    const saved = await almacen.loadDevice();
     if (!saved) return 0;
     try {
       return SyncDevice.restore(saved).pendingCount;
     } catch {
       return 0;
     }
-  }, []);
+  }, [almacen]);
 
   const login = useCallback(
     async (email: string, password: string): Promise<string | null> => {
@@ -439,12 +367,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         // cuenta nueva (device de otro tenant → 404) ni descartar en silencio.
         if (decision.accion === 'bloquear') return decision.mensaje;
         if (decision.accion === 'descartar') {
-          await storageRef.current.reset();
+          await almacen.reset();
           deviceRef.current = null;
-          metaRef.current = null;
+          aplicarMeta(null);
         }
 
-        metaRef.current = {
+        aplicarMeta({
           ...metaRef.current,
           accessToken: j.access_token,
           refreshToken: j.refresh_token,
@@ -453,8 +381,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           userId: newUserId,
           tenantId: newTenantId,
           organizations: j.organizations ?? [],
-        };
-        await storageRef.current.saveMeta(metaRef.current!);
+        });
+        await almacen.saveMeta(metaRef.current!);
         setStatus('boot');
         await init();
         return null;
@@ -462,7 +390,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         return `Sin conexión con la API (${e.message})`;
       }
     },
-    [init, savedPendingCount],
+    [init, savedPendingCount, almacen, aplicarMeta],
   );
 
   /**
@@ -503,9 +431,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Recién ahora se descarta lo local: el token nuevo ya está en la mano.
-      await storageRef.current.reset();
+      await almacen.reset();
       deviceRef.current = null;
-      metaRef.current = {
+      aplicarMeta({
         ...metaRef.current,
         accessToken: j.access_token,
         refreshToken: j.refresh_token,
@@ -521,14 +449,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         notifications: undefined,
         lastSyncAt: undefined,
         serverDeviceId: undefined,
-      };
-      await storageRef.current.saveMeta(metaRef.current!);
+      });
+      await almacen.saveMeta(metaRef.current!);
       setFarmTimeZone(null);
       setStatus('boot');
       await init();
       return null;
     },
-    [authFetch, init, savedPendingCount],
+    [authFetch, init, savedPendingCount, almacen, aplicarMeta],
   );
 
   const logout = useCallback(async () => {
@@ -539,13 +467,13 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ refresh_token: metaRef.current.refreshToken }),
       }).catch(() => {});
     }
-    metaRef.current = { ...metaRef.current, accessToken: undefined, refreshToken: undefined };
-    await storageRef.current.saveMeta(metaRef.current!);
+    aplicarMeta({ ...metaRef.current, accessToken: undefined, refreshToken: undefined });
+    await almacen.saveMeta(metaRef.current!);
     // La zona es de la finca que se está dejando: si entra otra cuenta, hasta su bootstrap se fecha
     // con la del teléfono y no con la del tenant anterior. Mismo criterio que el resto del cierre.
     setFarmTimeZone(null);
     setStatus('login');
-  }, []);
+  }, [almacen, aplicarMeta]);
 
   /**
    * Sync automático: al quedar listo, cada 60 s MIENTRAS LA APP ESTÁ ADELANTE, y al volver a ella.
@@ -575,7 +503,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       intervalo = null;
     };
 
-    syncNow();
+    // El primer sync sale en un turno aparte y no en el cuerpo del efecto: syncNow() pone
+    // 'sincronizando' de entrada, y hacerlo durante el montaje encadena un render más justo
+    // cuando la pantalla recién aparece. No hay apuro — el resultado tarda una ida al servidor.
+    const primero = setTimeout(() => {
+      if (!offlineRef.current) syncNow();
+    }, 0);
     arrancar();
 
     const sub = AppState.addEventListener('change', (estado) => {
@@ -588,6 +521,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      clearTimeout(primero);
       parar();
       sub.remove();
     };
@@ -629,23 +563,23 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     return {
       status,
       errorMsg,
-      userName: metaRef.current?.userName,
-      userEmail: metaRef.current?.userEmail,
-      userId: metaRef.current?.userId,
+      userName: metaVisible?.userName,
+      userEmail: metaVisible?.userEmail,
+      userId: metaVisible?.userId,
       authFetch,
       login,
       logout,
-      organizations: metaRef.current?.organizations ?? [],
-      tenantId: metaRef.current?.tenantId,
+      organizations: metaVisible?.organizations ?? [],
+      tenantId: metaVisible?.tenantId,
       switchOrganization,
-      farmName: metaRef.current?.farmName,
+      farmName: metaVisible?.farmName,
       // Del módulo de fecha y no de la meta: lo que importa mostrar es la zona que se está USANDO
       // para fechar, no la que quedó guardada. Si difirieran, el diagnóstico mentiría.
       farmTimeZone: getFarmTimeZone(),
-      lastSyncAt: metaRef.current?.lastSyncAt,
+      lastSyncAt: metaVisible?.lastSyncAt,
       lastSyncResult,
-      storageEngine: storageRef.current.engine,
-      pendingCount: deviceRef.current?.pendingCount ?? 0,
+      storageEngine: almacen.engine,
+      pendingCount,
       offlineSim,
       syncing,
       version,
@@ -660,28 +594,28 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       tasks: () => listTasks(store()),
 
       // Agenda diaria cacheada (P4-2): snapshot del último sync exitoso, usable offline.
-      agenda: (): AgendaItem[] => metaRef.current?.agenda ?? [],
-      agendaAt: metaRef.current?.agendaAt,
+      agenda: (): AgendaItem[] => metaVisible?.agenda ?? [],
+      agendaAt: metaVisible?.agendaAt,
 
       // Feed in_app cacheado (P7-4.c): vista reconciliada (snapshot + read-set), fuente única
       // para pantalla y badge; usable offline.
-      notifications: (): CachedNotification[] => reconcileView(metaRef.current?.notifications, metaRef.current?.notificationReadPending),
-      unreadNotifications: (): number => countUnread(reconcileView(metaRef.current?.notifications, metaRef.current?.notificationReadPending)),
-      notificationsAt: metaRef.current?.notificationsAt,
+      notifications: (): CachedNotification[] => reconcileView(metaVisible?.notifications, metaVisible?.notificationReadPending),
+      unreadNotifications: (): number => countUnread(reconcileView(metaVisible?.notifications, metaVisible?.notificationReadPending)),
+      notificationsAt: metaVisible?.notificationsAt,
       markNotificationRead,
       refreshNotifications,
 
       // Registro de push (P7 F2.a): identidad del device + último token confirmado (para el puente
       // nativo) y sincronización del token Expo. La obtención del token y los permisos son nativos.
-      serverDeviceId: metaRef.current?.serverDeviceId,
-      pushLastToken: metaRef.current?.lastPushToken,
+      serverDeviceId: metaVisible?.serverDeviceId,
+      pushLastToken: metaVisible?.lastPushToken,
       syncPushToken,
       scheduleNotificationsRefresh,
 
       withdrawalOf: (animalId: string) => effectiveWithdrawal(store(), animalId),
 
       puede: (cap: string, access: 'read' | 'write' = 'write') =>
-        tieneCapacidad(metaRef.current?.capabilities, cap, access),
+        tieneCapacidad(metaVisible?.capabilities, cap, access),
 
       openPregnancy: (animalId: string) => findOpenPregnancy(store(), animalId),
 
@@ -760,14 +694,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       syncNow,
       setOfflineSim,
       resetLocal: async () => {
-        await storageRef.current.reset();
+        await almacen.reset();
         deviceRef.current = null;
-        metaRef.current = null;
+        aplicarMeta(null);
         setStatus('boot');
         init();
       },
     };
-  }, [status, errorMsg, version, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, switchOrganization, authFetch]);
+  }, [status, errorMsg, version, metaVisible, pendingCount, almacen, offlineSim, syncing, lastSyncResult, syncNow, setOfflineSim, scheduleSync, init, login, logout, switchOrganization, authFetch, markNotificationRead, refreshNotifications, scheduleNotificationsRefresh, syncPushToken, aplicarMeta, bump]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
