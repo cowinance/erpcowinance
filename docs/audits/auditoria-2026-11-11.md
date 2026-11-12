@@ -185,9 +185,9 @@ conviene no romper:
 
 En orden. Los tres primeros son de riesgo y baratos; los dos últimos son estructurales.
 
-> **Estado al cierre del 11-11.** Hechos los puntos 1, 2, 3 y 4 — o sea H-1, H-3, H-4, H-5 y H-6.
-> Queda abierto el 5 (tests de la web), que es continuo por diseño. Cada punto dice abajo cómo
-> quedó.
+> **Estado al cierre del 11-11.** Hechos los puntos 1, 2, 3 y 4 — o sea H-1, H-3, H-4, H-5 y H-6 —
+> más la primera vuelta del 5. Lo que queda del 5 no es escribir más tests sino una decisión: cómo
+> probar las 29.700 líneas de `.tsx` que el runner actual no puede tocar. Cada punto dice abajo cómo quedó.
 
 ### 1 · Actualizar dependencias (H-5) — ✅ hecho
 
@@ -237,12 +237,39 @@ runner los tome, y era la causa real de que no hubiera tests—. El gate quedó 
 `.ts` y `.tsx`. Ya mordió una vez: al agregar la cámara, `manga.tsx` pasó de 773 a 833 y hubo que
 partirlo en vez de subir el techo.
 
-### 5 · Tests de unidad para la web (H-2) — ⬜ abierto, y es lo único que queda
+### 5 · Tests de unidad para la web (H-2) — ◐ primera vuelta hecha; el criterio sigue abierto
 
 No es un proyecto de una semana ni conviene que lo sea. El criterio razonable: **todo componente
 nuevo con lógica propia nace con test**, y los cuatro de más de 600 líneas se cubren cuando haya que
 tocarlos. El andamiaje ya existe —vitest corre `apps/web/src/**/*.test.ts`— y hoy lo usan seis
 archivos.
+
+**Cómo quedó la primera vuelta.** De 6 archivos de test a 12, de 50 a 119 tests. Se empezó por
+donde un error no se nota: el control de acceso (`routes`, `session`, `admin-session`), que decide
+si una ruta pide sesión y si los tokens quedan legibles por JavaScript, y las fechas de finca en el
+navegador. Los invariantes más caros se verificaron por mutación.
+
+**Escribirlos encontró tres bugs de verdad**, que es el argumento más fuerte a favor de seguir:
+
+| Qué | Qué se veía |
+|---|---|
+| `EVENT_LABELS` sin cinco eventos que el móvil emite | Quien capturaba un celo en el corral veía «heat» en el timeline de la web |
+| `ageFrom` dividía por un mes promedio de 30,44 días | Un animal de exactamente dos años figuraba como «1 a 11 m» en la lista del hato |
+| `bucketForDue` mezclaba día de finca con fechas UTC | En un huso negativo, después de las 20:00 una tarea del borde caía en la columna equivocada |
+
+**Lo que no se arregla escribiendo más tests de lo mismo.** La proporción subió de 0,013 a 0,031 y
+ahí se va a quedar: el runner solo toma `.ts`, y **29.700 de las 30.700 líneas de la web son
+`.tsx`**. Hay dos caminos y conviene elegir uno a conciencia:
+
+1. **Extraer la lógica de los componentes**, como se hizo en el móvil con `SyncContext`. Es lo que
+   se hizo acá con `bucketForDue`, y de paso apareció el bug. El relevamiento dice que hay menos de
+   lo que el tamaño sugiere: los componentes grandes son sobre todo presentación y fetch, porque la
+   aritmética del dominio vive en la API —que sí está cubierta—.
+2. **Sumar un runner de componentes** (Testing Library con entorno jsdom). Es la única forma de
+   probar lo que de verdad ocupa esas 29.700 líneas: que la pantalla muestre lo que corresponde.
+
+Mientras no se elija, la web sigue protegida por los 43 tests E2E, que es cobertura de recorrido y
+no de borde.
 
 ---
 
