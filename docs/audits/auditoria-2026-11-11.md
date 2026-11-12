@@ -185,7 +185,11 @@ conviene no romper:
 
 En orden. Los tres primeros son de riesgo y baratos; los dos últimos son estructurales.
 
-### 1 · Actualizar dependencias (H-5) — horas
+> **Estado al cierre del 11-11.** Hechos los puntos 1, 2, 3 y 4 — o sea H-1, H-3, H-4, H-5 y H-6.
+> Queda abierto el 5 (tests de la web), que es continuo por diseño. Cada punto dice abajo cómo
+> quedó.
+
+### 1 · Actualizar dependencias (H-5) — ✅ hecho
 
 `npm audit fix` resuelve 13 de las 17 críticas y altas sin salto mayor. Las dos de `vitest`
 requieren la versión 5 y conviene hacerlas aparte, porque tocan la infraestructura de pruebas de
@@ -194,24 +198,46 @@ todo el repositorio.
 Al terminar, el gate completo y el E2E tienen que pasar antes de commitear: un salto de `next` o
 `nest` puede romper en runtime sin que el typecheck lo note.
 
-### 2 · Corregir el README (H-6) — horas
+**Cómo quedó.** En la raíz, 35 → 19 sin mover un solo rango de `package.json` (críticas 4 → 2,
+altas 13 → 2). En el móvil, 27 → 8 y ninguna crítica, con `expo install --fix` y no con
+`npm audit fix`: Expo fija versiones para mantener el SDK alineado y un fix a ciegas rompe esa
+alineación. Lo que queda exige saltos mayores —`vitest` 5, `nodemailer` 10, Expo SDK 58— y cada uno
+es un trabajo aparte, no una línea de este plan.
+
+### 2 · Corregir el README (H-6) — ✅ hecho
 
 Las cuatro afirmaciones desactualizadas, más una sección sobre permisos, invitaciones y
 multi-organización. Es el documento que lee quien llega, y hoy describe un sistema sin control de
 acceso.
 
-### 3 · Tests de `AuthService` y de `media` (H-1, H-4) — un día
+**Cómo quedó.** Corregidas las cuatro, afinada la de `Idempotency-Key` (no es un no-op: lo honran
+las rutas donde un doble-submit duplicaría un hecho de dominio) y agregadas dos limitaciones reales
+que no estaban —las fotos no tienen cola offline y los fallos del móvil no se reportan a ningún
+servicio—. «Suscripciones parciales» se dejó: se verificó que sigue siendo cierta.
+
+### 3 · Tests de `AuthService` y de `media` (H-1, H-4) — ✅ hecho
 
 Empezando por lo que protege algo: rotación y detección de reuso del refresh, la revalidación de la
 asignación, el cambio de organización, y la firma de los tokens de archivo.
 
-### 4 · Techo de tamaño para el móvil y partir `SyncContext` (H-3) — dos o tres días
+**Cómo quedó.** 26 tests de `AuthService` y 14 entre `media.serve` y el token de archivo, escritos
+como lo que NO tiene que pasar. Los dos invariantes más caros se verificaron por mutación: revertir
+el arreglo de agosto —el rol otra vez desde el token— tumba tres tests, y quitar la comparación de
+ids en `serve()` tumba el que impide pedir un archivo con el token de otro.
+
+### 4 · Techo de tamaño para el móvil y partir `SyncContext` (H-3) — ✅ hecho
 
 Extender el gate al móvil con el mismo criterio que la API, y partir `SyncContext` por costura:
 sesión, almacén local, cola de cambios, bootstrap. La API ya hizo esto tres veces y el método está
 probado — cortar por las costuras que el archivo ya marca, no inventar unas nuevas.
 
-### 5 · Tests de unidad para la web (H-2) — continuo
+**Cómo quedó.** `SyncContext.tsx` de 1.485 a 738 líneas, repartido en `sync-types`, `store-queries`,
+`capture-actions` y `session-rules`, todos `.ts` sin React ni Expo —que es el requisito para que el
+runner los tome, y era la causa real de que no hubiera tests—. El gate quedó en 800 líneas para
+`.ts` y `.tsx`. Ya mordió una vez: al agregar la cámara, `manga.tsx` pasó de 773 a 833 y hubo que
+partirlo en vez de subir el techo.
+
+### 5 · Tests de unidad para la web (H-2) — ⬜ abierto, y es lo único que queda
 
 No es un proyecto de una semana ni conviene que lo sea. El criterio razonable: **todo componente
 nuevo con lógica propia nace con test**, y los cuatro de más de 600 líneas se cubren cuando haya que
@@ -229,6 +255,10 @@ Para que nadie lo dé por revisado:
 - **La app móvil corriendo.** El typecheck pasa y hay tests de su lógica pura, pero el ciclo de
   captura offline completo —guardar sin señal, verlo en la cola, que suba al sincronizar— no se
   ejercitó en un dispositivo.
+  *Al cierre del 11-11:* la app sí se ejercitó corriendo en web contra la API local —login,
+  bootstrap del rodeo, mapa de potreros, fotos del animal, manga— y la cola quedó cubierta por
+  tests, incluida la garantía de que un push fallido no la borra. Lo que sigue sin probarse es el
+  ciclo **en un teléfono**, y todo lo que necesita cámara de verdad.
 - **Los 48 documentos de sprint y los 14 `.docx` de especificación**, que pueden tener la misma
   deriva que el README.
 - **Accesibilidad**, más allá de los dos invariantes que el gate ya verifica.
