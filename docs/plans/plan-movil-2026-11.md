@@ -1,6 +1,6 @@
 # Plan: la app móvil, de proyecto a producto
 
-**Fecha:** 2026-11-11 · **Estado: Fases 0, 1 y 2 hechas salvo lo que pide un teléfono y D-1** · **Origen:** pedido del productor —
+**Fecha:** 2026-11-11 · **Estado: las cuatro fases dieron su primera vuelta; falta el teléfono y D-1** · **Origen:** pedido del productor —
 *«rehacer la app móvil, hacerla nativa para Android y iOS, hacerla más profesional»*
 
 > **Cómo leer este documento.** El pedido traía tres cosas juntas —rehacer, nativa, profesional— y
@@ -291,6 +291,53 @@ No es una fase con fecha; es el criterio con el que se trabaja después.
 - **Actualizaciones por aire** (EAS Update) para arreglar sin pasar por revisión de tienda. Para una
   app de campo, esperar tres días una corrección es mucho.
 - **Qué NO hacer:** analítica de producto antes de tener usuarios. Mide nada y cuesta confianza.
+
+### Primera vuelta — lo que se volvió exigible
+
+Siendo la fase «continua», lo útil no era tachar una lista sino convertir el criterio en algo que
+el repositorio haga cumplir solo.
+
+**Accesibilidad.** 65 de 82 elementos tocables no se anunciaban: un `Pressable` sin
+`accessibilityRole` lo lee TalkBack como texto suelto. Eran tantos por la misma razón que los altos
+fijos antes del gate — nada lo frenaba. Ahora están los 82 anotados, los seis selectores llevan
+`accessibilityState={{ selected }}` (el rol dice que es un botón; el estado dice cuál está
+elegido), y **un gate nuevo lo mantiene en cero**.
+
+**Sol directo.** El contraste de la paleta ahora se mide contra WCAG en el paquete de tokens, que
+es donde sirve a la web y al móvil a la vez. Lo que cumple quedó fijado; lo que no, quedó escrito
+con su número — ver «Decisiones de paleta» abajo.
+
+**Batería al 10%.** El encabezado de `SyncContext` decía «cada 60 s en primer plano» y no era
+cierto: no había control de `AppState`. En iOS los timers se congelan solos y no se notaba; en
+Android el teléfono en el bolsillo despertaba la radio cada minuto toda la jornada. Ahora el
+intervalo se detiene al pasar a segundo plano y sincroniza al volver.
+
+**Actualizaciones por aire.** `runtimeVersion` con política `fingerprint`. Es la decisión que hay
+que tomar ANTES de la primera compilación: cambiarla después invalida la compatibilidad de lo ya
+publicado. `fingerprint` cuesta más compilaciones y a cambio hace imposible mandar una
+actualización a una build cuyo código nativo no la soporta — con RFID y OCR a la vista, eso vale
+más. `expo-updates` no se instaló: sin cuenta de Expo no hay `projectId` y quedaría inerte.
+
+### Decisiones de paleta que quedan abiertas
+
+Las tres salieron de medir, y las tres tienen alcance en web y móvil, así que se reportan en vez de
+cambiarse:
+
+| Qué | Medida | Por qué importa |
+|---|---|---|
+| `text.tertiary` | 2,86 – 3,85 (AA pide 4,5) | El peor caso no llega ni al piso de texto grande. Mientras siga así, **no debería llevar información que no esté en otro lado**. |
+| `border.strong` | 1,54 (WCAG 2.1 pide 3 para no-texto) | Hay 19 controles cuyo único indicio visual es ese borde. Al sol, no se ve. |
+| `accent` en tema oscuro | 3,55 | Alcanza para un título, no para texto corrido. |
+
+### Lo que queda sin hacer de esta fase
+
+- **El `lint` del móvil no funciona**: `npm run lint` llama a `expo lint` y el proyecto no tiene las
+  dependencias de ESLint. Al instalarlas aparecen **40 hallazgos preexistentes**, casi todos
+  «cannot access refs during render» — relevante porque el proyecto tiene el React Compiler
+  activado. Es un trabajo propio, no un renglón de esta fase; se revirtió la instalación para no
+  dejar el repositorio con un linter que nadie atiende.
+- **Guantes y una sola mano** no se tocaron: hay que medir áreas de toque reales y el alcance del
+  pulgar, y eso se hace con el teléfono en la mano, no leyendo código.
 
 ---
 
