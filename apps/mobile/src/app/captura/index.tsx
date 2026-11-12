@@ -2,7 +2,7 @@
  * Capturador rápido (doc diseño §3.2): el botón central abre una hoja con
  * las acciones de campo más frecuentes. Todas funcionan offline.
  */
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,14 +54,37 @@ export default function CapturaMenu() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
-      <View style={{ padding: T.space['4'], flex: 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: T.space['4'] }}>
-          <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Capturar</Text>
-          <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8}>
-            <Ionicons name="close" size={24} color={T.ink2} />
-          </Pressable>
-        </View>
+      {/*
+        El encabezado queda FUERA del scroll a propósito: ahí vive la X de cerrar, y si se fuera
+        con el contenido, en un teléfono chico habría que desplazarse hacia arriba para encontrar
+        la salida.
+      */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: T.space['4'],
+          paddingTop: T.space['4'],
+          marginBottom: T.space['4'],
+        }}
+      >
+        <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Capturar</Text>
+        <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8}>
+          <Ionicons name="close" size={24} color={T.ink2} />
+        </Pressable>
+      </View>
 
+      {/*
+        Y el contenido SÍ scrollea. Son doce capturas en una grilla que envuelve: en la pantalla
+        ancha del navegador entran todas y esto nunca se vio, pero en un teléfono las últimas
+        quedaban cortadas y sin manera de alcanzarlas. El relleno de abajo deja aire para que la
+        última fila no muera contra el borde.
+      */}
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: T.space['4'], paddingBottom: T.space['8'] }}
+        showsVerticalScrollIndicator={false}
+      >
         {hasAnimals ? (
           <>
             <Text style={{ fontSize: T.type.body, color: T.ink3, marginBottom: T.space['4'] }}>
@@ -86,7 +109,7 @@ export default function CapturaMenu() {
         ) : (
           <EmptyHerd />
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

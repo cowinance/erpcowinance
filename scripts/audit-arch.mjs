@@ -292,6 +292,50 @@ gate('tests (vitest run)', testRun.ok, testsPassed ? `${testsPassed} passed` : '
     console.log(dim('    con texto visible alcanza accessibilityRole; un ícono solo necesita accessibilityLabel.'));
 }
 
+// Gate 2f: toda pantalla del móvil tiene por dónde desplazarse.
+//
+// La pantalla de Capturar mostraba doce tarjetas en una grilla dentro de un `View` con `flex: 1`.
+// En el navegador —donde se verificó TODO hasta que la app corrió en un teléfono— las doce entran
+// y no pasa nada. En un teléfono las últimas cuatro quedaban cortadas y no había forma de llegar a
+// ellas: ni Destete, ni Nota, ni Baja, ni Parto existían para quien usara la app.
+//
+// Es el tipo de defecto que no se ve leyendo el código ni corriendo tests, solo en un dispositivo
+// real, y por eso conviene que lo vigile una máquina. Lo encontró el dueño del proyecto a los diez
+// minutos de instalar el primer APK.
+//
+// Se aceptan `ScrollView`, `FlatList`, `SectionList` y `FormScroll` (el envoltorio propio que
+// además maneja el teclado). Quedan fuera los `_layout` —que componen, no muestran contenido— y
+// las rutas que solo redirigen.
+{
+  const sinScroll = [];
+  const CONTENEDORES = /ScrollView|FlatList|SectionList|FormScroll/;
+  const recorrer = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, f.name);
+      if (f.isDirectory()) {
+        recorrer(full);
+      } else if (f.name.endsWith('.tsx') && f.name !== '_layout.tsx') {
+        const texto = readFileSync(full, 'utf8');
+        // Una ruta que solo redirige no tiene contenido que desplazar.
+        if (/<Redirect\b/.test(texto)) continue;
+        if (!CONTENEDORES.test(texto)) sinScroll.push(full.replace(/\\/g, '/'));
+      }
+    }
+  };
+  try {
+    recorrer('apps/mobile/src/app');
+  } catch {
+    /* un directorio ausente no bloquea el gate */
+  }
+  gate(
+    'toda pantalla del móvil se puede desplazar',
+    sinScroll.length === 0,
+    sinScroll.length ? sinScroll.slice(0, 3).join(' · ') : '',
+  );
+  if (sinScroll.length > 0)
+    console.log(dim('    envolvé el contenido en ScrollView o FormScroll; en un teléfono no entra lo que en el navegador sí.'));
+}
+
 // Gate 2e: el linter del móvil, en cero.
 //
 // POR QUÉ ES UN GATE. El script `lint` existía desde el principio y NUNCA había corrido: faltaban
