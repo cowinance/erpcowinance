@@ -87,6 +87,17 @@ La pantalla **Sincronización** del móvil muestra la cola pendiente con detalle
 y los conflictos del servidor en revisión con resolución de un toque; el resultado del sync avisa si un
 push generó conflictos.
 
+**El día de trabajo pertenece a la finca, no al teléfono.** La zona horaria de la organización viaja
+en el bootstrap y queda persistida, así que el dispositivo fecha con ella aun sin señal: un
+veterinario que carga desde otro país anota en el día de la finca. El retiro de carne se cuenta en
+días de calendario en esa zona — calculado en UTC salía corrido hacia ANTES, que es carne con
+residuos dada por habilitada. El servidor sigue siendo la autoridad y recalcula con la misma zona.
+
+La caravana se puede **leer con la cámara** (código de barras o QR) además de teclearse, siempre con
+una confirmación que muestra qué animal es antes de aplicar nada. La ficha del animal guarda **fotos**
+contra el módulo `media`, y la pestaña **Potreros** dibuja el mapa esquemático de la finca —el mismo
+lienzo que el editor de la web— coloreado por carga animal relativa al propio campo.
+
 ## Motor de sincronización
 
 La suite de simulación de convergencia (criterio de salida de Fase 0: >99%) corre con:
@@ -451,8 +462,14 @@ npm run e2e:web
 - **DB y log temporales** viven en `os.tmpdir()/cowinance-web-e2e/` (**fuera del repo**) y se **borran** en el
   teardown, aun si un test falla. El helper de emails lee ese log (no hay buzón en la app).
 - **Ejecución serial** (`workers: 1`): los cinco escenarios comparten una API, un log y una base PGlite.
-- Comando de CI (deuda inmediata; el repo no tiene workflow todavía): `npx playwright install --with-deps
-  chromium && npm run e2e:web`. `audit:arch` **no** arranca Playwright — el gate E2E es explícito y separado.
+- **Corre en CI** (`.github/workflows/ci.yml`, job «E2E web»): `npx playwright install --with-deps chromium
+  && npm run e2e:web`, 43 tests. `audit:arch` **no** arranca Playwright — el gate E2E es explícito y separado.
+
+El workflow tiene cinco jobs: **Gates** (tokens · typecheck · tests · ciclos · build + la matriz de
+permisos), **Gates en Windows** (portabilidad: el separador de rutas rompía filtros en silencio),
+**Aislamiento multi-tenant** contra PostgreSQL real con un rol sin privilegios, **E2E web**, y
+**Backup y restore** (ensayo completo). `release.yml` construye las imágenes, prueba el stack real y
+publica en GHCR por SHA.
 
 ## API (extracto)
 
@@ -478,22 +495,33 @@ se propagan por pull a dispositivos vía **changesets de origen servidor** ([ADR
 - **Login con JWT** (access 15 min + refresh 7 días con **rotación y detección de reuso**): el emisor dev
   vive en la API con el mismo shape de claims que un IdP OIDC (en producción se reemplaza por
   Keycloak/Auth0 cambiando solo la clave de verificación del interceptor).
-- **RLS activa y forzada** en 24 tablas de dominio: cada request corre en una transacción con
-  `SET LOCAL app.tenant_id`; sin contexto, cero filas. Verificado con dos tenants
-  (`cowinance@gmail.com / cowinance` — Grupo La Esperanza; `maria@elsaman.com / saman1234` — El Samán):
-  cada uno ve solo su hato y el acceso cruzado por id devuelve 404.
-- E2E: `node apps/api/scripts/auth-e2e.mjs` (15 checks).
+- **RLS activa y forzada** en 143 tablas de dominio (`apps/api/src/db/rls.ts` es la fuente única):
+  cada request corre en una transacción con `SET LOCAL app.tenant_id`; sin contexto, cero filas.
+  Verificado con dos tenants (`cowinance@gmail.com / cowinance` — Grupo La Esperanza;
+  `maria@elsaman.com / saman1234` — El Samán): cada uno ve solo su hato y el acceso cruzado por id
+  devuelve 404. En CI se verifica contra **PostgreSQL real con un rol sin privilegios**
+  (`npm run verify:rls`), porque `FORCE ROW LEVEL SECURITY` no aplica al dueño de la tabla y un
+  superusuario pasaría el test sin que la política exista.
+- **Permisos por capacidad**: 31 capacidades y 6 roles, resueltos por prefijo de ruta (69 reglas) y
+  aplicados **deny-by-default** por un interceptor global. Un prefijo sin regla es un error de
+  configuración que levanta el test de cobertura, no un permiso concedido. El mismo criterio
+  gobierna el canal de sincronización y lo que la interfaz ofrece.
+- E2E: `node apps/api/scripts/auth-e2e.mjs` (15 checks) · `npm run verify:permisos` comprueba contra
+  la API levantada que la matriz **se aplica de verdad**, rol por rol.
 
 ## Limitaciones conocidas (entorno dev)
 
 - **Emisor de tokens embebido**: sin MFA/passkeys ni SSO SAML; llegan al integrar el IdP externo.
-- **RBAC superficial**: el rol viaja en el token pero no restringe endpoints todavía (ABAC/Cedar pendiente).
-- **`Idempotency-Key` en REST**: se acepta la cabecera pero el dedupe solo está implementado en el canal
-  de sincronización (device + seq); en REST es un no-op por ahora.
-- **Fechas en UTC**: los cálculos de retiro/parto usan fechas ISO UTC; la presentación por zona horaria
-  del establecimiento queda pendiente.
+- **`Idempotency-Key` en REST**: lo honran las rutas donde un doble-submit duplica un hecho de
+  dominio —movimientos de hacienda, sanidad, reproducción—, usando la clave como identidad de la
+  entidad creada. En el resto de los POST sigue siendo un no-op: se acepta la cabecera y no se
+  deduplica.
 - **Suscripciones parciales**: el bootstrap baja el tenant completo; el filtrado por fincas asignadas al
   dispositivo queda pendiente.
+- **Fotos sin cola offline**: el motor de sincronización mueve filas y eventos, no archivos. Las fotos
+  del animal se suben en el momento; sin señal no quedan encoladas (la app lo avisa antes de sacarlas).
+- **Sin reporte remoto de fallos**: el móvil registra los últimos diez fallos de render en el
+  dispositivo y los muestra en su pantalla de Sincronización, pero no los manda a ningún servicio.
 
 ## Próximos pasos (según roadmap)
 
