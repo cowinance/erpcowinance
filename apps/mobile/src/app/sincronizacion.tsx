@@ -51,7 +51,7 @@ function ConflictRow({ c, onResolved }: { c: ServerConflict; onResolved: () => v
         </Text>
         <Text style={{ fontSize: T.type.label, color: T.ink2, marginTop: T.space['0.5'] }}>{c.detail}</Text>
       </View>
-      <Pressable onPress={resolve} disabled={busy} style={[styles.resolveBtn, confirming && { borderColor: T.warning }]}>
+      <Pressable accessibilityRole="button" onPress={resolve} disabled={busy} style={[styles.resolveBtn, confirming && { borderColor: T.warning }]}>
         <Text style={{ fontSize: T.type.caption, fontWeight: '600', color: confirming ? T.warning : T.ink2 }}>
           {busy ? '…' : confirming ? '¿Confirmar?' : 'Resolver'}
         </Text>
@@ -94,7 +94,7 @@ export default function SyncScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <ScrollView refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: T.space['3'] }}>
-        <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
+        <Pressable accessibilityRole="button" onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
           <Ionicons name="chevron-back" size={16} color={T.ink2} />
           <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
         </Pressable>

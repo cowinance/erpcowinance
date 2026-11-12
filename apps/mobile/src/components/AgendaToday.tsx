@@ -100,6 +100,7 @@ export function AgendaToday() {
             const color = i.severity === 'warning' || i.severity === 'critical' ? T.warning : T.info;
             return (
               <Pressable
+                accessibilityRole="button"
                 key={`${i.code}:${i.related_id ?? idx}`}
                 onPress={() => onPress(i)}
                 disabled={!tappable}
@@ -113,7 +114,7 @@ export function AgendaToday() {
                 </View>
                 {tappable && <Ionicons name="chevron-forward" size={16} color={T.ink3} />}
                 {isTask && (
-                  <Pressable onPress={() => completeTask(i)} hitSlop={6} style={styles.completeBtn}>
+                  <Pressable accessibilityRole="button" onPress={() => completeTask(i)} hitSlop={6} style={styles.completeBtn}>
                     <Ionicons name="checkmark" size={15} color={T.success} />
                     <Text style={styles.completeText}>Completar</Text>
                   </Pressable>

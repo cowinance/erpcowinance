@@ -46,6 +46,8 @@ function Segmented<V extends string>({
     <View style={{ flexDirection: 'row', gap: T.space['2'] }}>
       {options.map(([v, label]) => (
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: value === v }}
           key={v}
           onPress={() => onChange(v)}
           style={[styles.segBtn, value === v && { borderColor: T.brand700, backgroundColor: T.brand100 }]}
@@ -144,7 +146,7 @@ export default function CaptureForm() {
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <FormScroll contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />
             <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
           </Pressable>
@@ -177,6 +179,7 @@ export default function CaptureForm() {
             <View style={{ gap: T.space['2'] }}>
               {products.map((p) => (
                 <Pressable
+                  accessibilityRole="button"
                   key={p.id}
                   onPress={() => setProductId(p.id)}
                   style={[styles.productRow, productId === p.id && { borderColor: T.brand700, backgroundColor: T.brand100 }]}
@@ -231,6 +234,7 @@ export default function CaptureForm() {
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
                   {bulls.map((b) => (
                     <Pressable
+                      accessibilityRole="button"
                       key={b.id}
                       onPress={() => setSireId(sireId === b.id ? null : b.id)}
                       style={[styles.segBtn, sireId === b.id && { borderColor: T.brand700, backgroundColor: T.brand100 }]}

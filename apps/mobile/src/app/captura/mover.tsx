@@ -48,7 +48,7 @@ export default function MoverCapture() {
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }}>
       <FormScroll contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />
             <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
           </Pressable>
@@ -72,13 +72,13 @@ export default function MoverCapture() {
             {lots.map((l) => {
               const sel = dest === l.id;
               return (
-                <Pressable key={l.id} onPress={() => setDest(l.id)} style={[styles.option, sel && styles.optionSel]}>
+                <Pressable accessibilityRole="button" key={l.id} onPress={() => setDest(l.id)} style={[styles.option, sel && styles.optionSel]}>
                   <Text style={[styles.optionName, sel && { color: T.brand700 }]}>{l.name}</Text>
                   <Text style={styles.optionSub}>{l.paddock_name ?? 'sin potrero'}</Text>
                 </Pressable>
               );
             })}
-            <Pressable onPress={() => setDest(CLEAR)} style={[styles.option, dest === CLEAR && styles.optionSel]}>
+            <Pressable accessibilityRole="button" onPress={() => setDest(CLEAR)} style={[styles.option, dest === CLEAR && styles.optionSel]}>
               <Text style={[styles.optionName, dest === CLEAR && { color: T.brand700 }]}>Sacar del lote</Text>
               <Text style={styles.optionSub}>El animal queda sin lote</Text>
             </Pressable>
@@ -91,7 +91,7 @@ export default function MoverCapture() {
             {REASONS.map((r) => {
               const sel = reason === r;
               return (
-                <Pressable key={r} onPress={() => setReason(sel ? '' : r)} style={[styles.chip, sel && styles.optionSel]}>
+                <Pressable accessibilityRole="button" key={r} onPress={() => setReason(sel ? '' : r)} style={[styles.chip, sel && styles.optionSel]}>
                   <Text style={[styles.chipText, sel && { color: T.brand700 }]}>{r}</Text>
                 </Pressable>
               );

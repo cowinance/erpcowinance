@@ -39,7 +39,7 @@ export function AnimalPickerLocal({
           {animal.last_weight_kg ? ` · ${Math.round(animal.last_weight_kg)} kg` : ''}
         </Text>
         <Ionicons name="checkmark-circle" size={18} color={T.success} />
-        <Pressable onPress={() => onSelect(null)} hitSlop={8}>
+        <Pressable accessibilityRole="button" onPress={() => onSelect(null)} hitSlop={8}>
           <Ionicons name="close" size={18} color={T.ink3} />
         </Pressable>
       </View>
@@ -58,7 +58,7 @@ export function AnimalPickerLocal({
           keyboardType="number-pad"
           style={styles.input}
         />
-        <Pressable onPress={lookup} disabled={!tag.trim()} style={[styles.searchBtn, !tag.trim() && { opacity: 0.4 }]}>
+        <Pressable accessibilityRole="button" onPress={lookup} disabled={!tag.trim()} style={[styles.searchBtn, !tag.trim() && { opacity: 0.4 }]}>
           <Text style={{ fontSize: T.type.body, fontWeight: '600', color: T.ink }}>Buscar</Text>
         </Pressable>
       </View>

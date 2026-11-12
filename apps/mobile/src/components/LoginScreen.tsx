@@ -104,7 +104,7 @@ export function LoginScreen() {
             />
             {!!error && <Text style={styles.error}>{error}</Text>}
             <Button label={busy ? 'Ingresando…' : 'Ingresar'} onPress={submitLogin} disabled={busy || !email || !password} />
-            <Pressable onPress={() => { setMode('forgot'); setError(''); }} hitSlop={8}>
+            <Pressable accessibilityRole="button" onPress={() => { setMode('forgot'); setError(''); }} hitSlop={8}>
               <Text style={styles.link}>¿Olvidaste tu contraseña?</Text>
             </Pressable>
             <Text style={styles.hint}>El primer ingreso descarga tu finca al dispositivo; después funciona sin señal.</Text>
@@ -126,7 +126,7 @@ export function LoginScreen() {
             />
             {!!error && <Text style={styles.error}>{error}</Text>}
             <Button label={busy ? 'Enviando…' : 'Enviar enlace'} onPress={submitForgot} disabled={busy || !email} />
-            <Pressable onPress={goLogin} hitSlop={8}>
+            <Pressable accessibilityRole="button" onPress={goLogin} hitSlop={8}>
               <Text style={styles.link}>Volver a ingresar</Text>
             </Pressable>
           </View>

@@ -57,14 +57,14 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
         <Text style={styles.stepLabel}>CONDICIÓN CORPORAL</Text>
         <View style={styles.wrapRow}>
           {CC_OPTIONS.map((v) => (
-            <Pressable key={v} onPress={() => setCc(cc === v ? null : v)} style={[styles.ccBtn, cc === v && { backgroundColor: GREEN }]}>
+            <Pressable accessibilityRole="button" accessibilityState={{ selected: cc === v }} key={v} onPress={() => setCc(cc === v ? null : v)} style={[styles.ccBtn, cc === v && { backgroundColor: GREEN }]}>
               <Text style={[styles.ccText, cc === v && { color: '#000' }]}>{v}</Text>
             </Pressable>
           ))}
         </View>
         {!!warn && <Text style={styles.warn}>⚠ {warn}</Text>}
         {!!confirmMsg && <Text style={styles.confirm}>⚠ {confirmMsg}</Text>}
-        <Pressable onPress={save} disabled={!kg} style={[styles.bigBtn, { backgroundColor: confirmMsg ? AMBER : GREEN }, !kg && { opacity: 0.3 }]}>
+        <Pressable accessibilityRole="button" onPress={save} disabled={!kg} style={[styles.bigBtn, { backgroundColor: confirmMsg ? AMBER : GREEN }, !kg && { opacity: 0.3 }]}>
           <Text style={[styles.bigBtnText, { color: '#000' }]}>{confirmMsg ? 'CONFIRMAR Y GUARDAR' : 'GUARDAR Y SIGUIENTE'}</Text>
         </Pressable>
       </>
@@ -93,13 +93,13 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
         {!isReview && (
           <View style={styles.wrapRow}>
             {NOTE_TEMPLATES.map((t) => (
-              <Pressable key={t} onPress={() => setNote((n) => (n.trim() ? `${n.trim()} · ${t}` : t))} style={styles.pillSm}>
+              <Pressable accessibilityRole="button" key={t} onPress={() => setNote((n) => (n.trim() ? `${n.trim()} · ${t}` : t))} style={styles.pillSm}>
                 <Text style={styles.pillTextSm}>{t}</Text>
               </Pressable>
             ))}
           </View>
         )}
-        <Pressable onPress={save} disabled={!isReview && !note.trim()} style={[styles.bigBtn, { backgroundColor: GREEN }, !isReview && !note.trim() && { opacity: 0.3 }]}>
+        <Pressable accessibilityRole="button" onPress={save} disabled={!isReview && !note.trim()} style={[styles.bigBtn, { backgroundColor: GREEN }, !isReview && !note.trim() && { opacity: 0.3 }]}>
           <Text style={[styles.bigBtnText, { color: '#000' }]}>{isReview ? 'REVISADO ✓ Y SIGUIENTE' : 'GUARDAR NOTA'}</Text>
         </Pressable>
       </>
@@ -131,14 +131,14 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
             {list.slice(0, 10).map((p: any) => {
               const on = productId === p.id;
               return (
-                <Pressable key={p.id} onPress={() => setProductId(p.id)} style={[styles.pillSm, on && styles.pillOn]}>
+                <Pressable accessibilityRole="button" accessibilityState={{ selected: on }} key={p.id} onPress={() => setProductId(p.id)} style={[styles.pillSm, on && styles.pillOn]}>
                   <Text style={[styles.pillTextSm, on && styles.pillTextOn]}>{p.name}</Text>
                 </Pressable>
               );
             })}
           </View>
         )}
-        <Pressable onPress={save} disabled={!productId} style={[styles.bigBtn, { backgroundColor: GREEN }, !productId && { opacity: 0.3 }]}>
+        <Pressable accessibilityRole="button" onPress={save} disabled={!productId} style={[styles.bigBtn, { backgroundColor: GREEN }, !productId && { opacity: 0.3 }]}>
           <Text style={[styles.bigBtnText, { color: '#000' }]}>{mode === 'Vacunación' ? 'GUARDAR VACUNA' : 'GUARDAR TRATAMIENTO'}</Text>
         </Pressable>
       </>
@@ -161,16 +161,16 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
           {lots.filter((l: any) => l.id !== animal.current_lot_id).slice(0, 10).map((l: any) => {
             const on = dest === l.id;
             return (
-              <Pressable key={l.id} onPress={() => setDest(l.id)} style={[styles.pillSm, on && styles.pillOn]}>
+              <Pressable accessibilityRole="button" accessibilityState={{ selected: on }} key={l.id} onPress={() => setDest(l.id)} style={[styles.pillSm, on && styles.pillOn]}>
                 <Text style={[styles.pillTextSm, on && styles.pillTextOn]}>{l.name}</Text>
               </Pressable>
             );
           })}
-          <Pressable onPress={() => setDest('clear')} style={[styles.pillSm, dest === 'clear' && styles.pillOn]}>
+          <Pressable accessibilityRole="button" onPress={() => setDest('clear')} style={[styles.pillSm, dest === 'clear' && styles.pillOn]}>
             <Text style={[styles.pillTextSm, dest === 'clear' && styles.pillTextOn]}>Sacar del lote</Text>
           </Pressable>
         </View>
-        <Pressable onPress={save} disabled={!dest} style={[styles.bigBtn, { backgroundColor: GREEN }, !dest && { opacity: 0.3 }]}>
+        <Pressable accessibilityRole="button" onPress={save} disabled={!dest} style={[styles.bigBtn, { backgroundColor: GREEN }, !dest && { opacity: 0.3 }]}>
           <Text style={[styles.bigBtnText, { color: '#000' }]}>MOVER Y SIGUIENTE</Text>
         </Pressable>
       </>
@@ -200,7 +200,7 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
         {(['celo', 'servicio', 'diagnostico'] as const).map((a) => {
           const on = reproAction === a;
           return (
-            <Pressable key={a} onPress={() => setReproAction(a)} style={[styles.pill, on && styles.pillOn]}>
+            <Pressable accessibilityRole="button" key={a} onPress={() => setReproAction(a)} style={[styles.pill, on && styles.pillOn]}>
               <Text style={[styles.pillText, on && styles.pillTextOn]}>{a === 'diagnostico' ? 'Diagnóstico' : a === 'celo' ? 'Celo' : 'Servicio'}</Text>
             </Pressable>
           );
@@ -210,7 +210,7 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
         <View style={{ width: '100%', gap: 8 }}>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {(['ai', 'natural'] as const).map((m) => (
-              <Pressable key={m} onPress={() => setMethod(m)} style={[styles.pill, { flex: 1 }, method === m && styles.pillOn]}>
+              <Pressable accessibilityRole="button" key={m} onPress={() => setMethod(m)} style={[styles.pill, { flex: 1 }, method === m && styles.pillOn]}>
                 <Text style={[styles.pillText, method === m && styles.pillTextOn]}>{m === 'ai' ? 'IA' : 'Monta'}</Text>
               </Pressable>
             ))}
@@ -218,7 +218,7 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
           {method === 'natural' && bulls.length > 0 && (
             <View style={styles.wrapRow}>
               {bulls.slice(0, 8).map((b: AnimalRow) => (
-                <Pressable key={b.id} onPress={() => setSireId(b.id)} style={[styles.pillSm, sireId === b.id && styles.pillOn]}>
+                <Pressable accessibilityRole="button" key={b.id} onPress={() => setSireId(b.id)} style={[styles.pillSm, sireId === b.id && styles.pillOn]}>
                   <Text style={[styles.pillTextSm, sireId === b.id && styles.pillTextOn]}>{b.tag ?? b.id.slice(0, 6)}</Text>
                 </Pressable>
               ))}
@@ -229,13 +229,13 @@ export function ModeCapture({ mode, animal, sync, lots, vaccines, meds, bulls, w
       {reproAction === 'diagnostico' && (
         <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
           {(['pregnant', 'empty'] as const).map((r) => (
-            <Pressable key={r} onPress={() => setResult(r)} style={[styles.pill, { flex: 1 }, result === r && styles.pillOn]}>
+            <Pressable accessibilityRole="button" key={r} onPress={() => setResult(r)} style={[styles.pill, { flex: 1 }, result === r && styles.pillOn]}>
               <Text style={[styles.pillText, result === r && styles.pillTextOn]}>{r === 'pregnant' ? 'Preñada' : 'Vacía'}</Text>
             </Pressable>
           ))}
         </View>
       )}
-      <Pressable onPress={runRepro} disabled={!reproAction} style={[styles.bigBtn, { backgroundColor: GREEN }, !reproAction && { opacity: 0.3 }]}>
+      <Pressable accessibilityRole="button" onPress={runRepro} disabled={!reproAction} style={[styles.bigBtn, { backgroundColor: GREEN }, !reproAction && { opacity: 0.3 }]}>
         <Text style={[styles.bigBtnText, { color: '#000' }]}>{reproAction ? 'GUARDAR Y SIGUIENTE' : 'ELEGÍ UNA ACCIÓN'}</Text>
       </Pressable>
     </>

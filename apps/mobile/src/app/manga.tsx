@@ -150,7 +150,7 @@ export default function Manga() {
           <Text style={[styles.link, { textAlign: 'left', opacity: 0.7 }]}>
             La manga registra trabajo de campo —pesajes, sanidad, movimientos— y tu rol no captura ninguno.
           </Text>
-          <Pressable onPress={() => router.back()}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()}>
             <Text style={styles.link}>Volver</Text>
           </Pressable>
         </View>
@@ -177,13 +177,13 @@ export default function Manga() {
 
           <Text style={styles.fieldLabel}>LOTE OBJETIVO (OPCIONAL)</Text>
           <View style={styles.wrapRow}>
-            <Pressable onPress={() => setTargetLot(null)} style={[styles.pill, !targetLot && styles.pillOn]}>
+            <Pressable accessibilityRole="button" onPress={() => setTargetLot(null)} style={[styles.pill, !targetLot && styles.pillOn]}>
               <Text style={[styles.pillText, !targetLot && styles.pillTextOn]}>Todos</Text>
             </Pressable>
             {lots.slice(0, 8).map((l) => {
               const on = targetLot?.id === l.id;
               return (
-                <Pressable key={l.id} onPress={() => setTargetLot({ id: l.id, name: l.name })} style={[styles.pill, on && styles.pillOn]}>
+                <Pressable accessibilityRole="button" accessibilityState={{ selected: on }} key={l.id} onPress={() => setTargetLot({ id: l.id, name: l.name })} style={[styles.pill, on && styles.pillOn]}>
                   <Text style={[styles.pillText, on && styles.pillTextOn]}>{l.name}</Text>
                 </Pressable>
               );
@@ -195,7 +195,7 @@ export default function Manga() {
             {modosPermitidos.map((m) => {
               const on = mode === m;
               return (
-                <Pressable key={m} onPress={() => setMode(m)} style={[styles.pill, on && styles.pillOn]}>
+                <Pressable accessibilityRole="button" accessibilityState={{ selected: on }} key={m} onPress={() => setMode(m)} style={[styles.pill, on && styles.pillOn]}>
                   <Text style={[styles.pillText, on && styles.pillTextOn]}>{m}</Text>
                 </Pressable>
               );
@@ -203,6 +203,7 @@ export default function Manga() {
           </View>
 
           <Pressable
+            accessibilityRole="button"
             onPress={() => {
               setStartedAt(Date.now());
               setRecords([]);
@@ -214,7 +215,7 @@ export default function Manga() {
           >
             <Text style={[styles.bigBtnText, { color: '#000' }]}>EMPEZAR</Text>
           </Pressable>
-          <Pressable onPress={() => router.back()}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()}>
             <Text style={styles.link}>Cancelar</Text>
           </Pressable>
         </FormScroll>
@@ -268,10 +269,10 @@ export default function Manga() {
           ))}
 
           <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
-            <Pressable onPress={() => setPhase('setup')} style={[styles.bigBtn, { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+            <Pressable accessibilityRole="button" onPress={() => setPhase('setup')} style={[styles.bigBtn, { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)' }]}>
               <Text style={[styles.bigBtnText, { color: '#fff', fontSize: 17 }]}>Nueva sesión</Text>
             </Pressable>
-            <Pressable onPress={() => router.back()} style={[styles.bigBtn, { flex: 1, backgroundColor: '#fff' }]}>
+            <Pressable accessibilityRole="button" onPress={() => router.back()} style={[styles.bigBtn, { flex: 1, backgroundColor: '#fff' }]}>
               <Text style={[styles.bigBtnText, { color: '#000', fontSize: 17 }]}>Salir</Text>
             </Pressable>
           </View>
@@ -333,7 +334,7 @@ export default function Manga() {
           <Text style={{ color: errors ? RED : 'rgba(255,255,255,0.3)' }}>{errors}</Text>
           <Text style={styles.counterUnit}> err</Text>
         </Text>
-        <Pressable onPress={() => setPhase('summary')} style={styles.exitBtn}>
+        <Pressable accessibilityRole="button" onPress={() => setPhase('summary')} style={styles.exitBtn}>
           <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>Salir</Text>
         </Pressable>
       </View>
@@ -355,6 +356,7 @@ export default function Manga() {
             {!!error && <Text style={styles.error}>{error}</Text>}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable
+                accessibilityRole="button"
                 onPress={lookup}
                 disabled={!tag.trim()}
                 style={[styles.bigBtn, { backgroundColor: '#fff', flex: 1, width: 'auto' }, !tag.trim() && { opacity: 0.3 }]}
@@ -377,7 +379,7 @@ export default function Manga() {
               {modosPermitidos.map((m) => {
                 const on = mode === m;
                 return (
-                  <Pressable key={m} onPress={() => setMode(m)} style={[styles.pillSm, on && styles.pillOn]}>
+                  <Pressable accessibilityRole="button" accessibilityState={{ selected: on }} key={m} onPress={() => setMode(m)} style={[styles.pillSm, on && styles.pillOn]}>
                     <Text style={[styles.pillTextSm, on && styles.pillTextOn]}>{m}</Text>
                   </Pressable>
                 );
@@ -417,7 +419,7 @@ export default function Manga() {
               onSaved={pushRecord}
               onFail={fail}
             />
-            <Pressable onPress={() => { setAnimal(null); setError(''); setWarn(null); setConfirmMsg(null); focusTag(); }}>
+            <Pressable accessibilityRole="button" onPress={() => { setAnimal(null); setError(''); setWarn(null); setConfirmMsg(null); focusTag(); }}>
               <Text style={styles.link}>Cambiar animal</Text>
             </Pressable>
           </>

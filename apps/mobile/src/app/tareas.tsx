@@ -95,7 +95,7 @@ export default function TareasScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: T.canvas }} key={tick}>
       <FormScroll refreshControl={refreshControl} contentContainerStyle={{ padding: T.space['4'], gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}>
             <Ionicons name="chevron-back" size={18} color={T.ink2} />
             <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
           </Pressable>
@@ -114,7 +114,7 @@ export default function TareasScreen() {
             ].map((f) => {
               const sel = mineOnly === f.on;
               return (
-                <Pressable key={f.label} onPress={() => setMineOnly(f.on)} style={[styles.chip, sel && styles.chipSel]}>
+                <Pressable accessibilityRole="button" key={f.label} onPress={() => setMineOnly(f.on)} style={[styles.chip, sel && styles.chipSel]}>
                   <Text style={[styles.chipText, sel && { color: T.brand700 }]}>{f.label}</Text>
                 </Pressable>
               );
@@ -130,7 +130,7 @@ export default function TareasScreen() {
             {PRIORITIES.map(([v, label]) => {
               const sel = priority === v;
               return (
-                <Pressable key={v} onPress={() => setPriority(v)} style={[styles.chip, sel && styles.chipSel]}>
+                <Pressable accessibilityRole="button" key={v} onPress={() => setPriority(v)} style={[styles.chip, sel && styles.chipSel]}>
                   <Text style={[styles.chipText, sel && { color: T.brand700 }]}>{label}</Text>
                 </Pressable>
               );
@@ -174,11 +174,11 @@ export default function TareasScreen() {
                           </View>
                           {meta.length > 0 && <Text style={styles.itemMeta}>{meta.join(' · ')}</Text>}
                         </View>
-                        <Pressable onPress={() => act(() => sync.captureTaskComplete(t.id))} style={styles.completeBtn} hitSlop={6}>
+                        <Pressable accessibilityRole="button" onPress={() => act(() => sync.captureTaskComplete(t.id))} style={styles.completeBtn} hitSlop={6}>
                           <Ionicons name="checkmark" size={16} color={T.success} />
                           <Text style={{ fontSize: T.type.label, fontWeight: '600', color: T.success }}>Completar</Text>
                         </Pressable>
-                        <Pressable onPress={() => setExpanded(isOpen ? null : t.id)} hitSlop={8} style={{ paddingHorizontal: T.space['1'] }}>
+                        <Pressable accessibilityRole="button" onPress={() => setExpanded(isOpen ? null : t.id)} hitSlop={8} style={{ paddingHorizontal: T.space['1'] }}>
                           <Ionicons name={isOpen ? 'chevron-up' : 'ellipsis-horizontal'} size={18} color={T.ink3} />
                         </Pressable>
                       </View>
@@ -187,13 +187,14 @@ export default function TareasScreen() {
                         <View style={styles.actions}>
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
                             {t.status === 'pending' && (
-                              <Pressable onPress={() => act(() => sync.captureTaskStart(t.id))} style={styles.actionChip}>
+                              <Pressable accessibilityRole="button" onPress={() => act(() => sync.captureTaskStart(t.id))} style={styles.actionChip}>
                                 <Ionicons name="play" size={13} color={T.brand700} />
                                 <Text style={styles.actionText}>Iniciar</Text>
                               </Pressable>
                             )}
                             {myId && (
                               <Pressable
+                                accessibilityRole="button"
                                 onPress={() => act(() => sync.captureTaskAssign(t.id, t.assigned_to === myId ? null : myId))}
                                 style={styles.actionChip}
                               >
@@ -201,7 +202,7 @@ export default function TareasScreen() {
                                 <Text style={styles.actionText}>{t.assigned_to === myId ? 'Quitarme' : 'Asignarme'}</Text>
                               </Pressable>
                             )}
-                            <Pressable onPress={() => act(() => sync.captureTaskCancel(t.id))} style={styles.actionChip}>
+                            <Pressable accessibilityRole="button" onPress={() => act(() => sync.captureTaskCancel(t.id))} style={styles.actionChip}>
                               <Ionicons name="close" size={13} color={T.danger} />
                               <Text style={[styles.actionText, { color: T.danger }]}>Cancelar</Text>
                             </Pressable>
@@ -210,6 +211,7 @@ export default function TareasScreen() {
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
                             {RESCHEDULE.map((r) => (
                               <Pressable
+                                accessibilityRole="button"
                                 key={r.label}
                                 onPress={() => act(() => sync.captureTaskReschedule(t.id, r.days === null ? null : dateIn(r.days)))}
                                 style={styles.actionChip}

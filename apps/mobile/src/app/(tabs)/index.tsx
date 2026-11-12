@@ -119,6 +119,7 @@ export default function Home() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: T.space['2'] }}>
             {priority.slice(0, 6).map((p) => (
               <Pressable
+                accessibilityRole="button"
                 key={p.code}
                 onPress={() => router.push(routeFor(p.code) as any)}
                 style={[styles.priChip, { borderLeftColor: sevColor(T, p.severity) ?? T.info }]}
@@ -139,7 +140,7 @@ export default function Home() {
             <EmptyHerd />
           </Card>
         ) : (
-          <Pressable onPress={() => router.push('/manga')} style={styles.mangaBtn}>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/manga')} style={styles.mangaBtn}>
             <Ionicons name="scan-outline" size={26} color="#fff" />
             <View>
               <Text style={styles.mangaTitle}>Modo manga</Text>
@@ -150,12 +151,12 @@ export default function Home() {
 
         {/* Tareas + Sincronizar — accesos grandes */}
         <View style={{ flexDirection: 'row', gap: T.space['3'] }}>
-          <Pressable onPress={() => router.push('/tareas')} style={styles.actionCard}>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/tareas')} style={styles.actionCard}>
             <Ionicons name="checkbox-outline" size={22} color={T.brand700} />
             <Text style={styles.actionTitle}>Tareas</Text>
             <Text style={styles.actionSub}>{pendingTasks === 0 ? 'sin pendientes' : `${pendingTasks} pendiente${pendingTasks === 1 ? '' : 's'}`}</Text>
           </Pressable>
-          <Pressable onPress={doSync} disabled={sync.syncing} style={[styles.actionCard, sync.syncing && { opacity: 0.6 }]}>
+          <Pressable accessibilityRole="button" onPress={doSync} disabled={sync.syncing} style={[styles.actionCard, sync.syncing && { opacity: 0.6 }]}>
             <Ionicons name="sync-outline" size={22} color={T.brand700} />
             <Text style={styles.actionTitle}>{sync.syncing ? 'Sincronizando…' : 'Sincronizar'}</Text>
             <Text style={styles.actionSub}>{sync.pendingCount ? `${sync.pendingCount} por subir` : 'todo al día'}</Text>

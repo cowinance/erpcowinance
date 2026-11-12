@@ -6,7 +6,7 @@
  * al arrancar, tras cada captura (debounce) y cada 60 s en primer plano.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
 import { setFarmTimeZone, getFarmTimeZone } from '../lib/date';
@@ -547,14 +547,50 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     setStatus('login');
   }, []);
 
-  // Sync automático: al quedar listo y luego cada 60 s
+  /**
+   * Sync automático: al quedar listo, cada 60 s MIENTRAS LA APP ESTÁ ADELANTE, y al volver a ella.
+   *
+   * Lo del primer plano no estaba, aunque el encabezado de este archivo lo decía. En iOS el
+   * sistema congela los timers al pasar a segundo plano y la diferencia no se notaba; en Android
+   * no, así que el teléfono en el bolsillo seguía despertando la radio cada minuto toda la
+   * jornada. En un día de campo con batería al 10% eso importa más que la frescura del dato: si
+   * nadie está mirando la pantalla, nada de lo que llegue se va a leer.
+   *
+   * Al volver al primer plano se sincroniza enseguida, así que lo que se ve está al día igual —
+   * lo que se saca es el trabajo que no servía a nadie.
+   */
   useEffect(() => {
     if (status !== 'ready') return;
+
+    let intervalo: ReturnType<typeof setInterval> | null = null;
+    const arrancar = () => {
+      if (intervalo) return;
+      intervalo = setInterval(() => {
+        if (!offlineRef.current) syncNow();
+      }, AUTO_SYNC_INTERVAL_MS);
+    };
+    const parar = () => {
+      if (!intervalo) return;
+      clearInterval(intervalo);
+      intervalo = null;
+    };
+
     syncNow();
-    const t = setInterval(() => {
-      if (!offlineRef.current) syncNow();
-    }, AUTO_SYNC_INTERVAL_MS);
-    return () => clearInterval(t);
+    arrancar();
+
+    const sub = AppState.addEventListener('change', (estado) => {
+      if (estado === 'active') {
+        if (!offlineRef.current) syncNow();
+        arrancar();
+      } else {
+        parar();
+      }
+    });
+
+    return () => {
+      parar();
+      sub.remove();
+    };
   }, [status, syncNow]);
 
   const setOfflineSim = useCallback(

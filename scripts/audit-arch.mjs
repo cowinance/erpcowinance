@@ -237,6 +237,61 @@ gate('tests (vitest run)', testRun.ok, testsPassed ? `${testsPassed} passed` : '
   );
 }
 
+// Gate 2d: todo lo que se toca en el móvil se anuncia como tal.
+//
+// Un `Pressable` sin `accessibilityRole` ni `accessibilityLabel` lo lee TalkBack o VoiceOver como
+// texto suelto: quien no ve la pantalla no se entera de que ahí hay algo para tocar. Eran 65 de
+// 82 cuando se midió, y la razón de que fueran tantos es que nada lo frenaba — exactamente la
+// misma historia que los altos fijos.
+//
+// Alcanza con UNO de los dos: con texto visible adentro, el rol basta y una etiqueta encima lo
+// TAPARÍA; sin texto (un ícono solo), hace falta la etiqueta.
+{
+  const ofensores = [];
+  const revisar = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, f.name);
+      if (f.isDirectory()) {
+        if (!['node_modules', 'dist', '.expo'].includes(f.name)) revisar(full);
+      } else if (f.name.endsWith('.tsx')) {
+        const texto = readFileSync(full, 'utf8');
+        let i = 0;
+        while ((i = texto.indexOf('<Pressable', i)) >= 0) {
+          // Fin de la etiqueta de apertura: el primer `>` fuera de llaves.
+          let llaves = 0;
+          let fin = -1;
+          for (let j = i; j < texto.length; j++) {
+            const c = texto[j];
+            if (c === '{') llaves++;
+            else if (c === '}') llaves--;
+            else if (c === '>' && llaves === 0) {
+              fin = j;
+              break;
+            }
+          }
+          const etiqueta = texto.slice(i, fin < 0 ? texto.length : fin);
+          if (!/accessibilityRole|accessibilityLabel/.test(etiqueta)) {
+            ofensores.push(`${posix(full)}:${texto.slice(0, i).split('\n').length}`);
+          }
+          i = fin < 0 ? i + 10 : fin;
+        }
+      }
+    }
+  };
+  try {
+    revisar('apps/mobile/src');
+  } catch {
+    /* un directorio ausente no bloquea el gate */
+  }
+  gate(
+    'todo lo tocable del móvil se anuncia (accesibilidad)',
+    ofensores.length === 0,
+    ofensores.length ? ofensores.slice(0, 3).join(' · ') : '',
+  );
+  if (ofensores.length > 0)
+    console.log(dim('    con texto visible alcanza accessibilityRole; un ícono solo necesita accessibilityLabel.'));
+}
+
 // Gate 3: cero dependencias circulares (madge).
 const madge = trySh(`npx madge --extensions ts --circular --json ${LARGEST_DIR}`);
 let cycles = -1;

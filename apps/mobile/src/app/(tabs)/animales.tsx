@@ -13,6 +13,7 @@ function Row({ a }: { a: AnimalRow }) {
   const styles = useStyles(makeStyles);
   return (
     <Pressable
+      accessibilityRole="button"
       onPress={() => router.push(`/animal/${a.id}`)}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: T.sunken }]}
     >

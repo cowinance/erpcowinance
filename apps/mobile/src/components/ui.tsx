@@ -79,6 +79,7 @@ export function Button({
   const styles = useStyles(makeStyles);
   return (
     <Pressable
+      accessibilityRole="button"
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [

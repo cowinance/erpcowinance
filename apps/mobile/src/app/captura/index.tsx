@@ -57,7 +57,7 @@ export default function CapturaMenu() {
       <View style={{ padding: T.space['4'], flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: T.space['4'] }}>
           <Text style={{ fontSize: T.type.title, fontWeight: '700', color: T.ink }}>Capturar</Text>
-          <Pressable onPress={() => router.back()} hitSlop={8}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8}>
             <Ionicons name="close" size={24} color={T.ink2} />
           </Pressable>
         </View>
@@ -70,6 +70,7 @@ export default function CapturaMenu() {
             <View style={styles.grid}>
               {acciones.map((a) => (
                 <Pressable
+                  accessibilityRole="button"
                   key={a.tipo}
                   onPress={() => router.replace(a.href as any)}
                   style={({ pressed }) => [styles.action, pressed && { backgroundColor: T.brand100 }]}
