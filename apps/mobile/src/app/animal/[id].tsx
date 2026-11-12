@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable } from 'react-native';
 import { useSync } from '@/sync/SyncContext';
 import { Card } from '@/components/ui';
+import { FotosDelAnimal } from '@/media/FotosDelAnimal';
 import { useSyncRefresh } from '@/components/refresh';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
@@ -78,6 +79,8 @@ export default function AnimalDetail() {
             </Text>
           </Card>
         </View>
+
+        <FotosDelAnimal animalId={animal.id} />
 
         <Card>
           <Text style={{ fontSize: T.type.subheading, fontWeight: '600', color: T.ink, marginBottom: T.space['2.5'] }}>
