@@ -15,11 +15,38 @@ rompe en producción: TLS, un proxy adelante, almacenamiento de objetos, correo 
 
 | | Por qué |
 |---|---|
-| Un servidor con Docker | 2 GB de RAM alcanzan. Un VPS chico ronda los 5-6 USD al mes. |
+| Un servidor con Docker | 2 GB de RAM. Ver la nota de abajo sobre el tamaño. |
 | Dos subdominios apuntando a él | `staging.…` para la web y `api.staging.…` para el teléfono. **El DNS tiene que resolver antes de levantar**: Caddy valida el dominio al arrancar. |
 | Puertos 80 y 443 abiertos | El 80 no es opcional: es por donde se valida el dominio para emitir el certificado. |
-| Un bucket S3 | Cloudflare R2 tiene capa gratuita. Sin esto las fotos del animal se pierden en cada despliegue. |
+| Un bucket de objetos privado | Sin esto las fotos del animal se pierden en cada despliegue. |
 | Un SMTP | Sin esto no llega la verificación de email ni el reset de contraseña. |
+
+### Sobre el tamaño del servidor
+
+Corren cuatro procesos: PostgreSQL, la API, el servidor de Next y Caddy. Sumados rondan los
+600-800 MB en reposo, más el sistema operativo.
+
+**1 GB no alcanza.** Entra justo y se queda sin aire ante cualquier pico — un sync grande, varias
+fotos, el arranque simultáneo de todo. En AWS Lightsail eso es el plan de **2 GB (12 USD al mes)**;
+el de 1 GB (7 USD) va a dar problemas y el de 0,5 GB directamente no arranca.
+
+Las imágenes se BAJAN ya construidas (`--no-build`), así que el servidor no necesita memoria para
+compilar. Construir ahí además significaría correr algo que nunca pasó por CI.
+
+### Si es AWS Lightsail
+
+Tres cosas que no son evidentes y se pagan caro:
+
+- **Asignar una IP estática** (pestaña Redes). Por defecto la IP cambia al detener y arrancar la
+  instancia, y el DNS queda apuntando a la nada. Es gratis mientras esté asignada a una instancia.
+- **Abrir el puerto 443 en el firewall de Lightsail.** Viene abierto el 22 y el 80, pero no el 443.
+  El síntoma es desconcertante: el certificado se emite bien —eso usa el 80— y después el sitio no
+  carga.
+- **La instancia no puede usar un rol de IAM** como una EC2. Para S3 hace falta un usuario IAM con
+  clave de acceso, con permiso solo sobre ese bucket.
+
+Conviene elegir una imagen **Ubuntu LTS** limpia e instalar Docker, en vez de las preconfiguradas
+de Bitnami: traen su propio stack y estorban.
 
 ---
 
@@ -84,6 +111,12 @@ ver, justamente porque el correo llegó.
 
 **Las fotos desaparecen al desplegar.** `STORAGE_DRIVER=local` las escribe en el disco del
 contenedor. Es la variable que más fácil se olvida porque nada falla hasta el segundo despliegue.
+
+**S3 devuelve 403 al subir una foto.** Casi siempre es la combinación región/estilo, que **no es la
+misma en AWS que en R2**: la firma SigV4 usa la región, así que `S3_REGION=auto` contra AWS falla
+siempre, y AWS quiere `S3_FORCE_PATH_STYLE=false` mientras R2, MinIO y B2 lo exigen en `true`. El
+error de S3 llega completo al log de la API (`docker compose logs api`): el cuerpo XML dice el
+motivo real, que el 403 solo no cuenta.
 
 ---
 
