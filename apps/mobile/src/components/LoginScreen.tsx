@@ -100,6 +100,15 @@ export function LoginScreen() {
               placeholder="Contraseña"
               placeholderTextColor={T.ink3}
               secureTextEntry
+              // El campo de email ya los declaraba; este no, y es el que más duele. `secureTextEntry`
+              // suele alcanzar para que el teclado no sugiera ni capitalice, pero no está
+              // garantizado: depende del teclado instalado, y en Android hay muchos. Una mayúscula
+              // de más en la primera letra devuelve un 401 idéntico al de una contraseña
+              // equivocada, así que la persona reescribe lo mismo y vuelve a fallar.
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
               style={styles.input}
             />
             {!!error && <Text style={styles.error}>{error}</Text>}
