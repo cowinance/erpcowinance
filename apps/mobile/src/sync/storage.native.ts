@@ -28,7 +28,7 @@ export function createStorage(): DeviceStorage {
   let db: SQLite.SQLiteDatabase | null = null;
   // Serializa las mutaciones y CUENTA las que no entran al disco. Ver `cola-de-escritura`.
   const cola = crearColaDeEscritura();
-  const enqueue = (fn: () => Promise<unknown>) => cola.encolar(fn);
+  const enqueue = (fn: () => Promise<unknown>, etiqueta?: string) => cola.encolar(fn, etiqueta);
 
   const setKv = (k: string, v: string) => db!.runAsync('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)', k, v);
   const getKv = async (k: string) => (await db!.getFirstAsync<{ v: string }>('SELECT v FROM kv WHERE k = ?', k))?.v ?? null;
@@ -83,7 +83,7 @@ export function createStorage(): DeviceStorage {
       return raw ? (JSON.parse(raw) as PersistedMeta) : null;
     },
     async saveMeta(meta) {
-      enqueue(() => setKv('meta', JSON.stringify(meta)));
+      enqueue(() => setKv('meta', JSON.stringify(meta)), 'meta');
       await cola.vaciar();
     },
     async loadDevice() {
@@ -115,8 +115,11 @@ export function createStorage(): DeviceStorage {
       return serialized;
     },
     attach(device) {
-      enqueue(() => setKv('device_id', device.deviceId));
-      device.listener = (m) => enqueue(() => write(m));
+      enqueue(() => setKv('device_id', device.deviceId), 'device_id');
+      // La etiqueta dice QUÉ se estaba guardando: una fila del hato, un hecho capturado, un
+      // changeset en cola o el cursor. Cambia por completo la gravedad del fallo.
+      device.listener = (m) =>
+        enqueue(() => write(m), m.kind === 'row' ? `row:${m.table}` : m.kind === 'event' ? `event:${m.table}` : m.kind);
     },
     async reset() {
       if (!db) return;

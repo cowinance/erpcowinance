@@ -12,8 +12,15 @@
  * rastro — y un teléfono de campo con la memoria llena es lo normal, no lo excepcional.
  */
 export interface ColaDeEscritura {
-  /** Agenda una escritura detrás de las anteriores. No se espera: la captura tiene que ser instantánea. */
-  encolar(escribir: () => Promise<unknown>): void;
+  /**
+   * Agenda una escritura detrás de las anteriores. No se espera: la captura tiene que ser
+   * instantánea.
+   *
+   * `etiqueta` dice QUÉ se estaba escribiendo —`row:animals`, `cursor`, `meta`…— y viaja en el
+   * aviso de fallo. Sin eso, el motivo que devuelve SQLite llega sin contexto y no se sabe si lo
+   * que no entró fue una captura del día o un contador de posición.
+   */
+  encolar(escribir: () => Promise<unknown>, etiqueta?: string): void;
   /** Espera a que se vacíe lo encolado hasta ahora. Nunca rechaza: los fallos se cuentan, no se lanzan. */
   vaciar(): Promise<void>;
   /** Cuántas escrituras no entraron desde que arrancó la app. */
@@ -30,12 +37,13 @@ export function crearColaDeEscritura(): ColaDeEscritura {
   let avisar: ((fallos: number, detalle: string) => void) | null = null;
 
   return {
-    encolar(escribir) {
+    encolar(escribir, etiqueta) {
       cola = cola.then(escribir).catch((e: unknown) => {
         fallos++;
         // La cadena NO se abandona: cortarla dejaría de persistir todo lo que venga después, que
         // es peor que el fallo puntual. Se cuenta, se avisa y se sigue.
-        avisar?.(fallos, e instanceof Error ? e.message : String(e));
+        const motivo = e instanceof Error ? e.message : String(e);
+        avisar?.(fallos, etiqueta ? `${etiqueta}: ${motivo}` : motivo);
       });
     },
     vaciar() {

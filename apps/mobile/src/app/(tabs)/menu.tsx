@@ -8,6 +8,7 @@ import { useAccount } from '@/account/AccountContext';
 import { Button, Card } from '@/components/ui';
 import { activatePush } from '@/push/native';
 import { pushStatusMessage, type PushRegistrationStatus } from '@/push/registration';
+import Constants from 'expo-constants';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 
 /**
@@ -202,6 +203,14 @@ export default function Menu() {
           <Text style={styles.value}>{sync.storageEngine}</Text>
           <Text style={[styles.title, { marginTop: T.space['3'] }]}>Zona de la finca</Text>
           <Text style={styles.value}>{sync.farmTimeZone ?? 'la del dispositivo'}</Text>
+          {/*
+            Qué versión está corriendo. Parece un detalle y no lo es: al diagnosticar un problema
+            se compiló un APK con más información, se instaló, y la pantalla seguía mostrando el
+            texto viejo — sin forma de saber si la instalación no había tomado o si el arreglo no
+            servía. Media hora de dudas que esta línea habría evitado.
+          */}
+          <Text style={[styles.title, { marginTop: T.space['3'] }]}>Versión</Text>
+          <Text style={styles.mono}>{Constants.expoConfig?.version ?? '—'}</Text>
         </Card>
 
         {account.emailVerified === false && (

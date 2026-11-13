@@ -11,6 +11,7 @@ import * as Crypto from 'expo-crypto';
 import { SyncDevice, Changeset, PushResult, PullResult, RemoteChangeset } from '@cowinance/sync-core';
 import { setFarmTimeZone, getFarmTimeZone } from '../lib/date';
 import { createStorage } from './storage';
+import { registrarFallo } from '../errors/crash-store';
 import type { DeviceStorage, PersistedMeta, AgendaItem } from './storage.types';
 import {
   describePending,
@@ -388,9 +389,32 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     init();
   }, [init]);
 
-  // El almacenamiento avisa cuando una escritura no entró; de ahí sale la advertencia en pantalla.
+  /**
+   * El almacenamiento avisa cuando una escritura no entró: de ahí sale la advertencia en pantalla
+   * y, desde ahora, un registro que SOBREVIVE al reinicio.
+   *
+   * El contador vive en memoria y arranca en cero con cada apertura de la app. Eso borraba la
+   * única evidencia justo cuando se reinicia para investigar — pasó de verdad: el aviso marcaba 90
+   * fallos, se reinstaló la app para poder leer el motivo, y al volver no había nada que leer.
+   *
+   * Se guarda en el almacén de fallos, que usa AsyncStorage y NO depende de SQLite. Eso es
+   * deliberado: el diagnóstico de una base que no escribe no puede guardarse en esa misma base.
+   *
+   * Solo el PRIMERO de cada sesión. Si fallan noventa escrituras, noventa registros idénticos no
+   * agregan nada y tapan los fallos de render, que son lo otro que vive en esa lista.
+   */
+  const falloYaRegistrado = useRef(false);
   useEffect(() => {
-    return almacen.alFallarEscritura((fallos, detalle) => setFalloDePersistencia({ fallos, detalle }));
+    return almacen.alFallarEscritura((fallos, detalle) => {
+      setFalloDePersistencia({ fallos, detalle });
+      if (falloYaRegistrado.current) return;
+      falloYaRegistrado.current = true;
+      registrarFallo(new Error(`No se pudo guardar en la base local — ${detalle}`), 'escritura local (SQLite)').catch(
+        () => {
+          /* si tampoco se puede registrar el fallo, no hay nada más que hacer */
+        },
+      );
+    });
   }, [almacen]);
 
   /** Operaciones locales sin subir del store actual (dueño previo), sin hidratarlo. */

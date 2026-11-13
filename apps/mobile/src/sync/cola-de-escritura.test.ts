@@ -95,6 +95,31 @@ describe('cola de escritura local', () => {
     expect(avisos).toEqual(['QuotaExceededError']);
   });
 
+  /**
+   * Sin saber QUÉ se estaba escribiendo, el motivo de SQLite llega sin contexto: no se distingue
+   * una captura del día perdida de un contador de posición que se reescribe en el sync siguiente.
+   */
+  it('el aviso dice qué se estaba escribiendo', async () => {
+    const cola = crearColaDeEscritura();
+    const avisos: string[] = [];
+    cola.alFallar((_, detalle) => avisos.push(detalle));
+
+    cola.encolar(async () => Promise.reject(new Error('disk I/O error')), 'row:animals');
+    cola.encolar(async () => Promise.reject(new Error('disk I/O error')), 'cursor');
+    await cola.vaciar();
+
+    expect(avisos).toEqual(['row:animals: disk I/O error', 'cursor: disk I/O error']);
+  });
+
+  it('sin etiqueta, el aviso es el motivo pelado', async () => {
+    const cola = crearColaDeEscritura();
+    const avisos: string[] = [];
+    cola.alFallar((_, detalle) => avisos.push(detalle));
+    cola.encolar(async () => Promise.reject(new Error('sin espacio')));
+    await cola.vaciar();
+    expect(avisos).toEqual(['sin espacio']);
+  });
+
   it('reiniciar() vuelve a cero tras borrar el almacenamiento', async () => {
     const cola = crearColaDeEscritura();
     cola.encolar(async () => Promise.reject(new Error('sin espacio')));
