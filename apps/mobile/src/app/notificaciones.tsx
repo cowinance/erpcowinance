@@ -80,10 +80,30 @@ export default function Notificaciones() {
   };
 
   const header = (right?: string) => (
-    <View style={styles.headerRow}>
-      <Text style={styles.h1}>Notificaciones</Text>
-      {right ? <Text style={styles.muted}>{right}</Text> : null}
-    </View>
+    <>
+      {/*
+        «Volver» visible, igual que Sincronización, Tareas y las pantallas de captura.
+        Esta era la única sin salida a la vista: se cerraba deslizando desde el borde, que es un
+        gesto que hay que conocer de antemano y que además no existe en todos los teléfonos —en
+        Android depende del fabricante y de si el usuario usa botones o gestos. Un callejón sin
+        salida aparente en una app de campo es peor que feo: quien no conoce el gesto cierra la
+        app entera, y si había algo capturado sin subir, la siguiente vez arranca con miedo.
+      */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Volver"
+        onPress={() => router.back()}
+        hitSlop={8}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: T.space['1'] }}
+      >
+        <Ionicons name="chevron-back" size={18} color={T.ink2} />
+        <Text style={{ fontSize: T.type.body, color: T.ink2 }}>Volver</Text>
+      </Pressable>
+      <View style={styles.headerRow}>
+        <Text style={styles.h1}>Notificaciones</Text>
+        {right ? <Text style={styles.muted}>{right}</Text> : null}
+      </View>
+    </>
   );
 
   return (

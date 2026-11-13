@@ -224,6 +224,8 @@ export interface SyncCtx {
     categoryLabel: string;
     origin: 'born' | 'purchased';
     lotId?: string | null;
+    /** Opcional, y se guarda como null si viene vacío. */
+    name?: string | null;
   }) => { animalId: string };
   /** Las categorías que la finca usa de verdad, para el selector del alta. */
   categoriesInUse: () => { code: string; label: string }[];

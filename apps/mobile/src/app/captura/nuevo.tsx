@@ -36,6 +36,7 @@ export default function NuevoAnimalCapture() {
   const sync = useSync();
 
   const [tag, setTag] = useState('');
+  const [nombre, setNombre] = useState('');
   const [sex, setSex] = useState<'F' | 'M' | null>(null);
   const [categoryCode, setCategoryCode] = useState<string | null>(null);
   const [origin, setOrigin] = useState<'born' | 'purchased'>('purchased');
@@ -53,11 +54,14 @@ export default function NuevoAnimalCapture() {
   function guardar() {
     if (!puedeGuardar || !sex || !categoryCode) return;
     const label = categorias.find((c) => c.code === categoryCode)?.label ?? categoryCode;
-    sync.captureNewAnimal({ tag: check.tag, sex, categoryCode, categoryLabel: label, origin });
+    sync.captureNewAnimal({ tag: check.tag, sex, categoryCode, categoryLabel: label, origin, name: nombre });
     haptics.ok();
     setSuccess(`${check.tag} dada de alta · ${label}`);
     setCount((c) => c + 1);
-    setTag(''); // se limpia SOLO la caravana: cargar un camión es repetir sexo y categoría
+    // Se limpian SOLO la caravana y el nombre: cargar un camión es repetir sexo y categoría, pero
+    // nunca el identificador del animal.
+    setTag('');
+    setNombre('');
   }
 
   // La caravana repetida avisa y deja seguir, igual que el servidor, pero se confirma: el productor
@@ -100,6 +104,24 @@ export default function NuevoAnimalCapture() {
               <Text style={{ fontSize: T.type.label, color: T.warning, flex: 1 }}>{aviso}</Text>
             </View>
           )}
+        </View>
+
+        {/*
+          Opcional, y va DESPUÉS de la caravana. El identificador del animal es la caravana: la
+          mayoría del rodeo no tiene nombre y pedirlo primero haría pensar que hace falta. Pero las
+          vacas de ordeño sí lo tienen, y la web deja ponerlo — que el móvil no pudiera obligaba a
+          volver a la computadora para completar un animal recién dado de alta en el corral.
+        */}
+        <View>
+          <Text style={styles.label}>Nombre (opcional)</Text>
+          <TextInput
+            value={nombre}
+            onChangeText={setNombre}
+            placeholder="La Pinta"
+            placeholderTextColor={T.ink3}
+            autoCapitalize="words"
+            style={styles.input}
+          />
         </View>
 
         <View>

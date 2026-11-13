@@ -270,4 +270,41 @@ describe('stageNewAnimal', () => {
       current_lot_id: 'lote-b',
     });
   });
+
+  /**
+   * El nombre es opcional y lo pide el móvil desde que se detectó, usándolo en el corral, que la
+   * app dejaba poner la caravana pero no el nombre — y había que volver a la computadora a
+   * completar un animal recién dado de alta.
+   */
+  const nombreEmitido = (d: ReturnType<typeof dispositivo>) => {
+    const alta = emitido(d).find((o) => o.kind === 'put' && o.table === 'animals');
+    return alta?.kind === 'put' ? alta.fields.name : undefined;
+  };
+  const base = { tag: '600', sex: 'F', categoryCode: 'vaca', categoryLabel: 'Vaca', origin: 'born' } as const;
+
+  it('guarda el nombre cuando se escribe', () => {
+    const d = dispositivo();
+    stageNewAnimal(d, { ...base, name: 'La Pinta' }, new Date('2026-04-01T12:00:00Z'), ids());
+    expect(nombreEmitido(d)).toBe('La Pinta');
+  });
+
+  it('le saca los espacios de los bordes', () => {
+    const d = dispositivo();
+    stageNewAnimal(d, { ...base, name: '  La Pinta  ' }, new Date('2026-04-01T12:00:00Z'), ids());
+    expect(nombreEmitido(d)).toBe('La Pinta');
+  });
+
+  /**
+   * Null y no cadena vacía: la web muestra la caravana cuando no hay nombre, y una cadena vacía
+   * le haría mostrar un hueco en la lista del hato.
+   */
+  it.each([
+    ['sin el campo', undefined],
+    ['vacío', ''],
+    ['solo espacios', '   '],
+  ])('guarda null cuando el nombre viene %s', (_caso, name) => {
+    const d = dispositivo();
+    stageNewAnimal(d, { ...base, name }, new Date('2026-04-01T12:00:00Z'), ids());
+    expect(nombreEmitido(d)).toBeNull();
+  });
 });

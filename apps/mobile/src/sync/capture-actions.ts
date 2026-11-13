@@ -246,14 +246,26 @@ export function stageCalving(
  */
 export function stageNewAnimal(
   d: SyncDevice,
-  a: { tag: string; sex: 'F' | 'M'; categoryCode: string; categoryLabel: string; origin: 'born' | 'purchased'; lotId?: string | null },
+  a: {
+    tag: string;
+    sex: 'F' | 'M';
+    categoryCode: string;
+    categoryLabel: string;
+    origin: 'born' | 'purchased';
+    lotId?: string | null;
+    /** Opcional: la mayoría de los animales no tiene nombre, pero las vacas de ordeño sí. */
+    name?: string | null;
+  },
   now: Date,
   newId: NewId,
 ): { animalId: string } {
   const animalId = newId();
+  const nombre = a.name?.trim();
   d.setFields('animals', animalId, {
     visual_tag: a.tag,
-    name: null,
+    // Vacío se guarda como null, no como cadena vacía: la web muestra la caravana cuando no hay
+    // nombre, y una cadena vacía le haría mostrar un hueco.
+    name: nombre ? nombre : null,
     status: 'active',
     sex: a.sex,
     birth_date: null,
