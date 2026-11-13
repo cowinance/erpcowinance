@@ -13,6 +13,16 @@ import { useSync, type AgendaItem } from '@/sync/SyncContext';
 import { relativeTime } from '@/lib/relative-time';
 import { useStyles, useTheme, type Theme } from '@/useTheme';
 import { farmToday } from '../lib/date';
+import { recortarAgenda } from '../lib/agenda-recorte';
+
+/**
+ * Cuántos ítems se muestran antes de pedir «ver todas».
+ *
+ * Diez entran en una pantalla de teléfono sin empujar el botón de manga —la acción principal del
+ * día— fuera de la vista. Con 59 ítems, que es lo que trae una finca de 66 animales, el inicio se
+ * volvía un scroll sin fondo.
+ */
+const ITEMS_VISIBLES = 10;
 
 const GROUPS: { key: 'overdue' | 'today' | 'upcoming'; label: string }[] = [
   { key: 'overdue', label: 'Vencidos' },
@@ -40,6 +50,7 @@ export function AgendaToday() {
   const styles = useStyles(makeStyles);
   const sync = useSync();
   const [, setTick] = useState(0); // fuerza re-lectura tras completar una tarea offline
+  const [verTodas, setVerTodas] = useState(false);
   const agendaAt = sync.agendaAt;
   const todayStr = farmToday();
 
@@ -81,6 +92,8 @@ export function AgendaToday() {
   }
 
   const grouped = GROUPS.map((g) => ({ ...g, list: items.filter((i) => urgency(i, todayStr) === g.key) })).filter((g) => g.list.length);
+  // El recorte respeta el orden de urgencia: los vencidos entran siempre. Ver `agenda-recorte`.
+  const recorte = recortarAgenda(grouped, verTodas ? 0 : ITEMS_VISIBLES);
 
   const onPress = (i: AgendaItem) => {
     if (i.related_type === 'animal' && i.related_id) router.push(`/animal/${i.related_id}` as any);
@@ -89,7 +102,7 @@ export function AgendaToday() {
   return (
     <Card>
       {header(`actualizado ${relativeTime(agendaAt)}`)}
-      {grouped.map((g) => (
+      {recorte.grupos.map((g) => (
         <View key={g.key} style={{ marginTop: T.space['2'] }}>
           <Text style={styles.group}>
             {g.label} · {g.list.length}
@@ -124,12 +137,53 @@ export function AgendaToday() {
           })}
         </View>
       ))}
+
+      {/*
+        El botón solo aparece cuando hay algo escondido, y dice CUÁNTO: «Ver las 59» informa mucho
+        más que «Ver todas», porque la decisión de tocarlo depende justamente de si son doce o
+        sesenta. Expande en la misma pantalla en vez de navegar: la agenda no tiene pantalla
+        propia y crearla para esto sería mucho para el problema.
+      */}
+      {recorte.ocultos > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Ver las ${recorte.total} acciones`}
+          onPress={() => setVerTodas(true)}
+          style={({ pressed }) => [styles.verMas, pressed && { backgroundColor: T.sunken }]}
+        >
+          <Text style={styles.verMasTexto}>Ver las {recorte.total}</Text>
+          <Ionicons name="chevron-down" size={16} color={T.brand700} />
+        </Pressable>
+      )}
+      {verTodas && recorte.total > ITEMS_VISIBLES && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Mostrar menos acciones"
+          onPress={() => setVerTodas(false)}
+          style={({ pressed }) => [styles.verMas, pressed && { backgroundColor: T.sunken }]}
+        >
+          <Text style={styles.verMasTexto}>Mostrar menos</Text>
+          <Ionicons name="chevron-up" size={16} color={T.brand700} />
+        </Pressable>
+      )}
     </Card>
   );
 }
 
 const makeStyles = (T: Theme) =>
   StyleSheet.create({
+  verMas: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: T.space['1'],
+    marginTop: T.space['2'],
+    paddingVertical: T.space['2'],
+    borderRadius: T.radiusSm,
+    // minHeight y no height: la letra crece con el tamaño de texto del sistema (gate 2c).
+    minHeight: 44,
+  },
+  verMasTexto: { fontSize: T.type.body, color: T.brand700, fontWeight: '600' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: T.space['1'] },
   title: { fontSize: T.type.body, fontWeight: '700', color: T.ink },
   muted: { fontSize: T.type.label, color: T.ink3 },
