@@ -112,6 +112,36 @@ export default function Menu() {
           <Ionicons name="chevron-forward" size={18} color={T.ink3} />
         </Pressable>
 
+        {/*
+          Acceso a Sincronización. La pantalla existía desde siempre —con el detalle de la cola,
+          los conflictos en revisión y el registro de fallos de la app— pero NINGUNA parte de la
+          app navegaba a ella: la ruta estaba declarada en el Stack y no había un solo
+          `router.push('/sincronizacion')`. Era código muerto desde el punto de vista de quien usa
+          la app, y justo el que hace falta cuando algo va mal.
+        */}
+        <Pressable
+          onPress={() => router.push('/sincronizacion')}
+          accessibilityRole="button"
+          accessibilityLabel={
+            sync.pendingCount === 0
+              ? 'Sincronización. Todo al día'
+              : `Sincronización. ${sync.pendingCount} por subir`
+          }
+          accessibilityHint="Abre el detalle de la cola, los conflictos y los fallos"
+          style={({ pressed }) => [styles.notifRow, pressed && { backgroundColor: T.sunken }]}
+        >
+          <Ionicons name="sync-outline" size={20} color={T.ink2} />
+          <Text style={styles.notifLabel}>Sincronización</Text>
+          {sync.pendingCount === 0 ? (
+            <Text style={styles.notifEmpty}>Todo al día</Text>
+          ) : (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>{sync.pendingCount > 99 ? '99+' : sync.pendingCount}</Text>
+            </View>
+          )}
+          <Ionicons name="chevron-forward" size={18} color={T.ink3} />
+        </Pressable>
+
         <Card>
           <Text style={styles.title}>Usuario</Text>
           <Text style={styles.value}>{account.name ?? '—'}</Text>

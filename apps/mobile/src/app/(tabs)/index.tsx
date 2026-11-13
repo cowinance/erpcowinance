@@ -128,16 +128,36 @@ export default function Home() {
           y queda a salvo; si se cierra antes, se pierde. No hay nada que la app pueda hacer sola.
         */}
         {sync.falloDePersistencia && (
-          <View style={styles.storageBanner}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityHint="Abre el detalle del problema de guardado"
+            onPress={() => router.push('/sincronizacion')}
+            style={styles.storageBanner}
+          >
             <Text style={{ color: '#fff', fontSize: T.type.body, fontWeight: '700' }}>
               No se está pudiendo guardar en el teléfono
             </Text>
             <Text style={{ color: '#fff', fontSize: T.type.label, marginTop: T.space['1'] }}>
               {sync.falloDePersistencia.fallos}{' '}
               {sync.falloDePersistencia.fallos === 1 ? 'escritura falló' : 'escrituras fallaron'}. Sincronizá ahora:
-              lo de esta sesión puede perderse al cerrar la app. Suele ser falta de espacio.
+              lo de esta sesión puede perderse al cerrar la app.
             </Text>
-          </View>
+            {/*
+              El motivo técnico va ACÁ y no solo en la pantalla de Sincronización.
+              Decía «suele ser falta de espacio», que es la causa habitual pero no la única, y
+              afirmarlo mandó a buscar el problema donde no estaba: el contador subía con cada
+              recarga, que no es lo que hace un disco lleno. Un diagnóstico probable presentado
+              como cierto cuesta más que no dar ninguno.
+            */}
+            <Text
+              style={{ color: '#fff', opacity: 0.85, fontSize: T.type.label, marginTop: T.space['1'], fontFamily: 'monospace' }}
+            >
+              {sync.falloDePersistencia.detalle}
+            </Text>
+            <Text style={{ color: '#fff', opacity: 0.85, fontSize: T.type.label, marginTop: T.space['1'] }}>
+              Tocá acá para ver el detalle.
+            </Text>
+          </Pressable>
         )}
 
         {/* Atención prioritaria — compacta, arriba de todo (online) */}
